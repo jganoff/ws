@@ -1,0 +1,20 @@
+[package]
+name = "ws"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+ctrlc = "3"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_yml = "0.0.12"
+tabwriter = "1"
+url = "2"
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"

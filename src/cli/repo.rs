@@ -1,0 +1,169 @@
+use anyhow::{Result, bail};
+use chrono::Utc;
+use clap::{Arg, ArgMatches, Command};
+
+use crate::config::{self, RepoEntry};
+use crate::giturl;
+use crate::mirror;
+use crate::output;
+
+pub fn add_cmd() -> Command {
+    Command::new("add")
+        .about("Register and bare-clone a repository")
+        .arg(Arg::new("url").required(true))
+}
+
+pub fn list_cmd() -> Command {
+    Command::new("list").about("List registered repositories")
+}
+
+pub fn remove_cmd() -> Command {
+    Command::new("remove")
+        .about("Remove a repository and its mirror")
+        .arg(Arg::new("name").required(true))
+}
+
+pub fn fetch_cmd() -> Command {
+    Command::new("fetch")
+        .about("Fetch updates for mirror(s)")
+        .arg(Arg::new("name"))
+        .arg(
+            Arg::new("all")
+                .long("all")
+                .action(clap::ArgAction::SetTrue)
+                .help("Fetch all registered repos"),
+        )
+}
+
+pub fn run_add(matches: &ArgMatches) -> Result<()> {
+    let raw_url = matches.get_one::<String>("url").unwrap();
+
+    let parsed = giturl::parse(raw_url)?;
+    let mut cfg = config::Config::load()?;
+
+    let identity = parsed.identity();
+    if cfg.repos.contains_key(&identity) {
+        bail!("repo {} already registered", identity);
+    }
+
+    let exists = mirror::exists(&parsed)?;
+    if exists {
+        bail!("mirror already exists for {}", identity);
+    }
+
+    println!("Cloning {}...", raw_url);
+    mirror::clone(&parsed, raw_url).map_err(|e| anyhow::anyhow!("cloning: {}", e))?;
+
+    cfg.repos.insert(
+        identity.clone(),
+        RepoEntry {
+            url: raw_url.clone(),
+            added: Utc::now(),
+        },
+    );
+
+    cfg.save()
+        .map_err(|e| anyhow::anyhow!("saving config: {}", e))?;
+
+    println!("Registered {}", identity);
+    Ok(())
+}
+
+pub fn run_list(_matches: &ArgMatches) -> Result<()> {
+    let cfg = config::Config::load().map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
+
+    if cfg.repos.is_empty() {
+        println!("No repos registered.");
+        return Ok(());
+    }
+
+    let mut identities: Vec<String> = cfg.repos.keys().cloned().collect();
+    identities.sort();
+
+    let shortnames = giturl::shortnames(&identities);
+
+    let mut table = output::Table::new(
+        Box::new(std::io::stdout()),
+        vec![
+            "Identity".to_string(),
+            "Shortname".to_string(),
+            "URL".to_string(),
+        ],
+    );
+
+    for id in &identities {
+        let entry = &cfg.repos[id];
+        let short = shortnames.get(id).cloned().unwrap_or_default();
+        table.add_row(vec![id.clone(), short, entry.url.clone()])?;
+    }
+
+    table.render()
+}
+
+pub fn run_remove(matches: &ArgMatches) -> Result<()> {
+    let name = matches.get_one::<String>("name").unwrap();
+
+    let mut cfg = config::Config::load().map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
+
+    let identities: Vec<String> = cfg.repos.keys().cloned().collect();
+    let identity = giturl::resolve(name, &identities)?;
+
+    let entry = &cfg.repos[&identity];
+    let parsed = giturl::parse(&entry.url)?;
+
+    println!("Removing mirror for {}...", identity);
+    mirror::remove(&parsed).map_err(|e| anyhow::anyhow!("removing mirror: {}", e))?;
+
+    cfg.repos.remove(&identity);
+    cfg.save()
+        .map_err(|e| anyhow::anyhow!("saving config: {}", e))?;
+
+    println!("Removed {}", identity);
+    Ok(())
+}
+
+pub fn run_fetch(matches: &ArgMatches) -> Result<()> {
+    let all = matches.get_flag("all");
+    let name = matches.get_one::<String>("name");
+
+    let cfg = config::Config::load().map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
+
+    if cfg.repos.is_empty() {
+        println!("No repos registered.");
+        return Ok(());
+    }
+
+    let identities: Vec<String> = cfg.repos.keys().cloned().collect();
+
+    let to_fetch = match name {
+        Some(n) if !all => {
+            let identity = giturl::resolve(n, &identities)?;
+            vec![identity]
+        }
+        _ => identities.clone(),
+    };
+
+    let mut failed = 0;
+    for identity in &to_fetch {
+        let entry = &cfg.repos[identity];
+        let parsed = match giturl::parse(&entry.url) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("  {}: error parsing URL: {}", identity, e);
+                failed += 1;
+                continue;
+            }
+        };
+
+        println!("Fetching {}...", identity);
+        if let Err(e) = mirror::fetch(&parsed) {
+            println!("  {}: error: {}", identity, e);
+            failed += 1;
+        }
+    }
+
+    if failed > 0 {
+        bail!("{} fetch(es) failed", failed);
+    }
+    Ok(())
+}
