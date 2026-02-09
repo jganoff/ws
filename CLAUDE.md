@@ -2,10 +2,10 @@
 
 ## Build & Test
 
-- `task build` - Build binary to `bin/ws`
-- `task test` - Run all tests (single-threaded due to env var usage)
-- `task lint` - Run clippy with `-D warnings`
-- `task check` - Run fmt + lint + test
+- `cargo build --release` - Build optimized binary
+- `cargo test -- --test-threads=1` - Run all tests (single-threaded due to env var usage)
+- `cargo clippy -- -D warnings` - Run linter
+- `cargo fmt` - Format code
 
 ## Architecture
 
@@ -29,5 +29,5 @@
 
 - Git ops via `std::process::Command`, not libgit2
 - Table-driven tests
-- YAML config with `serde_yaml`
+- YAML config with `serde_yml`
 - Error handling with `anyhow`

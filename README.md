@@ -10,7 +10,7 @@ own branch. No conflicts, no juggling state between features.
 ## Install
 
 ```
-go install github.com/jganoff/ws/cmd/ws@latest
+cargo install --git https://github.com/jganoff/ws.git
 ```
 
 Or build from source:
@@ -18,8 +18,7 @@ Or build from source:
 ```
 git clone https://github.com/jganoff/ws.git
 cd ws
-task build        # binary at bin/ws
-task install      # installs to GOPATH/bin
+cargo install --path .
 ```
 
 ## Quick start
@@ -427,18 +426,39 @@ groups:
 
 ## Development
 
-Requires Go 1.25+, [Task](https://taskfile.dev), and
-[golangci-lint](https://golangci-lint.run).
+Requires [Rust](https://www.rust-lang.org/tools/install) (stable) with the
+`clippy` and `rustfmt` components:
 
-| Target       | Description                                |
-|--------------|--------------------------------------------|
-| `task build` | Build binary to `bin/ws`                   |
-| `task test`  | Run tests with race detector               |
-| `task lint`  | Run golangci-lint                          |
-| `task fmt`   | Format code                                |
-| `task check` | Run fmt + lint + test                      |
-| `task ci`    | Full CI pipeline (fmt-check, tidy-check, lint, build, test) |
-| `task clean` | Remove build artifacts                     |
+```
+rustup component add clippy rustfmt
+```
 
-CI runs `task ci` on every push to `main` and on pull requests. See
+### Building
+
+```
+cargo build --release    # optimized binary at target/release/ws
+cargo install --path .   # install to ~/.cargo/bin/ws
+```
+
+### Testing
+
+```
+cargo test -- --test-threads=1
+```
+
+Tests must run single-threaded (`--test-threads=1`) because some tests mutate
+process environment variables.
+
+### Linting and formatting
+
+```
+cargo clippy -- -D warnings   # lint (warnings are errors)
+cargo fmt                      # auto-format
+cargo fmt --check              # check formatting (CI)
+```
+
+### CI
+
+CI runs on every push to `main` and on pull requests. It checks formatting,
+runs clippy, builds, and runs all tests. See
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml).

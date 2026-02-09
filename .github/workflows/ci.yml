@@ -15,8 +15,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2
-        with:
-          version: 3.x
-
-      - run: task ci
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo build --release
+      - run: cargo test -- --test-threads=1
