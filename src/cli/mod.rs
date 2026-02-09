@@ -1,6 +1,7 @@
 pub mod add;
 pub mod completers;
 pub mod completion;
+pub mod diff;
 pub mod exec;
 pub mod group;
 pub mod list;
@@ -39,6 +40,7 @@ pub fn build_cli() -> Command {
         .subcommand(add::cmd())
         .subcommand(list::cmd())
         .subcommand(status::cmd())
+        .subcommand(diff::cmd())
         .subcommand(remove::cmd())
         .subcommand(exec::cmd())
         .subcommand(
@@ -73,6 +75,7 @@ pub fn run() -> anyhow::Result<()> {
         Some(("add", m)) => add::run(m, &paths),
         Some(("list", m)) => list::run(m, &paths),
         Some(("status", m)) => status::run(m, &paths),
+        Some(("diff", m)) => diff::run(m, &paths),
         Some(("remove", m)) => remove::run(m, &paths),
         Some(("exec", m)) => exec::run(m, &paths),
         Some(("completion", m)) => completion::run(m, &paths),
