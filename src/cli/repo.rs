@@ -33,10 +33,7 @@ pub fn remove_cmd() -> Command {
 pub fn fetch_cmd() -> Command {
     Command::new("fetch")
         .about("Fetch updates for mirror(s)")
-        .arg(
-            Arg::new("name")
-                .add(ArgValueCandidates::new(completers::complete_repos)),
-        )
+        .arg(Arg::new("name").add(ArgValueCandidates::new(completers::complete_repos)))
         .arg(
             Arg::new("all")
                 .long("all")

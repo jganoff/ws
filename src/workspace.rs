@@ -253,9 +253,8 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
                     continue;
                 }
             };
-            let merged =
-                git::branch_is_merged(&ar.mirror_dir, &meta.branch, &default_branch)
-                    .unwrap_or(false);
+            let merged = git::branch_is_merged(&ar.mirror_dir, &meta.branch, &default_branch)
+                .unwrap_or(false);
             if !merged {
                 unmerged.push((ar.identity.clone(), ar.fetch_failed));
             }
@@ -431,7 +430,12 @@ mod tests {
             owner: "user".into(),
             repo: "test-repo".into(),
         };
-        mirror::clone(&paths.mirrors_dir, &parsed, repo_dir.path().to_str().unwrap()).unwrap();
+        mirror::clone(
+            &paths.mirrors_dir,
+            &parsed,
+            repo_dir.path().to_str().unwrap(),
+        )
+        .unwrap();
 
         // Set up HEAD ref so DefaultBranch works
         let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);

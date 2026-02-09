@@ -40,8 +40,5 @@ pub fn complete_workspaces() -> Vec<CompletionCandidate> {
     let Ok(names) = workspace::list_all(&paths.workspaces_dir) else {
         return Vec::new();
     };
-    names
-        .into_iter()
-        .map(CompletionCandidate::new)
-        .collect()
+    names.into_iter().map(CompletionCandidate::new).collect()
 }

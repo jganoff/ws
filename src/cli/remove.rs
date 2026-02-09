@@ -11,10 +11,7 @@ pub fn cmd() -> Command {
     Command::new("remove")
         .visible_alias("rm")
         .about("Remove a workspace and its worktrees")
-        .arg(
-            Arg::new("workspace")
-                .add(ArgValueCandidates::new(completers::complete_workspaces)),
-        )
+        .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("force")
                 .short('f')

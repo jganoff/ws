@@ -26,23 +26,19 @@ pub fn list_cmd() -> Command {
 }
 
 pub fn show_cmd() -> Command {
-    Command::new("show")
-        .about("Show repos in a group")
-        .arg(
-            Arg::new("name")
-                .required(true)
-                .add(ArgValueCandidates::new(completers::complete_groups)),
-        )
+    Command::new("show").about("Show repos in a group").arg(
+        Arg::new("name")
+            .required(true)
+            .add(ArgValueCandidates::new(completers::complete_groups)),
+    )
 }
 
 pub fn delete_cmd() -> Command {
-    Command::new("delete")
-        .about("Delete a group")
-        .arg(
-            Arg::new("name")
-                .required(true)
-                .add(ArgValueCandidates::new(completers::complete_groups)),
-        )
+    Command::new("delete").about("Delete a group").arg(
+        Arg::new("name")
+            .required(true)
+            .add(ArgValueCandidates::new(completers::complete_groups)),
+    )
 }
 
 pub fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<()> {

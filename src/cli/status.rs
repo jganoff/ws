@@ -15,10 +15,7 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("status")
         .about("Git status across workspace repos")
-        .arg(
-            Arg::new("workspace")
-                .add(ArgValueCandidates::new(completers::complete_workspaces)),
-        )
+        .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<()> {
