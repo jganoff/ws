@@ -9,22 +9,15 @@ pub fn cmd() -> Command {
         .about("Remove a workspace and its worktrees")
         .arg(Arg::new("workspace"))
         .arg(
-            Arg::new("delete-branches")
-                .long("delete-branches")
-                .action(clap::ArgAction::SetTrue)
-                .help("Also delete workspace branches from mirrors"),
-        )
-        .arg(
             Arg::new("force")
                 .short('f')
                 .long("force")
                 .action(clap::ArgAction::SetTrue)
-                .help("Remove even if repos have pending changes"),
+                .help("Remove even if repos have pending changes or unmerged branches"),
         )
 }
 
 pub fn run(matches: &ArgMatches) -> Result<()> {
-    let delete_branches = matches.get_flag("delete-branches");
     let force = matches.get_flag("force");
 
     let name = if let Some(n) = matches.get_one::<String>("workspace") {
@@ -56,7 +49,7 @@ pub fn run(matches: &ArgMatches) -> Result<()> {
     }
 
     println!("Removing workspace {:?}...", name);
-    workspace::remove(&name, delete_branches)?;
+    workspace::remove(&name, force)?;
 
     println!("Workspace {:?} removed.", name);
     Ok(())

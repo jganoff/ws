@@ -166,10 +166,21 @@ pub fn has_pending_changes(ws_dir: &Path) -> Result<Vec<String>> {
     Ok(dirty)
 }
 
-pub fn remove(name: &str, delete_branches: bool) -> Result<()> {
+pub fn remove(name: &str, force: bool) -> Result<()> {
     let ws_dir = dir(name)?;
     let meta =
         load_metadata(&ws_dir).map_err(|e| anyhow::anyhow!("reading workspace metadata: {}", e))?;
+
+    // Collect active repos (no fixed ref) that need branch cleanup
+    struct ActiveRepo {
+        identity: String,
+        parsed: giturl::Parsed,
+        mirror_dir: std::path::PathBuf,
+        fetch_failed: bool,
+    }
+
+    let mut active_repos: Vec<ActiveRepo> = Vec::new();
+    let mut context_repos: Vec<(giturl::Parsed, std::path::PathBuf)> = Vec::new();
 
     for (identity, entry) in &meta.repos {
         let parsed = match parse_identity(identity) {
@@ -189,24 +200,101 @@ pub fn remove(name: &str, delete_branches: bool) -> Result<()> {
                 continue;
             }
         };
-        let worktree_path = ws_dir.join(&parsed.repo);
 
-        if let Err(e) = git::worktree_remove(&mirror_dir, &worktree_path) {
-            println!("  warning: removing worktree for {}: {}", identity, e);
-        }
-
-        // Only delete branches for active repos (no fixed ref)
         let is_active = match entry {
             None => true,
             Some(re) => re.r#ref.is_empty(),
         };
-        if delete_branches
-            && is_active
-            && let Err(e) = git::branch_delete(&mirror_dir, &meta.branch)
-        {
+
+        if is_active {
+            // Best-effort fetch to detect remote merges (e.g. PR merged on GitHub)
+            let fetch_failed = git::fetch(&mirror_dir).is_err();
+            if fetch_failed {
+                println!("  warning: fetch failed for {}, using local data", identity);
+            }
+            active_repos.push(ActiveRepo {
+                identity: identity.clone(),
+                parsed,
+                mirror_dir,
+                fetch_failed,
+            });
+        } else {
+            context_repos.push((parsed, mirror_dir));
+        }
+    }
+
+    // Pre-flight: check if all active branches are merged
+    if !force {
+        let mut unmerged: Vec<(String, bool)> = Vec::new();
+        for ar in &active_repos {
+            if !git::branch_exists(&ar.mirror_dir, &meta.branch) {
+                continue; // branch already gone, nothing to check
+            }
+            let default_branch = match git::default_branch(&ar.mirror_dir) {
+                Ok(b) => b,
+                Err(e) => {
+                    println!(
+                        "  warning: cannot detect default branch for {}: {}",
+                        ar.identity, e
+                    );
+                    continue;
+                }
+            };
+            let merged =
+                git::branch_is_merged(&ar.mirror_dir, &meta.branch, &default_branch)
+                    .unwrap_or(false);
+            if !merged {
+                unmerged.push((ar.identity.clone(), ar.fetch_failed));
+            }
+        }
+
+        if !unmerged.is_empty() {
+            let mut list = String::new();
+            let mut any_fetch_failed = false;
+            for (repo, fetch_failed) in &unmerged {
+                list.push_str(&format!("\n  - {}", repo));
+                if *fetch_failed {
+                    list.push_str(" (fetch failed, local data may be stale)");
+                    any_fetch_failed = true;
+                }
+            }
+            let mut msg = format!(
+                "workspace {:?} has unmerged branches ({}):{}\n\nUse --force to remove anyway",
+                name, meta.branch, list
+            );
+            if any_fetch_failed {
+                msg.push_str(
+                    "\n\nNote: some fetches failed; the branch may already be merged remotely",
+                );
+            }
+            bail!("{}", msg);
+        }
+    }
+
+    // Pass 2: actual removal
+    // Remove worktrees for all repos
+    for ar in &active_repos {
+        let worktree_path = ws_dir.join(&ar.parsed.repo);
+        if let Err(e) = git::worktree_remove(&ar.mirror_dir, &worktree_path) {
+            println!("  warning: removing worktree for {}: {}", ar.identity, e);
+        }
+    }
+    for (parsed, mirror_dir) in &context_repos {
+        let worktree_path = ws_dir.join(&parsed.repo);
+        if let Err(e) = git::worktree_remove(mirror_dir, &worktree_path) {
+            println!("  warning: removing worktree for {}: {}", parsed.repo, e);
+        }
+    }
+
+    // Delete branches from active repos
+    for ar in &active_repos {
+        if !git::branch_exists(&ar.mirror_dir, &meta.branch) {
+            continue;
+        }
+        if let Err(e) = git::branch_delete(&ar.mirror_dir, &meta.branch) {
             println!(
                 "  warning: deleting branch {} in {}: {}",
-                meta.branch, identity, e
+                meta.branch, ar.identity, e
             );
         }
     }
@@ -421,17 +509,114 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_workspace() {
+    fn test_remove_deletes_merged_branch() {
         let (_d, _h, _r, identity) = setup_test_env();
 
-        let refs = BTreeMap::from([(identity, String::new())]);
-        create("test-ws-rm", &refs).unwrap();
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create("rm-merged", &refs).unwrap();
 
-        let ws_dir = dir("test-ws-rm").unwrap();
+        let ws_dir = dir("rm-merged").unwrap();
         assert!(ws_dir.exists());
 
-        remove("test-ws-rm", false).unwrap();
+        // Branch was created from main with no extra commits, so it's merged
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = crate::mirror::dir(&parsed).unwrap();
+        assert!(git::branch_exists(&mirror_dir, "rm-merged"));
+
+        remove("rm-merged", false).unwrap();
         assert!(!ws_dir.exists());
+        assert!(!git::branch_exists(&mirror_dir, "rm-merged"));
+
+        cleanup_env();
+    }
+
+    #[test]
+    fn test_remove_blocks_unmerged_branch() {
+        let (_d, _h, _r, identity) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create("rm-unmerged", &refs).unwrap();
+
+        let ws_dir = dir("rm-unmerged").unwrap();
+        let repo_dir = ws_dir.join("test-repo");
+
+        // Add a commit to the workspace branch so it diverges from main
+        let cmds: Vec<Vec<&str>> = vec![
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "diverge"],
+        ];
+        for args in &cmds {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(&repo_dir)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "command {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let result = remove("rm-unmerged", false);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unmerged branches"),
+            "expected 'unmerged branches' in error: {}",
+            err
+        );
+
+        // Workspace and branch should still exist
+        assert!(ws_dir.exists());
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = crate::mirror::dir(&parsed).unwrap();
+        assert!(git::branch_exists(&mirror_dir, "rm-unmerged"));
+
+        cleanup_env();
+    }
+
+    #[test]
+    fn test_remove_force_deletes_unmerged_branch() {
+        let (_d, _h, _r, identity) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create("rm-force", &refs).unwrap();
+
+        let ws_dir = dir("rm-force").unwrap();
+        let repo_dir = ws_dir.join("test-repo");
+
+        // Add a commit to the workspace branch so it diverges from main
+        let cmds: Vec<Vec<&str>> = vec![
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "diverge"],
+        ];
+        for args in &cmds {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(&repo_dir)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "command {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        // Force remove should succeed despite unmerged branch
+        remove("rm-force", true).unwrap();
+        assert!(!ws_dir.exists());
+
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = crate::mirror::dir(&parsed).unwrap();
+        assert!(!git::branch_exists(&mirror_dir, "rm-force"));
 
         cleanup_env();
     }
@@ -652,12 +837,12 @@ mod tests {
     fn test_remove_skips_branch_delete_for_context_repos() {
         let (_d, _h, _r, identity) = setup_test_env();
 
-        // Create workspace with context repo
+        // Create workspace with context repo (pinned to "main")
         let refs = BTreeMap::from([(identity, "main".into())]);
         create("rm-ws-ctx", &refs).unwrap();
 
-        // Remove with --delete-branches; should not error
-        remove("rm-ws-ctx", true).unwrap();
+        // Remove should succeed without touching context repo branches
+        remove("rm-ws-ctx", false).unwrap();
 
         cleanup_env();
     }

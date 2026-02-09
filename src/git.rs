@@ -101,6 +101,26 @@ pub fn branch_delete(dir: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn branch_is_merged(dir: &Path, branch: &str, target: &str) -> Result<bool> {
+    let mut cmd = Command::new("git");
+    cmd.args(["merge-base", "--is-ancestor", branch, target]);
+    cmd.current_dir(dir);
+    let output = cmd.output()?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            bail!(
+                "git merge-base --is-ancestor (in {}): {}\n{}",
+                dir.display(),
+                output.status,
+                stderr
+            );
+        }
+    }
+}
+
 pub fn branch_exists(dir: &Path, branch: &str) -> bool {
     let ref_path = format!("refs/heads/{}", branch);
     run(Some(dir), &["rev-parse", "--verify", &ref_path]).is_ok()
