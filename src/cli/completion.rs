@@ -20,7 +20,11 @@ fn generate_zsh(w: &mut dyn Write) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("cannot determine executable path: {}", e))?;
     let bin_str = bin.display().to_string();
 
-    let cases = build_cases();
+    let ws_root = crate::config::default_workspaces_dir()
+        .map_err(|e| anyhow::anyhow!("cannot determine workspaces directory: {}", e))?;
+    let ws_root_str = ws_root.display().to_string();
+
+    let cases = build_cases(&ws_root_str);
 
     // Write wrapper function
     write!(
@@ -66,48 +70,48 @@ struct ZshCase {
     body: String,
 }
 
-fn build_cases() -> Vec<ZshCase> {
+fn build_cases(ws_root: &str) -> Vec<ZshCase> {
     vec![
         ZshCase {
             pattern: "new".to_string(),
-            body: build_cd_into_body("new"),
+            body: build_cd_into_body("new", ws_root),
         },
         ZshCase {
             pattern: "remove".to_string(),
-            body: build_cd_out_body("remove"),
+            body: build_cd_out_body("remove", ws_root),
         },
         ZshCase {
             pattern: "rm".to_string(),
-            body: build_cd_out_body("remove"),
+            body: build_cd_out_body("remove", ws_root),
         },
     ]
 }
 
-fn build_cd_into_body(cmd_name: &str) -> String {
+fn build_cd_into_body(cmd_name: &str, ws_root: &str) -> String {
     format!(
         "shift\n\
          \x20     command \"$ws_bin\" {} \"$@\" || return\n\
-         \x20     local ws_dir=\"$HOME/dev/workspaces/$1\"\n\
+         \x20     local ws_dir=\"{}/$1\"\n\
          \x20     cd \"$ws_dir\"",
-        cmd_name
+        cmd_name, ws_root
     )
 }
 
-fn build_cd_out_body(cmd_name: &str) -> String {
+fn build_cd_out_body(cmd_name: &str, ws_root: &str) -> String {
     format!(
         "shift\n\
          \x20     if [[ -n \"$1\" ]]; then\n\
-         \x20       local ws_dir=\"$HOME/dev/workspaces/$1\"\n\
+         \x20       local ws_dir=\"{}/$1\"\n\
          \x20       if [[ \"$PWD\" = \"$ws_dir\"* ]]; then\n\
-         \x20         cd \"$HOME/dev/workspaces\" || cd \"$HOME\"\n\
+         \x20         cd \"{}\" || cd \"$HOME\"\n\
          \x20       fi\n\
          \x20       command \"$ws_bin\" {} \"$@\"\n\
          \x20     else\n\
          \x20       command \"$ws_bin\" {} \"$@\" || return\n\
          \x20       if [[ ! -d \"$PWD\" ]]; then\n\
-         \x20         cd \"$HOME/dev/workspaces\" || cd \"$HOME\"\n\
+         \x20         cd \"{}\" || cd \"$HOME\"\n\
          \x20       fi\n\
          \x20     fi",
-        cmd_name, cmd_name
+        ws_root, ws_root, cmd_name, cmd_name, ws_root
     )
 }
