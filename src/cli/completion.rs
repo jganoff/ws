@@ -76,6 +76,14 @@ fn build_cases(ws_root: &str) -> Vec<ZshCase> {
             body: build_cd_into_body("new", ws_root),
         },
         ZshCase {
+            pattern: "cd".to_string(),
+            body: "shift\n\
+                 \x20     local dir\n\
+                 \x20     dir=$(WS_SHELL=1 command \"$ws_bin\" cd \"$@\") || return\n\
+                 \x20     cd \"$dir\""
+                .to_string(),
+        },
+        ZshCase {
             pattern: "remove".to_string(),
             body: build_cd_out_body("remove", ws_root),
         },

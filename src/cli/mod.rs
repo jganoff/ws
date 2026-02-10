@@ -1,4 +1,5 @@
 pub mod add;
+pub mod cd;
 pub mod cfg;
 pub mod completers;
 pub mod completion;
@@ -16,6 +17,7 @@ use clap::{Arg, ArgMatches, Command};
 
 use crate::config::Paths;
 use crate::output::Output;
+use crate::workspace;
 
 pub fn build_cli() -> Command {
     let repo = Command::new("repo")
@@ -50,7 +52,6 @@ pub fn build_cli() -> Command {
     Command::new("ws")
         .about("Multi-repo workspace manager")
         .version(env!("CARGO_PKG_VERSION"))
-        .subcommand_required(true)
         .arg(
             Arg::new("json")
                 .long("json")
@@ -63,6 +64,7 @@ pub fn build_cli() -> Command {
         .subcommand(config)
         .subcommand(skill_cmd)
         .subcommand(new::cmd())
+        .subcommand(cd::cmd())
         .subcommand(add::cmd())
         .subcommand(list::cmd())
         .subcommand(status::cmd())
@@ -105,6 +107,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
             _ => unreachable!(),
         },
         Some(("new", m)) => new::run(m, paths),
+        Some(("cd", m)) => cd::run(m, paths),
         Some(("add", m)) => add::run(m, paths),
         Some(("list", m)) => list::run(m, paths),
         Some(("status", m)) => status::run(m, paths),
@@ -112,6 +115,19 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("remove", m)) => remove::run(m, paths),
         Some(("exec", m)) => exec::run(m, paths),
         Some(("completion", m)) => completion::run(m, paths),
+        None => {
+            let cwd = std::env::current_dir()?;
+            if workspace::detect(&cwd).is_ok() {
+                status::run(matches, paths)
+            } else {
+                let mut output = list::run(matches, paths)?;
+                if let Output::WorkspaceList(ref mut wl) = output {
+                    wl.hint =
+                        Some("Not in a workspace. Use `ws cd <name>` to enter one.".to_string());
+                }
+                Ok(output)
+            }
+        }
         _ => unreachable!(),
     }
 }

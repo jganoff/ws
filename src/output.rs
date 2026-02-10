@@ -113,6 +113,8 @@ pub struct GroupShowOutput {
 
 #[derive(Serialize)]
 pub struct WorkspaceListOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
     pub workspaces: Vec<WorkspaceListEntry>,
 }
 
@@ -179,6 +181,11 @@ pub struct MutationOutput {
 }
 
 #[derive(Serialize)]
+pub struct PathOutput {
+    pub path: String,
+}
+
+#[derive(Serialize)]
 pub struct ErrorOutput {
     pub error: String,
 }
@@ -197,6 +204,7 @@ pub enum Output {
     ConfigList(ConfigListOutput),
     ConfigGet(ConfigGetOutput),
     Mutation(MutationOutput),
+    Path(PathOutput),
     None,
 }
 
@@ -217,6 +225,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::ConfigList(v) => print_json(&v),
             Output::ConfigGet(v) => print_json(&v),
             Output::Mutation(v) => print_json(&v),
+            Output::Path(v) => print_json(&v),
         };
     }
     match output {
@@ -230,6 +239,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::ConfigList(v) => render_config_list_text(v),
         Output::ConfigGet(v) => render_config_get_text(v),
         Output::Mutation(v) => render_mutation_text(v),
+        Output::Path(v) => render_path_text(v),
     }
 }
 
@@ -285,6 +295,9 @@ fn render_group_show_text(v: GroupShowOutput) -> Result<()> {
 }
 
 fn render_workspace_list_table(v: WorkspaceListOutput) -> Result<()> {
+    if let Some(hint) = &v.hint {
+        println!("{}\n", hint);
+    }
     if v.workspaces.is_empty() {
         println!("No workspaces.");
         return Ok(());
@@ -375,6 +388,11 @@ fn render_config_get_text(v: ConfigGetOutput) -> Result<()> {
 
 fn render_mutation_text(v: MutationOutput) -> Result<()> {
     println!("{}", v.message);
+    Ok(())
+}
+
+fn render_path_text(v: PathOutput) -> Result<()> {
+    println!("{}", v.path);
     Ok(())
 }
 
@@ -542,6 +560,7 @@ mod tests {
     #[test]
     fn test_json_workspace_list() {
         let output = WorkspaceListOutput {
+            hint: None,
             workspaces: vec![WorkspaceListEntry {
                 name: "my-ws".into(),
                 branch: "my-ws".into(),

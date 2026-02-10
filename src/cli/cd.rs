@@ -1,0 +1,36 @@
+use anyhow::{Result, bail};
+use clap::{Arg, ArgMatches, Command};
+use clap_complete::engine::ArgValueCandidates;
+
+use crate::config::Paths;
+use crate::output::{Output, PathOutput};
+use crate::workspace;
+
+use super::completers;
+
+pub fn cmd() -> Command {
+    Command::new("cd")
+        .about("Change directory into a workspace")
+        .arg(
+            Arg::new("workspace")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_workspaces)),
+        )
+}
+
+pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("workspace").unwrap();
+    let ws_dir = workspace::dir(&paths.workspaces_dir, name);
+    if !ws_dir.join(workspace::METADATA_FILE).exists() {
+        bail!("workspace '{}' not found", name);
+    }
+    if std::env::var("WS_SHELL").is_err() {
+        eprintln!(
+            "hint: shell integration not active, printing path only\n\
+             hint: run `eval \"$(ws completion zsh)\"` to enable `ws cd`"
+        );
+    }
+    Ok(Output::Path(PathOutput {
+        path: ws_dir.display().to_string(),
+    }))
+}

@@ -35,5 +35,8 @@ pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         });
     }
 
-    Ok(Output::WorkspaceList(WorkspaceListOutput { workspaces }))
+    Ok(Output::WorkspaceList(WorkspaceListOutput {
+        hint: None,
+        workspaces,
+    }))
 }
