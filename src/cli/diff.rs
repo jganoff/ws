@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
@@ -54,6 +54,14 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let repo_dir = ws_dir.join(&parsed.repo);
 
         let mut args = vec!["diff"];
+        let diff_base = if extra_args.is_empty() {
+            Some(resolve_diff_base(&repo_dir))
+        } else {
+            None
+        };
+        if let Some(ref base) = diff_base {
+            args.push(base);
+        }
         args.extend(&extra_args);
 
         let diff = match git::run(Some(&repo_dir), &args) {
@@ -76,4 +84,14 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     Ok(Output::Diff(DiffOutput { repos }))
+}
+
+/// Pick the best ref to diff against: upstream tracking branch if set,
+/// otherwise origin/<default_branch>.
+fn resolve_diff_base(repo_dir: &Path) -> String {
+    match git::resolve_upstream_ref(repo_dir) {
+        git::UpstreamRef::Tracking => "@{upstream}".to_string(),
+        git::UpstreamRef::DefaultBranch(b) => format!("origin/{}", b),
+        git::UpstreamRef::Head => "HEAD".to_string(),
+    }
 }

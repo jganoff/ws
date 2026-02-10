@@ -60,13 +60,17 @@ fn render_buf(headers: &[String], rows: &[Vec<String>]) -> Result<Vec<u8>> {
     Ok(tw.into_inner()?)
 }
 
-pub fn format_repo_status(ahead: u32, modified: u32) -> String {
+pub fn format_repo_status(ahead: u32, modified: u32, has_upstream: bool) -> String {
     if ahead == 0 && modified == 0 {
         return "clean".to_string();
     }
     let mut parts = Vec::new();
     if ahead > 0 {
-        parts.push(format!("{} ahead", ahead));
+        if has_upstream {
+            parts.push(format!("{} ahead", ahead));
+        } else {
+            parts.push(format!("{} ahead (no upstream)", ahead));
+        }
     }
     if modified > 0 {
         parts.push(format!("{} modified", modified));
@@ -139,6 +143,7 @@ pub struct RepoStatusEntry {
     pub branch: String,
     pub ahead: u32,
     pub changed: u32,
+    pub has_upstream: bool,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -494,14 +499,28 @@ mod tests {
     #[test]
     fn test_format_repo_status() {
         let cases = vec![
-            ("clean", 0, 0, "clean"),
-            ("modified only", 0, 5, "5 modified"),
-            ("ahead only", 3, 0, "3 ahead"),
-            ("both", 2, 4, "2 ahead, 4 modified"),
-            ("one each", 1, 1, "1 ahead, 1 modified"),
+            ("clean", 0, 0, true, "clean"),
+            ("clean no upstream", 0, 0, false, "clean"),
+            ("modified only", 0, 5, true, "5 modified"),
+            ("ahead with upstream", 3, 0, true, "3 ahead"),
+            ("ahead no upstream", 3, 0, false, "3 ahead (no upstream)"),
+            ("both with upstream", 2, 4, true, "2 ahead, 4 modified"),
+            (
+                "both no upstream",
+                2,
+                4,
+                false,
+                "2 ahead (no upstream), 4 modified",
+            ),
+            ("one each", 1, 1, true, "1 ahead, 1 modified"),
         ];
-        for (name, ahead, modified, want) in cases {
-            assert_eq!(format_repo_status(ahead, modified), want, "{}", name);
+        for (name, ahead, modified, has_upstream, want) in cases {
+            assert_eq!(
+                format_repo_status(ahead, modified, has_upstream),
+                want,
+                "{}",
+                name
+            );
         }
     }
 
@@ -584,6 +603,7 @@ mod tests {
                     branch: "my-ws".into(),
                     ahead: 1,
                     changed: 2,
+                    has_upstream: true,
                     status: "1 ahead, 2 modified".into(),
                     error: None,
                 },
@@ -592,6 +612,7 @@ mod tests {
                     branch: String::new(),
                     ahead: 0,
                     changed: 0,
+                    has_upstream: false,
                     status: String::new(),
                     error: Some("parse error".into()),
                 },
@@ -601,7 +622,9 @@ mod tests {
         assert_eq!(val["workspace"], "my-ws");
         assert_eq!(val["repos"][0]["ahead"], 1);
         assert_eq!(val["repos"][0]["changed"], 2);
+        assert_eq!(val["repos"][0]["has_upstream"], true);
         assert!(val["repos"][0].get("error").is_none());
+        assert_eq!(val["repos"][1]["has_upstream"], false);
         assert_eq!(val["repos"][1]["error"], "parse error");
     }
 

@@ -91,14 +91,14 @@ pub fn worktree_add(
     let wt = path_str(worktree_path)?;
     run(
         Some(repo_dir),
-        &["worktree", "add", "-b", branch, wt, start_point],
+        &["worktree", "add", "-b", branch, "--", wt, start_point],
     )?;
     Ok(())
 }
 
 pub fn worktree_add_existing(repo_dir: &Path, worktree_path: &Path, branch: &str) -> Result<()> {
     let wt = path_str(worktree_path)?;
-    run(Some(repo_dir), &["worktree", "add", wt, branch])?;
+    run(Some(repo_dir), &["worktree", "add", "--", wt, branch])?;
     Ok(())
 }
 
@@ -106,7 +106,7 @@ pub fn worktree_add_detached(repo_dir: &Path, worktree_path: &Path, git_ref: &st
     let wt = path_str(worktree_path)?;
     run(
         Some(repo_dir),
-        &["worktree", "add", "--detach", wt, git_ref],
+        &["worktree", "add", "--detach", "--", wt, git_ref],
     )?;
     Ok(())
 }
@@ -118,7 +118,7 @@ pub fn worktree_remove(repo_dir: &Path, worktree_path: &Path) -> Result<()> {
 }
 
 pub fn branch_delete(dir: &Path, branch: &str) -> Result<()> {
-    run(Some(dir), &["branch", "-D", branch])?;
+    run(Some(dir), &["branch", "-D", "--", branch])?;
     Ok(())
 }
 
@@ -161,11 +161,39 @@ pub fn branch_current(dir: &Path) -> Result<String> {
     run(Some(dir), &["rev-parse", "--abbrev-ref", "HEAD"])
 }
 
-pub fn ahead_count(dir: &Path) -> Result<u32> {
-    match run(Some(dir), &["rev-list", "--count", "@{upstream}..HEAD"]) {
-        Ok(out) => Ok(out.parse::<u32>().unwrap_or(0)),
-        Err(_) => Ok(0),
+/// Resolved upstream reference for the current branch.
+pub enum UpstreamRef {
+    /// @{upstream} tracking branch exists.
+    Tracking,
+    /// No tracking branch; fell back to origin/<default>.
+    DefaultBranch(String),
+    /// Nothing available — use HEAD.
+    Head,
+}
+
+/// Probe once and return the best upstream reference.
+pub fn resolve_upstream_ref(dir: &Path) -> UpstreamRef {
+    if run(Some(dir), &["rev-parse", "--verify", "@{upstream}"]).is_ok() {
+        return UpstreamRef::Tracking;
     }
+    if let Ok(branch) = default_branch(dir) {
+        return UpstreamRef::DefaultBranch(branch);
+    }
+    UpstreamRef::Head
+}
+
+pub fn has_upstream(dir: &Path) -> bool {
+    matches!(resolve_upstream_ref(dir), UpstreamRef::Tracking)
+}
+
+pub fn ahead_count(dir: &Path) -> Result<u32> {
+    let range = match resolve_upstream_ref(dir) {
+        UpstreamRef::Tracking => "@{upstream}..HEAD".to_string(),
+        UpstreamRef::DefaultBranch(b) => format!("origin/{}..HEAD", b),
+        UpstreamRef::Head => return Ok(0),
+    };
+    let out = run(Some(dir), &["rev-list", "--count", &range])?;
+    Ok(out.parse::<u32>().unwrap_or(0))
 }
 
 pub fn changed_file_count(dir: &Path) -> Result<u32> {

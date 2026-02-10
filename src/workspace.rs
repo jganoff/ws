@@ -38,6 +38,9 @@ pub fn validate_name(name: &str) -> Result<()> {
     if name.contains('/') || name.contains('\\') {
         bail!("workspace name {:?} cannot contain path separators", name);
     }
+    if name.starts_with('-') {
+        bail!("workspace name {:?} cannot start with a dash", name);
+    }
     if name == "." || name == ".." {
         bail!("workspace name {:?} is not allowed", name);
     }
@@ -745,6 +748,8 @@ mod tests {
             ("empty", "", true),
             ("forward slash", "a/b", true),
             ("backslash", "a\\b", true),
+            ("dash prefix", "-bad", true),
+            ("double dash prefix", "--also-bad", true),
             ("dot", ".", true),
             ("dotdot", "..", true),
         ];

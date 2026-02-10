@@ -40,6 +40,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     branch: String::new(),
                     ahead: 0,
                     changed: 0,
+                    has_upstream: false,
                     status: String::new(),
                     error: Some(e.to_string()),
                 });
@@ -50,15 +51,17 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let repo_dir = ws_dir.join(&parsed.repo);
 
         let branch = git::branch_current(&repo_dir).unwrap_or_else(|_| "?".to_string());
+        let has_upstream = git::has_upstream(&repo_dir);
         let ahead = git::ahead_count(&repo_dir).unwrap_or(0);
         let changed = git::changed_file_count(&repo_dir).unwrap_or(0);
-        let status = output::format_repo_status(ahead, changed);
+        let status = output::format_repo_status(ahead, changed, has_upstream);
 
         repos.push(RepoStatusEntry {
             name: parsed.repo,
             branch,
             ahead,
             changed,
+            has_upstream,
             status,
             error: None,
         });
