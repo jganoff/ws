@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Result, bail};
 
 use crate::config::{Config, GroupEntry};
@@ -27,6 +29,42 @@ pub fn get(cfg: &Config, name: &str) -> Result<Vec<String>> {
 
 pub fn list(cfg: &Config) -> Vec<String> {
     cfg.groups.keys().cloned().collect()
+}
+
+pub fn add_repos(cfg: &mut Config, name: &str, repos: Vec<String>) -> Result<()> {
+    let group = cfg
+        .groups
+        .get_mut(name)
+        .ok_or_else(|| anyhow::anyhow!("group {:?} not found", name))?;
+
+    let mut seen = HashSet::new();
+    for repo in &repos {
+        if !seen.insert(repo.as_str()) {
+            bail!("duplicate repo {:?} in add list", repo);
+        }
+        if group.repos.contains(repo) {
+            bail!("repo {:?} already in group {:?}", repo, name);
+        }
+    }
+
+    group.repos.extend(repos);
+    Ok(())
+}
+
+pub fn remove_repos(cfg: &mut Config, name: &str, repos: Vec<String>) -> Result<()> {
+    let group = cfg
+        .groups
+        .get_mut(name)
+        .ok_or_else(|| anyhow::anyhow!("group {:?} not found", name))?;
+
+    for repo in &repos {
+        if !group.repos.contains(repo) {
+            bail!("repo {:?} not in group {:?}", repo, name);
+        }
+    }
+
+    group.repos.retain(|r| !repos.contains(r));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -91,5 +129,159 @@ mod tests {
     fn test_list_empty() {
         let cfg = new_config();
         assert!(list(&cfg).is_empty());
+    }
+
+    #[test]
+    fn test_add_repos() {
+        struct Case {
+            name: &'static str,
+            group: &'static str,
+            initial: Vec<&'static str>,
+            add: Vec<&'static str>,
+            want_err: bool,
+            want_repos: Vec<&'static str>,
+        }
+
+        let cases = vec![
+            Case {
+                name: "add to existing group",
+                group: "backend",
+                initial: vec!["repo-a"],
+                add: vec!["repo-b", "repo-c"],
+                want_err: false,
+                want_repos: vec!["repo-a", "repo-b", "repo-c"],
+            },
+            Case {
+                name: "duplicate repo already in group errors",
+                group: "backend",
+                initial: vec!["repo-a"],
+                add: vec!["repo-a"],
+                want_err: true,
+                want_repos: vec!["repo-a"],
+            },
+            Case {
+                name: "duplicate within add list errors",
+                group: "backend",
+                initial: vec!["repo-a"],
+                add: vec!["repo-b", "repo-b"],
+                want_err: true,
+                want_repos: vec!["repo-a"],
+            },
+            Case {
+                name: "group not found",
+                group: "nonexistent",
+                initial: vec![],
+                add: vec!["repo-a"],
+                want_err: true,
+                want_repos: vec![],
+            },
+        ];
+
+        for tc in cases {
+            let mut cfg = new_config();
+            if tc.group == "backend" {
+                create(
+                    &mut cfg,
+                    "backend",
+                    tc.initial.iter().map(|s| s.to_string()).collect(),
+                )
+                .unwrap();
+            }
+
+            let result = add_repos(
+                &mut cfg,
+                tc.group,
+                tc.add.iter().map(|s| s.to_string()).collect(),
+            );
+            assert_eq!(result.is_err(), tc.want_err, "case: {}", tc.name);
+
+            if !tc.want_err {
+                let got = get(&cfg, tc.group).unwrap();
+                let want: Vec<String> = tc.want_repos.iter().map(|s| s.to_string()).collect();
+                assert_eq!(got, want, "case: {}", tc.name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_remove_repos() {
+        struct Case {
+            name: &'static str,
+            group: &'static str,
+            initial: Vec<&'static str>,
+            remove: Vec<&'static str>,
+            want_err: bool,
+            want_repos: Vec<&'static str>,
+        }
+
+        let cases = vec![
+            Case {
+                name: "remove from existing group",
+                group: "backend",
+                initial: vec!["repo-a", "repo-b", "repo-c"],
+                remove: vec!["repo-b"],
+                want_err: false,
+                want_repos: vec!["repo-a", "repo-c"],
+            },
+            Case {
+                name: "remove absent repo errors",
+                group: "backend",
+                initial: vec!["repo-a"],
+                remove: vec!["repo-z"],
+                want_err: true,
+                want_repos: vec!["repo-a"],
+            },
+            Case {
+                name: "group not found",
+                group: "nonexistent",
+                initial: vec![],
+                remove: vec!["repo-a"],
+                want_err: true,
+                want_repos: vec![],
+            },
+        ];
+
+        for tc in cases {
+            let mut cfg = new_config();
+            if tc.group == "backend" {
+                create(
+                    &mut cfg,
+                    "backend",
+                    tc.initial.iter().map(|s| s.to_string()).collect(),
+                )
+                .unwrap();
+            }
+
+            let result = remove_repos(
+                &mut cfg,
+                tc.group,
+                tc.remove.iter().map(|s| s.to_string()).collect(),
+            );
+            assert_eq!(result.is_err(), tc.want_err, "case: {}", tc.name);
+
+            if !tc.want_err {
+                let got = get(&cfg, tc.group).unwrap();
+                let want: Vec<String> = tc.want_repos.iter().map(|s| s.to_string()).collect();
+                assert_eq!(got, want, "case: {}", tc.name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_add_then_remove_sequence() {
+        let mut cfg = new_config();
+        create(&mut cfg, "backend", vec!["repo-a".into()]).unwrap();
+
+        add_repos(&mut cfg, "backend", vec!["repo-b".into()]).unwrap();
+        assert_eq!(
+            get(&cfg, "backend").unwrap(),
+            vec!["repo-a".to_string(), "repo-b".to_string()]
+        );
+
+        remove_repos(&mut cfg, "backend", vec!["repo-a".into()]).unwrap();
+        assert_eq!(
+            get(&cfg, "backend").unwrap(),
+            vec!["repo-b".to_string()]
+        );
     }
 }

@@ -66,6 +66,23 @@ $ ws group new backend api-gateway user-service
 Created group "backend" with 2 repos
 ```
 
+### `ws group update <name> --add <repos...> --remove <repos...>`
+
+Add or remove repos from an existing group. At least one of `--add` or
+`--remove` is required. Errors if adding a repo already in the group, or
+removing one that isn't.
+
+```
+$ ws group update backend --add api-gateway user-service
+Updated group "backend": added 2
+
+$ ws group update backend --remove old-service
+Updated group "backend": removed 1
+
+$ ws group update backend --add new-svc --remove old-svc
+Updated group "backend": added 1, removed 1
+```
+
 ### `ws group list`
 
 List all groups.

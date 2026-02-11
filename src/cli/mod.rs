@@ -34,7 +34,8 @@ pub fn build_cli() -> Command {
         .subcommand(group::new_cmd())
         .subcommand(group::list_cmd())
         .subcommand(group::show_cmd())
-        .subcommand(group::delete_cmd());
+        .subcommand(group::delete_cmd())
+        .subcommand(group::update_cmd());
 
     let config = Command::new("config")
         .about("Manage global configuration")
@@ -93,6 +94,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
             Some(("list", m)) => group::run_list(m, paths),
             Some(("show", m)) => group::run_show(m, paths),
             Some(("delete", m)) => group::run_delete(m, paths),
+            Some(("update", m)) => group::run_update(m, paths),
             _ => unreachable!(),
         },
         Some(("config", sub)) => match sub.subcommand() {

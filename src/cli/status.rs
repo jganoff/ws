@@ -12,6 +12,35 @@ use crate::workspace;
 
 use super::completers;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::build_cli;
+    use crate::config::Paths;
+    use std::path::PathBuf;
+
+    fn dummy_paths() -> Paths {
+        Paths {
+            config_path: PathBuf::from("/nonexistent/config.yaml"),
+            mirrors_dir: PathBuf::from("/nonexistent/mirrors"),
+            workspaces_dir: PathBuf::from("/nonexistent/workspaces"),
+        }
+    }
+
+    #[test]
+    fn run_with_root_matches_does_not_panic() {
+        // When `ws` is run with no subcommand inside a workspace, dispatch
+        // passes root-level ArgMatches (which lack a "workspace" arg) to
+        // status::run. This must not panic — it should gracefully fall
+        // through to workspace detection via cwd.
+        let matches = build_cli().get_matches_from(["ws"]);
+
+        // The only thing we're testing is that this doesn't panic.
+        // The result depends on whether tests run inside a workspace.
+        let _ = run(&matches, &dummy_paths());
+    }
+}
+
 pub fn cmd() -> Command {
     Command::new("status")
         .about("Git status across workspace repos")
@@ -19,7 +48,7 @@ pub fn cmd() -> Command {
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
-    let ws_dir: PathBuf = if let Some(name) = matches.get_one::<String>("workspace") {
+    let ws_dir: PathBuf = if let Some(name) = matches.try_get_one::<String>("workspace").ok().flatten() {
         workspace::dir(&paths.workspaces_dir, name)
     } else {
         let cwd = std::env::current_dir()?;
