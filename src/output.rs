@@ -180,6 +180,20 @@ pub struct ConfigGetOutput {
 }
 
 #[derive(Serialize)]
+pub struct FetchOutput {
+    pub repos: Vec<FetchRepoResult>,
+}
+
+#[derive(Serialize)]
+pub struct FetchRepoResult {
+    pub identity: String,
+    pub shortname: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct MutationOutput {
     pub ok: bool,
     pub message: String,
@@ -206,6 +220,7 @@ pub enum Output {
     WorkspaceList(WorkspaceListOutput),
     Status(StatusOutput),
     Diff(DiffOutput),
+    Fetch(FetchOutput),
     ConfigList(ConfigListOutput),
     ConfigGet(ConfigGetOutput),
     Mutation(MutationOutput),
@@ -227,6 +242,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::WorkspaceList(v) => print_json(&v),
             Output::Status(v) => print_json(&v),
             Output::Diff(v) => print_json(&v),
+            Output::Fetch(v) => print_json(&v),
             Output::ConfigList(v) => print_json(&v),
             Output::ConfigGet(v) => print_json(&v),
             Output::Mutation(v) => print_json(&v),
@@ -241,10 +257,19 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::WorkspaceList(v) => render_workspace_list_table(v),
         Output::Status(v) => render_status_table(v),
         Output::Diff(v) => render_diff_text(v),
+        Output::Fetch(v) => render_fetch_text(v),
         Output::ConfigList(v) => render_config_list_text(v),
         Output::ConfigGet(v) => render_config_get_text(v),
         Output::Mutation(v) => render_mutation_text(v),
         Output::Path(v) => render_path_text(v),
+    }
+}
+
+/// Returns non-zero exit code for batch outputs with failures.
+pub fn exit_code(output: &Output) -> i32 {
+    match output {
+        Output::Fetch(v) if v.repos.iter().any(|r| !r.ok) => 1,
+        _ => 0,
     }
 }
 
@@ -364,6 +389,17 @@ fn render_diff_text(v: DiffOutput) -> Result<()> {
         println!("==> [{}]", entry.name);
         println!("{}", entry.diff);
         first = false;
+    }
+    Ok(())
+}
+
+fn render_fetch_text(v: FetchOutput) -> Result<()> {
+    let total = v.repos.len();
+    let failed = v.repos.iter().filter(|r| !r.ok).count();
+    if failed == 0 {
+        println!("Fetched {} repo(s)", total);
+    } else {
+        println!("Fetched {} repo(s), {} failed", total - failed, failed);
     }
     Ok(())
 }

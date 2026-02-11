@@ -455,7 +455,7 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
 
         if is_active {
             // Best-effort fetch to detect remote merges (e.g. PR merged on GitHub)
-            let fetch_failed = git::fetch(&mirror_dir).is_err();
+            let fetch_failed = git::fetch(&mirror_dir, true).is_err();
             if fetch_failed {
                 eprintln!("  warning: fetch failed for {}, using local data", identity);
             }

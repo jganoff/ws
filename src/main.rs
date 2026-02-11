@@ -37,9 +37,13 @@ fn main() {
 
     match cli::dispatch(&matches, &paths) {
         Ok(out) => {
+            let code = output::exit_code(&out);
             if let Err(err) = output::render(out, json) {
                 render_error(err, json);
                 process::exit(1);
+            }
+            if code != 0 {
+                process::exit(code);
             }
         }
         Err(err) => {

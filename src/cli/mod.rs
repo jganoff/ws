@@ -6,6 +6,7 @@ pub mod completion;
 pub mod delete;
 pub mod diff;
 pub mod exec;
+pub mod fetch;
 pub mod group;
 pub mod list;
 pub mod new;
@@ -26,8 +27,7 @@ pub fn build_cli() -> Command {
         .subcommand_required(true)
         .subcommand(repo::add_cmd())
         .subcommand(repo::list_cmd())
-        .subcommand(repo::remove_cmd())
-        .subcommand(repo::fetch_cmd());
+        .subcommand(repo::remove_cmd());
 
     let group = Command::new("group")
         .about("Manage repo groups")
@@ -72,7 +72,8 @@ pub fn build_cli() -> Command {
         .about("Manage repos in the current workspace")
         .subcommand_required(true)
         .subcommand(add::cmd())
-        .subcommand(remove::cmd());
+        .subcommand(remove::cmd())
+        .subcommand(fetch::cmd());
 
     Command::new("ws")
         .about("Multi-repo workspace manager")
@@ -102,7 +103,6 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
                 Some(("add", m)) => repo::run_add(m, paths),
                 Some(("list", m)) => repo::run_list(m, paths),
                 Some(("remove", m)) => repo::run_remove(m, paths),
-                Some(("fetch", m)) => repo::run_fetch(m, paths),
                 _ => unreachable!(),
             },
             Some(("group", sub2)) => match sub2.subcommand() {
@@ -130,6 +130,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("repo", sub)) => match sub.subcommand() {
             Some(("add", m)) => add::run(m, paths),
             Some(("rm", m)) => remove::run(m, paths),
+            Some(("fetch", m)) => fetch::run(m, paths),
             _ => unreachable!(),
         },
         Some(("new", m)) => new::run(m, paths),

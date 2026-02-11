@@ -30,18 +30,6 @@ pub fn remove_cmd() -> Command {
         )
 }
 
-pub fn fetch_cmd() -> Command {
-    Command::new("fetch")
-        .about("Fetch updates for mirror(s)")
-        .arg(Arg::new("name").add(ArgValueCandidates::new(completers::complete_repos)))
-        .arg(
-            Arg::new("all")
-                .long("all")
-                .action(clap::ArgAction::SetTrue)
-                .help("Fetch all registered repos"),
-        )
-}
-
 pub fn run_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let raw_url = matches.get_one::<String>("url").unwrap();
 
@@ -127,58 +115,5 @@ pub fn run_remove(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     Ok(Output::Mutation(MutationOutput {
         ok: true,
         message: format!("Removed {}", identity),
-    }))
-}
-
-pub fn run_fetch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
-    let all = matches.get_flag("all");
-    let name = matches.get_one::<String>("name");
-
-    let cfg = config::Config::load_from(&paths.config_path)
-        .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
-
-    if cfg.repos.is_empty() {
-        return Ok(Output::Mutation(MutationOutput {
-            ok: true,
-            message: "No repos registered.".into(),
-        }));
-    }
-
-    let identities: Vec<String> = cfg.repos.keys().cloned().collect();
-
-    let to_fetch = match name {
-        Some(n) if !all => {
-            let identity = giturl::resolve(n, &identities)?;
-            vec![identity]
-        }
-        _ => identities.clone(),
-    };
-
-    let mut failed = 0;
-    for identity in &to_fetch {
-        let entry = &cfg.repos[identity];
-        let parsed = match giturl::parse(&entry.url) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("  {}: error parsing URL: {}", identity, e);
-                failed += 1;
-                continue;
-            }
-        };
-
-        eprintln!("Fetching {}...", identity);
-        if let Err(e) = mirror::fetch(&paths.mirrors_dir, &parsed) {
-            eprintln!("  {}: error: {}", identity, e);
-            failed += 1;
-        }
-    }
-
-    if failed > 0 {
-        bail!("{} fetch(es) failed", failed);
-    }
-
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Fetched {} repo(s)", to_fetch.len()),
     }))
 }

@@ -61,9 +61,13 @@ fn ensure_fetch_refspec(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn fetch(dir: &Path) -> Result<()> {
+pub fn fetch(dir: &Path, prune: bool) -> Result<()> {
     ensure_fetch_refspec(dir)?;
-    run(Some(dir), &["fetch", "--all", "--prune"])?;
+    let mut args = vec!["fetch", "--all"];
+    if prune {
+        args.push("--prune");
+    }
+    run(Some(dir), &args)?;
     Ok(())
 }
 
