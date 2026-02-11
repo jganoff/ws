@@ -2,10 +2,14 @@
 
 ## Build & Test
 
-- `cargo build --release` - Build optimized binary
-- `cargo test` - Run all tests
-- `cargo clippy -- -D warnings` - Run linter
-- `cargo fmt` - Format code
+Use `just` (see `Justfile`). Key recipes:
+
+- `just` - Default: runs `check` (fmt --check + clippy)
+- `just build` - Build release binary (runs check first)
+- `just test` - Run all tests
+- `just ci` - Full CI pipeline (check + build + test)
+- `just fix` - Auto-fix formatting and lint
+- `just install-hooks` - Install git pre-commit hook
 
 ## Architecture
 
