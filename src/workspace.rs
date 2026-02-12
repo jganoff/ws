@@ -308,10 +308,17 @@ pub fn remove_repos(
                             default_branch
                         }
                     };
-                    let merged = git::branch_is_merged(&mirror_dir, &meta.branch, &merge_target)
-                        .unwrap_or(false);
-                    if !merged {
-                        problems.push(format!("{} (unmerged branch)", identity));
+                    match git::branch_safety(&mirror_dir, &meta.branch, &merge_target) {
+                        git::BranchSafety::Merged | git::BranchSafety::SquashMerged => {}
+                        git::BranchSafety::PushedToRemote => {
+                            problems.push(format!(
+                                "{} (unmerged branch, but pushed to remote)",
+                                identity
+                            ));
+                        }
+                        git::BranchSafety::Unmerged => {
+                            problems.push(format!("{} (unmerged branch)", identity));
+                        }
                     }
                 }
             }
@@ -506,10 +513,17 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
                     default_branch
                 }
             };
-            let merged =
-                git::branch_is_merged(&ar.mirror_dir, &meta.branch, &merge_target).unwrap_or(false);
-            if !merged {
-                unmerged.push((ar.identity.clone(), ar.fetch_failed));
+            match git::branch_safety(&ar.mirror_dir, &meta.branch, &merge_target) {
+                git::BranchSafety::Merged | git::BranchSafety::SquashMerged => {}
+                git::BranchSafety::PushedToRemote => {
+                    unmerged.push((
+                        format!("{} (unmerged, but pushed to remote)", ar.identity),
+                        ar.fetch_failed,
+                    ));
+                }
+                git::BranchSafety::Unmerged => {
+                    unmerged.push((ar.identity.clone(), ar.fetch_failed));
+                }
             }
         }
 
@@ -1469,5 +1483,197 @@ mod tests {
 
         let meta = load_metadata(&ws_dir).unwrap();
         assert!(meta.repos.is_empty());
+    }
+
+    /// Helper: squash-merge a branch into target in the source repo.
+    fn squash_merge_branch(dir: &Path, branch: &str, target: &str) {
+        for args in &[
+            vec!["git", "checkout", target],
+            vec!["git", "merge", "--squash", branch],
+            vec!["git", "commit", "-m", &format!("squash-merge {}", branch)],
+        ] {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn test_remove_allows_squash_merged_branch() {
+        let (paths, _d, source_repo, identity) = setup_test_env();
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "rm-squash", &refs, None).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "rm-squash");
+        let repo_dir = ws_dir.join("test-repo");
+
+        // Commit and push to source so the branch exists remotely
+        commit_push_and_track(&repo_dir, "rm-squash", "feat.txt", "feature");
+
+        // Squash-merge the branch into main on the source
+        squash_merge_branch(source_repo.path(), "rm-squash", "main");
+
+        // Fetch the mirror to pick up the squash-merge on main
+        git::fetch(&mirror_dir, true).unwrap();
+
+        // Remove should succeed without --force since branch is squash-merged
+        remove(&paths, "rm-squash", false).unwrap();
+        assert!(!ws_dir.exists());
+    }
+
+    #[test]
+    fn test_remove_blocks_pushed_but_unmerged() {
+        let (paths, _d, _source_repo, identity) = setup_test_env();
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "rm-pushed", &refs, None).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "rm-pushed");
+        let repo_dir = ws_dir.join("test-repo");
+
+        // Commit and push so branch exists on remote but is not merged
+        commit_push_and_track(&repo_dir, "rm-pushed", "wip.txt", "wip");
+
+        // Fetch to make sure mirror sees remote branch
+        git::fetch(&mirror_dir, true).unwrap();
+
+        // Remove should be blocked with "pushed to remote" message
+        let result = remove(&paths, "rm-pushed", false);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("pushed to remote"),
+            "expected 'pushed to remote' in error: {}",
+            err
+        );
+
+        // Workspace should still exist
+        assert!(ws_dir.exists());
+    }
+
+    /// Helper: commit a file, push to origin, fetch, and set up tracking in a worktree.
+    /// This ensures `ahead_count` returns 0 so the branch safety check runs in `remove_repos`.
+    fn commit_push_and_track(repo_dir: &Path, branch: &str, file: &str, content: &str) {
+        for args in &[
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+        ] {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(repo_dir)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        }
+        fs::write(repo_dir.join(file), content).unwrap();
+        let output = Command::new("git")
+            .args(["add", file])
+            .current_dir(repo_dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let output = Command::new("git")
+            .args(["commit", "-m", &format!("add {}", file)])
+            .current_dir(repo_dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        // Push to origin (source repo, via the bare mirror's remote)
+        let output = Command::new("git")
+            .args(["push", "origin", branch])
+            .current_dir(repo_dir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "push: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Fetch so origin/<branch> appears in the mirror
+        let output = Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(repo_dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        // Set tracking so ahead_count returns 0
+        let upstream = format!("origin/{}", branch);
+        let output = Command::new("git")
+            .args(["branch", "--set-upstream-to", &upstream])
+            .current_dir(repo_dir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "set-upstream: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn test_remove_repos_allows_squash_merged() {
+        let (paths, _d, source_repo, identity) = setup_test_env();
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "rmr-squash", &refs, None).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "rmr-squash");
+        let repo_dir = ws_dir.join("test-repo");
+
+        // Commit, push, and set up tracking so pending-changes check passes
+        commit_push_and_track(&repo_dir, "rmr-squash", "feat.txt", "feature");
+
+        // Squash-merge on source, then fetch mirror to pick up updated main
+        squash_merge_branch(source_repo.path(), "rmr-squash", "main");
+        git::fetch(&mirror_dir, true).unwrap();
+
+        // remove_repos should succeed without --force
+        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false).unwrap();
+
+        let meta = load_metadata(&ws_dir).unwrap();
+        assert!(meta.repos.is_empty());
+    }
+
+    #[test]
+    fn test_remove_repos_blocks_pushed_but_unmerged() {
+        let (paths, _d, _r, identity) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "rmr-pushed", &refs, None).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "rmr-pushed");
+        let repo_dir = ws_dir.join("test-repo");
+
+        // Commit, push, and set up tracking so pending-changes check passes
+        commit_push_and_track(&repo_dir, "rmr-pushed", "wip.txt", "wip");
+
+        // remove_repos should block with "pushed to remote" message
+        let result = remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("pushed to remote"),
+            "expected 'pushed to remote' in error: {}",
+            err
+        );
     }
 }

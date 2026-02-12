@@ -3,6 +3,14 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchSafety {
+    Merged,
+    SquashMerged,
+    PushedToRemote,
+    Unmerged,
+}
+
 fn path_str(p: &Path) -> Result<&str> {
     p.to_str().context("path contains non-UTF8 characters")
 }
@@ -12,6 +20,37 @@ pub fn run(dir: Option<&Path>, args: &[&str]) -> Result<String> {
     cmd.args(args);
     if let Some(d) = dir {
         cmd.current_dir(d);
+    }
+
+    let output = cmd.output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let args_str = args.join(" ");
+        if let Some(d) = dir {
+            bail!(
+                "git {} (in {}): {}\n{}",
+                args_str,
+                d.display(),
+                output.status,
+                stderr
+            );
+        } else {
+            bail!("git {}: {}\n{}", args_str, output.status, stderr);
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn run_with_env(dir: Option<&Path>, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
+    let mut cmd = Command::new("git");
+    cmd.args(args);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
     }
 
     let output = cmd.output()?;
@@ -153,6 +192,45 @@ pub fn branch_is_merged(dir: &Path, branch: &str, target: &str) -> Result<bool> 
     }
 }
 
+/// Detects if a branch was squash-merged into target using the commit-tree + cherry algorithm.
+pub fn branch_is_squash_merged(dir: &Path, branch: &str, target: &str) -> Result<bool> {
+    let mb = merge_base(dir, branch, target)?;
+    let tree = run(Some(dir), &["rev-parse", &format!("{}^{{tree}}", branch)])?;
+    let env = [
+        ("GIT_AUTHOR_NAME", "ws"),
+        ("GIT_AUTHOR_EMAIL", "ws@localhost"),
+        ("GIT_COMMITTER_NAME", "ws"),
+        ("GIT_COMMITTER_EMAIL", "ws@localhost"),
+    ];
+    let temp_commit = run_with_env(
+        Some(dir),
+        &["commit-tree", &tree, "-p", &mb, "-m", "_"],
+        &env,
+    )?;
+    let cherry_out = run(Some(dir), &["cherry", target, &temp_commit])?;
+    Ok(cherry_out.starts_with('-'))
+}
+
+pub fn remote_branch_exists(dir: &Path, branch: &str) -> bool {
+    let remote_ref = format!("refs/remotes/origin/{}", branch);
+    ref_exists(dir, &remote_ref)
+}
+
+/// Composite safety check for a workspace branch.
+/// Checks in order: merged → squash-merged → pushed to remote → unmerged.
+pub fn branch_safety(dir: &Path, branch: &str, target: &str) -> BranchSafety {
+    if branch_is_merged(dir, branch, target).unwrap_or(false) {
+        return BranchSafety::Merged;
+    }
+    if branch_is_squash_merged(dir, branch, target).unwrap_or(false) {
+        return BranchSafety::SquashMerged;
+    }
+    if remote_branch_exists(dir, branch) {
+        return BranchSafety::PushedToRemote;
+    }
+    BranchSafety::Unmerged
+}
+
 pub fn branch_exists(dir: &Path, branch: &str) -> bool {
     let ref_path = format!("refs/heads/{}", branch);
     run(Some(dir), &["rev-parse", "--verify", &ref_path]).is_ok()
@@ -217,5 +295,249 @@ pub fn changed_file_count(dir: &Path) -> Result<u32> {
         Ok(0)
     } else {
         Ok(out.lines().count() as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::process::Command as StdCommand;
+
+    /// Creates a bare repo with a single commit on main, plus a source worktree.
+    /// Returns (bare_dir, source_dir, TempDir handles to keep alive).
+    fn setup_bare_repo() -> (PathBuf, PathBuf, tempfile::TempDir, tempfile::TempDir) {
+        let source_tmp = tempfile::tempdir().unwrap();
+        let source = source_tmp.path().to_path_buf();
+        for args in &[
+            vec!["git", "init", "--initial-branch=main"],
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "initial"],
+        ] {
+            let out = StdCommand::new(args[0])
+                .args(&args[1..])
+                .current_dir(&source)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        let bare_tmp = tempfile::tempdir().unwrap();
+        let bare = bare_tmp.path().join("repo.git");
+        clone_bare(source.to_str().unwrap(), &bare).unwrap();
+        configure_fetch_refspec(&bare).unwrap();
+        fetch(&bare, true).unwrap();
+
+        // Set symbolic HEAD so default_branch works
+        let out = StdCommand::new("git")
+            .args([
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ])
+            .current_dir(&bare)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+
+        (bare, source, bare_tmp, source_tmp)
+    }
+
+    /// Creates a commit on a branch in the source repo with a unique file change.
+    fn commit_on_branch(dir: &Path, branch: &str, file: &str) {
+        for args in &[
+            vec!["git", "checkout", "-B", branch],
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+        ] {
+            let out = StdCommand::new(args[0])
+                .args(&args[1..])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        std::fs::write(dir.join(file), file).unwrap();
+        let out = StdCommand::new("git")
+            .args(["add", file])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let out = StdCommand::new("git")
+            .args(["commit", "-m", &format!("add {}", file)])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "commit: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Simulates a squash-merge of `branch` into `target` on the source repo.
+    fn squash_merge(dir: &Path, branch: &str, target: &str) {
+        for args in &[
+            vec!["git", "checkout", target],
+            vec!["git", "merge", "--squash", branch],
+            vec!["git", "commit", "-m", &format!("squash-merge {}", branch)],
+        ] {
+            let out = StdCommand::new(args[0])
+                .args(&args[1..])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn test_branch_is_squash_merged() {
+        let (bare, source, _bt, _st) = setup_bare_repo();
+
+        // Create a feature branch with a commit, then squash-merge it
+        commit_on_branch(&source, "feature", "feat.txt");
+        squash_merge(&source, "feature", "main");
+
+        // Fetch into bare so it has the updated refs
+        fetch(&bare, true).unwrap();
+
+        let result = branch_is_squash_merged(&bare, "origin/feature", "origin/main").unwrap();
+        assert!(result, "squash-merged branch should be detected");
+    }
+
+    #[test]
+    fn test_branch_is_squash_merged_false() {
+        let (bare, source, _bt, _st) = setup_bare_repo();
+
+        // Create a feature branch with a commit but don't merge it
+        commit_on_branch(&source, "unmerged", "unmerged.txt");
+
+        fetch(&bare, true).unwrap();
+
+        let result = branch_is_squash_merged(&bare, "origin/unmerged", "origin/main").unwrap();
+        assert!(
+            !result,
+            "unmerged branch should not be detected as squash-merged"
+        );
+    }
+
+    #[test]
+    fn test_remote_branch_exists() {
+        let (bare, source, _bt, _st) = setup_bare_repo();
+        commit_on_branch(&source, "exists-branch", "e.txt");
+        fetch(&bare, true).unwrap();
+
+        assert!(remote_branch_exists(&bare, "exists-branch"));
+    }
+
+    #[test]
+    fn test_remote_branch_not_exists() {
+        let (bare, _source, _bt, _st) = setup_bare_repo();
+        assert!(!remote_branch_exists(&bare, "no-such-branch"));
+    }
+
+    #[test]
+    fn test_branch_safety_variants() {
+        let (bare, source, _bt, _st) = setup_bare_repo();
+
+        // Create branches on source for each scenario
+        // 1. Regular merged branch
+        commit_on_branch(&source, "merged-br", "m.txt");
+        let out = StdCommand::new("git")
+            .args(["checkout", "main"])
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let out = StdCommand::new("git")
+            .args(["merge", "merged-br"])
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+
+        // 2. Squash-merged branch
+        commit_on_branch(&source, "squash-br", "s.txt");
+        squash_merge(&source, "squash-br", "main");
+
+        // 3. Pushed but unmerged branch (exists on remote but not merged)
+        commit_on_branch(&source, "pushed-br", "p.txt");
+        let out = StdCommand::new("git")
+            .args(["checkout", "main"])
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+
+        // Fetch everything into bare — creates refs/remotes/origin/* for all branches
+        fetch(&bare, true).unwrap();
+
+        // Create local branches (refs/heads/*) mirroring the remote tracking refs.
+        // This simulates what workspace worktrees do: the workspace branch is a
+        // local branch that may or may not have a corresponding origin/<branch>.
+        for name in &["merged-br", "squash-br", "pushed-br"] {
+            let sha = run(Some(&bare), &["rev-parse", &format!("origin/{}", name)]).unwrap();
+            run(Some(&bare), &["branch", name, &sha]).unwrap();
+        }
+
+        // 4. Unmerged local-only branch (no remote ref)
+        let main_sha = run(Some(&bare), &["rev-parse", "origin/main"]).unwrap();
+        run(Some(&bare), &["branch", "local-only", &main_sha]).unwrap();
+        // Add a commit to make it diverge
+        let tree = run(Some(&bare), &["rev-parse", "local-only^{tree}"]).unwrap();
+        let env = [
+            ("GIT_AUTHOR_NAME", "ws"),
+            ("GIT_AUTHOR_EMAIL", "ws@localhost"),
+            ("GIT_COMMITTER_NAME", "ws"),
+            ("GIT_COMMITTER_EMAIL", "ws@localhost"),
+        ];
+        let new_commit = run_with_env(
+            Some(&bare),
+            &["commit-tree", &tree, "-p", "local-only", "-m", "diverge"],
+            &env,
+        )
+        .unwrap();
+        run(
+            Some(&bare),
+            &["update-ref", "refs/heads/local-only", &new_commit],
+        )
+        .unwrap();
+
+        // All cases use local branch names (refs/heads/*), matching real workspace usage
+        let cases = vec![
+            ("merged-br", "origin/main", BranchSafety::Merged),
+            ("squash-br", "origin/main", BranchSafety::SquashMerged),
+            ("pushed-br", "origin/main", BranchSafety::PushedToRemote),
+            ("local-only", "origin/main", BranchSafety::Unmerged),
+        ];
+
+        for (branch, target, expected) in cases {
+            let result = branch_safety(&bare, branch, target);
+            assert_eq!(
+                result, expected,
+                "branch_safety({}, {}) = {:?}, want {:?}",
+                branch, target, result, expected
+            );
+        }
     }
 }
