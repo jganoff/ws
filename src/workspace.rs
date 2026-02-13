@@ -93,7 +93,27 @@ pub fn validate_name(name: &str) -> Result<()> {
 pub fn load_metadata(ws_dir: &Path) -> Result<Metadata> {
     let data = fs::read_to_string(ws_dir.join(METADATA_FILE))?;
     let m: Metadata = serde_yaml_ng::from_str(&data)?;
+    for (identity, dir_name) in &m.dirs {
+        validate_dir_name(dir_name)
+            .map_err(|e| anyhow::anyhow!("invalid dir override for {}: {}", identity, e))?;
+    }
     Ok(m)
+}
+
+fn validate_dir_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("directory name cannot be empty");
+    }
+    if name.contains('\0') || name.contains('/') || name.contains('\\') {
+        bail!(
+            "directory name {:?} contains path separators or null bytes",
+            name
+        );
+    }
+    if name == "." || name == ".." || name.contains("..") {
+        bail!("directory name {:?} contains path traversal", name);
+    }
+    Ok(())
 }
 
 pub fn save_metadata(ws_dir: &Path, m: &Metadata) -> Result<()> {
@@ -1093,6 +1113,58 @@ mod tests {
             } else {
                 assert!(result.is_ok(), "{}: unexpected error: {:?}", name, result);
             }
+        }
+    }
+
+    #[test]
+    fn test_validate_dir_name() {
+        let cases = vec![
+            ("valid simple", "repo-a", false),
+            ("valid with owner prefix", "acme-utils", false),
+            ("empty", "", true),
+            ("forward slash", "a/b", true),
+            ("backslash", "a\\b", true),
+            ("null byte", "bad\0name", true),
+            ("dotdot", "..", true),
+            ("dot", ".", true),
+            ("contains dotdot", "foo..bar", true),
+            ("path traversal prefix", "../etc", true),
+            ("absolute path", "/etc/passwd", true),
+        ];
+        for (name, input, want_err) in cases {
+            let result = validate_dir_name(input);
+            if want_err {
+                assert!(result.is_err(), "{}: expected error", name);
+            } else {
+                assert!(result.is_ok(), "{}: unexpected error: {:?}", name, result);
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_metadata_rejects_traversal_in_dirs() {
+        let cases = vec![
+            ("path separator", "../../.ssh", "path separators"),
+            ("dotdot", "..", "path traversal"),
+        ];
+        for (name, dir_val, expected_msg) in cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let yaml = format!(
+                "name: evil-ws\nbranch: evil-ws\nrepos:\n  github.com/acme/api:\ncreated: '2024-01-01T00:00:00Z'\ndirs:\n  github.com/acme/api: '{}'\n",
+                dir_val
+            );
+            fs::write(tmp.path().join(METADATA_FILE), &yaml).unwrap();
+
+            let result = load_metadata(tmp.path());
+            assert!(result.is_err(), "{}: expected error", name);
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains(expected_msg),
+                "{}: expected {:?} in error: {}",
+                name,
+                expected_msg,
+                err
+            );
         }
     }
 
