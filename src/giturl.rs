@@ -62,7 +62,6 @@ impl Parsed {
             .join(&self.owner)
             .join(format!("{}.git", self.repo))
     }
-
 }
 
 pub fn parse(raw_url: &str) -> Result<Parsed> {
