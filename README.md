@@ -1,9 +1,9 @@
-# ws
+# wsp
 
 Multi-repo workspace manager. Create isolated, branch-per-feature workspaces
 across multiple repositories in seconds.
 
-## Why ws?
+## Why wsp?
 
 Working across multiple repos on one feature usually means manually cloning,
 branching, and keeping track of which repos are on which branch. `wsp` handles
