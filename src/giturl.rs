@@ -9,6 +9,29 @@ pub struct Parsed {
     pub repo: String,
 }
 
+fn validate_component(s: &str, label: &str) -> Result<()> {
+    if s.is_empty() {
+        bail!("{} cannot be empty", label);
+    }
+    if s.contains("..") {
+        bail!("{} contains unsafe path component \"..\": {:?}", label, s);
+    }
+    if s.starts_with('/') || s.ends_with('/') {
+        bail!("{} contains leading/trailing slash: {:?}", label, s);
+    }
+    if s.contains('\0') {
+        bail!("{} contains null byte: {:?}", label, s);
+    }
+    Ok(())
+}
+
+fn validate_parsed(p: &Parsed) -> Result<()> {
+    validate_component(&p.host, "host")?;
+    validate_component(&p.owner, "owner")?;
+    validate_component(&p.repo, "repo")?;
+    Ok(())
+}
+
 impl Parsed {
     pub fn identity(&self) -> String {
         format!("{}/{}/{}", self.host, self.owner, self.repo)
@@ -22,14 +45,16 @@ impl Parsed {
         }
         let rest = parts[1];
         // Split owner from repo: last segment is repo, everything before is owner
-        match rest.rfind('/') {
-            Some(i) => Ok(Parsed {
+        let parsed = match rest.rfind('/') {
+            Some(i) => Parsed {
                 host: parts[0].to_string(),
                 owner: rest[..i].to_string(),
                 repo: rest[i + 1..].to_string(),
-            }),
+            },
             None => bail!("invalid identity format (missing owner): {}", identity),
-        }
+        };
+        validate_parsed(&parsed)?;
+        Ok(parsed)
     }
 
     pub fn mirror_path(&self) -> PathBuf {
@@ -80,11 +105,13 @@ fn parse_ssh(raw: &str) -> Result<Parsed> {
         bail!("invalid SSH URL path: {}", raw);
     }
 
-    Ok(Parsed {
+    let parsed = Parsed {
         host: host.to_string(),
         owner: segments[..segments.len() - 1].join("/"),
         repo: segments[segments.len() - 1].to_string(),
-    })
+    };
+    validate_parsed(&parsed)?;
+    Ok(parsed)
 }
 
 fn parse_https(raw: &str) -> Result<Parsed> {
@@ -99,11 +126,13 @@ fn parse_https(raw: &str) -> Result<Parsed> {
         bail!("invalid URL path: {}", raw);
     }
 
-    Ok(Parsed {
+    let parsed = Parsed {
         host: u.host_str().unwrap_or("").to_string(),
         owner: segments[..segments.len() - 1].join("/"),
         repo: segments[segments.len() - 1].to_string(),
-    })
+    };
+    validate_parsed(&parsed)?;
+    Ok(parsed)
 }
 
 /// Computes the shortest unique suffix for each identity.
@@ -229,6 +258,11 @@ mod tests {
                 Some(("gitlab.com", "org/sub", "project")),
             ),
             ("invalid no path", "git@github.com:repo.git", None),
+            (
+                "path traversal SSH",
+                "git@evil.com:../../etc/repo.git",
+                None,
+            ),
         ];
         for (name, url, want) in cases {
             let result = parse(url);
@@ -271,6 +305,8 @@ mod tests {
             ("no slash", "noslash", None),
             ("host only", "github.com/repo", None),
             ("empty", "", None),
+            ("path traversal in owner", "github.com/../../etc/repo", None),
+            ("path traversal in repo", "github.com/user/..", None),
         ];
         for (name, input, want) in cases {
             let result = Parsed::from_identity(input);
