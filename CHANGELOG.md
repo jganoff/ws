@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-02-13
+
+### Features
+
+- *(cli)* Add `wsp repo ls` to list workspace repos
+
+### Bug Fixes
+
+- *(ci)* Use rustsec/audit-check action, add Rust dependency caching
+
+### Documentation
+
+- Add clap alias dispatch convention, update command list
+
 ## [0.5.0] - 2026-02-13
 
 ### Bug Fixes
