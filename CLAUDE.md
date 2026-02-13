@@ -47,3 +47,12 @@ When writing docs or examples, use the actual command names above — not the lo
 - Error handling with `anyhow`
 - When capturing git output that includes tty-dependent formatting (colors, pagers), pass `--color=always` gated on `std::io::stdout().is_terminal() && !is_json` — see `src/cli/diff.rs` for the pattern
 - `build.rs` embeds `git describe` into `WS_VERSION_STRING` for dev/release differentiation
+
+## Releasing
+
+- `just release minor` — dry-run a minor release (also: `patch`, `major`)
+- `just release-execute minor` — execute the release
+
+`cargo-release` bumps `Cargo.toml`, runs `git cliff` to regenerate `CHANGELOG.md`, commits, tags `v<version>`, and pushes. The tag push triggers `.github/workflows/release.yml` (cargo-dist) which builds cross-platform binaries, creates a GitHub Release, and publishes to the Homebrew tap (`jganoff/homebrew-tap`).
+
+Config: `dist-workspace.toml`. To regenerate CI workflows after changing dist config, run `dist init` interactively — `dist generate` does not work reliably without interactive mode for installer changes.
