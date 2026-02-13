@@ -64,4 +64,6 @@ When writing docs or examples, use the actual command names above — not the lo
 
 **Important:** Dry runs (`just release minor`) execute the pre-release hook which modifies `CHANGELOG.md`. Run `git checkout CHANGELOG.md` before the real `--execute` run if the tree is dirty.
 
-Config: `dist-workspace.toml`. After changing dist config (e.g. adding installers), you **must** run `dist init` interactively to regenerate `.github/workflows/release.yml`. The workflow won't include new publish jobs (like `publish-homebrew`) until regenerated.
+Config: `dist-workspace.toml`. After changing dist config (e.g. adding installers), you **must** run `dist generate` (or `dist init` interactively) to regenerate `.github/workflows/release.yml`. The workflow won't include new publish jobs (like `publish-homebrew`) until regenerated.
+
+**cargo-dist config gotcha:** In `dist-workspace.toml`, all fields are flat under `[dist]` — there is no `[dist.homebrew]` subsection. The `tap`, `formula`, and `publish-jobs` keys all go directly under `[dist]`. The Homebrew publish job also requires a `HOMEBREW_TAP_TOKEN` secret in the repo (a PAT with write access to the tap repo).
