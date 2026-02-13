@@ -33,6 +33,19 @@ fn bin_path() -> Result<String> {
     Ok(bin.display().to_string())
 }
 
+/// Escape a string for embedding inside POSIX single quotes.
+/// Single quotes have no escape mechanism, so we close the quote, add an
+/// escaped literal single quote, and re-open: `'` → `'\''`
+fn posix_escape(s: &str) -> String {
+    s.replace('\'', "'\\''")
+}
+
+/// Escape a string for embedding inside fish single quotes.
+/// Fish supports `\'` inside single-quoted strings.
+fn fish_escape(s: &str) -> String {
+    s.replace('\'', "\\'")
+}
+
 // ---------- zsh / bash (POSIX-like) ----------
 
 fn generate_posix(w: &mut dyn Write, paths: &Paths, shell: &str) -> Result<()> {
@@ -43,14 +56,16 @@ fn generate_posix(w: &mut dyn Write, paths: &Paths, shell: &str) -> Result<()> {
 
 fn write_posix(w: &mut dyn Write, bin_str: &str, ws_root: &str, shell: &str) -> Result<()> {
     let cases = build_posix_cases();
+    let bin_esc = posix_escape(bin_str);
+    let root_esc = posix_escape(ws_root);
 
     write!(
         w,
         "# wsp shell integration \u{2014} source with: eval \"$(wsp setup completion {shell})\"\n\
          \n\
          wsp() {{\n\
-         \x20 local ws_bin='{bin_str}'\n\
-         \x20 local ws_root='{ws_root}'\n\
+         \x20 local ws_bin='{bin_esc}'\n\
+         \x20 local ws_root='{root_esc}'\n\
          \n\
          \x20 case \"$1\" in\n",
     )?;
@@ -75,7 +90,7 @@ fn write_posix(w: &mut dyn Write, bin_str: &str, ws_root: &str, shell: &str) -> 
          \n"
     )?;
 
-    writeln!(w, "source <(COMPLETE={shell} '{bin_str}')")?;
+    writeln!(w, "source <(COMPLETE={shell} '{bin_esc}')")?;
 
     Ok(())
 }
@@ -146,14 +161,17 @@ fn generate_fish(w: &mut dyn Write, paths: &Paths) -> Result<()> {
 }
 
 fn write_fish(w: &mut dyn Write, bin_str: &str, ws_root: &str) -> Result<()> {
+    let bin_esc = fish_escape(bin_str);
+    let root_esc = fish_escape(ws_root);
+
     write!(
         w,
         "\
 # wsp shell integration \u{2014} source with: wsp setup completion fish | source\n\
 \n\
 function wsp\n\
-    set -l ws_bin '{bin_str}'\n\
-    set -l ws_root '{ws_root}'\n\
+    set -l ws_bin '{bin_esc}'\n\
+    set -l ws_root '{root_esc}'\n\
 \n\
     switch $argv[1]\n\
         case new\n\
@@ -187,7 +205,7 @@ function wsp\n\
     end\n\
 end\n\
 \n\
-COMPLETE=fish '{bin_str}' | source\n"
+COMPLETE=fish '{bin_esc}' | source\n"
     )?;
 
     Ok(())
@@ -317,5 +335,56 @@ mod tests {
         // Single quotes prevent $weird from being expanded
         assert!(out.contains("local ws_bin='/opt/$weird/ws'"));
         assert!(out.contains("COMPLETE=bash '/opt/$weird/ws'"));
+    }
+
+    #[test]
+    fn test_posix_path_with_single_quote() {
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/o'brien/dev", "bash"));
+        // Single quote in ws_root must be escaped as '\''
+        assert!(
+            out.contains(r"local ws_root='/home/o'\''brien/dev'"),
+            "ws_root single quote must be escaped: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_posix_bin_with_single_quote() {
+        let out = output(|w| write_posix(w, "/opt/it's here/wsp", "/home/user/dev", "bash"));
+        assert!(
+            out.contains(r"local ws_bin='/opt/it'\''s here/wsp'"),
+            "ws_bin single quote must be escaped: {}",
+            out
+        );
+        assert!(
+            out.contains(r"COMPLETE=bash '/opt/it'\''s here/wsp'"),
+            "COMPLETE single quote must be escaped: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_fish_path_with_single_quote() {
+        let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/o'brien/dev"));
+        assert!(
+            out.contains(r"set -l ws_root '/home/o\'brien/dev'"),
+            "fish ws_root single quote must be escaped: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_fish_bin_with_single_quote() {
+        let out = output(|w| write_fish(w, "/opt/it's here/wsp", "/home/user/dev"));
+        assert!(
+            out.contains(r"set -l ws_bin '/opt/it\'s here/wsp'"),
+            "fish ws_bin single quote must be escaped: {}",
+            out
+        );
+        assert!(
+            out.contains(r"COMPLETE=fish '/opt/it\'s here/wsp' | source"),
+            "fish COMPLETE single quote must be escaped: {}",
+            out
+        );
     }
 }

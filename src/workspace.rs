@@ -75,6 +75,9 @@ pub fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("workspace name cannot be empty");
     }
+    if name.contains('\0') {
+        bail!("workspace name cannot contain null bytes");
+    }
     if name.contains('/') || name.contains('\\') {
         bail!("workspace name {:?} cannot contain path separators", name);
     }
@@ -1081,6 +1084,7 @@ mod tests {
             ("dotdot", "..", true),
             ("dot prefix", ".hidden", true),
             ("dot prefix config", ".config", true),
+            ("null byte", "bad\0name", true),
         ];
         for (name, input, want_err) in cases {
             let result = validate_name(input);

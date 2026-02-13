@@ -39,6 +39,12 @@ All admin/setup commands live under `wsp setup`: `wsp setup repo add/list/remove
 
 When writing docs or examples, use the actual command names above — not the long forms (`remove`, `list`, `status`).
 
+## Security Notes
+
+- **Shell completion scripts** (`src/cli/completion.rs`): User-configurable values (paths, config) embedded in generated shell code must be escaped for the target shell. Single quotes in POSIX shells have no escape mechanism — use `'` → `'\''`. In fish, use `'` → `\'`. Always test with shell metacharacters (`'`, `$`, `` ` ``, newlines) in paths.
+- **Path traversal**: `giturl::validate_component()` guards identity parsing. Any new code that builds filesystem paths from user input must go through similar validation.
+- `#![deny(unsafe_code)]` is enforced at the crate root.
+
 ## Conventions
 
 - Git ops via `std::process::Command`, not libgit2
