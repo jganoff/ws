@@ -35,3 +35,5 @@ Use `just` (see `Justfile`). Key recipes:
 - Table-driven tests
 - YAML config with `serde_yml`
 - Error handling with `anyhow`
+- When capturing git output that includes tty-dependent formatting (colors, pagers), pass `--color=always` gated on `std::io::stdout().is_terminal() && !is_json` — see `src/cli/diff.rs` for the pattern
+- `build.rs` embeds `git describe` into `WS_VERSION_STRING` for dev/release differentiation
