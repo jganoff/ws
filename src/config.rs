@@ -39,7 +39,7 @@ impl Config {
         }
 
         let data = fs::read_to_string(path)?;
-        let cfg: Config = serde_yml::from_str(&data)?;
+        let cfg: Config = serde_yaml_ng::from_str(&data)?;
         Ok(cfg)
     }
 
@@ -51,7 +51,7 @@ impl Config {
         let dir = path.parent().context("config path has no parent")?;
         fs::create_dir_all(dir)?;
 
-        let data = serde_yml::to_string(self)?;
+        let data = serde_yaml_ng::to_string(self)?;
         let mut tmp =
             tempfile::NamedTempFile::new_in(dir).context("creating temp file for atomic save")?;
         tmp.write_all(data.as_bytes())

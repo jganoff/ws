@@ -89,12 +89,12 @@ pub fn validate_name(name: &str) -> Result<()> {
 
 pub fn load_metadata(ws_dir: &Path) -> Result<Metadata> {
     let data = fs::read_to_string(ws_dir.join(METADATA_FILE))?;
-    let m: Metadata = serde_yml::from_str(&data)?;
+    let m: Metadata = serde_yaml_ng::from_str(&data)?;
     Ok(m)
 }
 
 pub fn save_metadata(ws_dir: &Path, m: &Metadata) -> Result<()> {
-    let data = serde_yml::to_string(m)?;
+    let data = serde_yaml_ng::to_string(m)?;
     let mut tmp =
         tempfile::NamedTempFile::new_in(ws_dir).context("creating temp file for atomic save")?;
     tmp.write_all(data.as_bytes())

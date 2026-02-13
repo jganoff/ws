@@ -17,8 +17,12 @@ build: check
 test:
     cargo test -- --test-threads=1
 
+# audit dependencies for known vulnerabilities
+audit:
+    cargo audit
+
 # full CI pipeline (mirrors .github/workflows/ci.yml)
-ci: check build test
+ci: check audit build test
 
 # auto-fix formatting and lint where possible
 fix:

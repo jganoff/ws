@@ -43,7 +43,7 @@ When writing docs or examples, use the actual command names above — not the lo
 
 - Git ops via `std::process::Command`, not libgit2
 - Table-driven tests
-- YAML config with `serde_yml`
+- YAML config with `serde_yaml_ng`
 - Error handling with `anyhow`
 - When capturing git output that includes tty-dependent formatting (colors, pagers), pass `--color=always` gated on `std::io::stdout().is_terminal() && !is_json` — see `src/cli/diff.rs` for the pattern
 - `build.rs` embeds `git describe` into `WS_VERSION_STRING` for dev/release differentiation

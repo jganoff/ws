@@ -15,7 +15,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - run: cargo install cargo-audit
+      - run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rustsec/rustsec/releases/latest/download/cargo-audit-installer.sh | sh
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo audit
