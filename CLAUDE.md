@@ -33,7 +33,7 @@ Use `just` (see `Justfile`). Key recipes:
 
 Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `wsp diff`, `wsp exec`, `wsp cd`.
 
-Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo fetch`.
+Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo ls`, `wsp repo fetch`.
 
 All admin/setup commands live under `wsp setup`: `wsp setup repo add/list/remove`, `wsp setup group new/list/show/update/delete`, `wsp setup config list/get/set/unset`, `wsp setup completion zsh|bash|fish`.
 
@@ -66,6 +66,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - Error handling with `anyhow`
 - When capturing git output that includes tty-dependent formatting (colors, pagers), pass `--color=always` gated on `std::io::stdout().is_terminal() && !is_json` — see `src/cli/diff.rs` for the pattern
 - `build.rs` embeds `git describe` into `WSP_VERSION_STRING` for dev/release differentiation
+- Clap `visible_alias`/`alias` dispatches under the primary command name — only match the primary name in dispatch arms (e.g., `Some(("ls", m))` not `Some(("ls", m)) | Some(("list", m))`)
 
 ## Releasing
 
