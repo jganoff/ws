@@ -58,4 +58,4 @@ When writing docs or examples, use the actual command names above — not the lo
 
 **Important:** Dry runs (`just release minor`) execute the pre-release hook which modifies `CHANGELOG.md`. Run `git checkout CHANGELOG.md` before the real `--execute` run if the tree is dirty.
 
-Config: `dist-workspace.toml`. To regenerate CI workflows after changing dist config, run `dist init` interactively — `dist generate` does not work reliably without interactive mode for installer changes.
+Config: `dist-workspace.toml`. After changing dist config (e.g. adding installers), you **must** run `dist init` interactively to regenerate `.github/workflows/release.yml`. The workflow won't include new publish jobs (like `publish-homebrew`) until regenerated.
