@@ -29,6 +29,16 @@ Use `just` (see `Justfile`). Key recipes:
 - Mirrors: `~/.local/share/ws/mirrors/<host>/<user>/<repo>.git/`
 - Workspaces: `~/dev/workspaces/<name>/` with `.ws.yaml` metadata
 
+## CLI Command Structure
+
+Top-level commands use short aliases: `ws new`, `ws rm`, `ws ls`, `ws st`, `ws diff`, `ws exec`, `ws cd`.
+
+Workspace-scoped repo ops: `ws repo add`, `ws repo rm`, `ws repo fetch`.
+
+All admin/setup commands live under `ws setup`: `ws setup repo add/list/remove`, `ws setup group new/list/show/update/delete`, `ws setup config list/get/set/unset`, `ws setup completion zsh|bash|fish`.
+
+When writing docs or examples, use the actual command names above — not the long forms (`remove`, `list`, `status`).
+
 ## Conventions
 
 - Git ops via `std::process::Command`, not libgit2
