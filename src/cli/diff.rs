@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -36,6 +37,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .map(|vals| vals.map(|s| s.as_str()).collect())
         .unwrap_or_default();
 
+    let is_json = matches.get_flag("json");
+    let use_color = !is_json && std::io::stdout().is_terminal();
+
     let mut repos = Vec::new();
     for identity in meta.repos.keys() {
         let dir_name = match meta.dir_name(identity) {
@@ -53,6 +57,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let repo_dir = ws_dir.join(&dir_name);
 
         let mut args = vec!["diff"];
+        if use_color {
+            args.push("--color=always");
+        }
         let diff_base = if extra_args.is_empty() {
             Some(resolve_diff_base(&repo_dir))
         } else {
