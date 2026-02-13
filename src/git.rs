@@ -125,50 +125,81 @@ pub fn default_branch(dir: &Path) -> Result<String> {
     Ok(parts[parts.len() - 1].to_string())
 }
 
-pub fn worktree_add(
-    repo_dir: &Path,
-    worktree_path: &Path,
-    branch: &str,
-    start_point: &str,
-) -> Result<()> {
-    let wt = path_str(worktree_path)?;
+/// Configure ws-mirror remote to fetch refs/remotes/origin/* from the bare mirror
+/// into refs/remotes/ws-mirror/* in the clone. This is needed because bare mirrors
+/// store fetched refs under refs/remotes/origin/*, not refs/heads/*.
+pub fn configure_ws_mirror_refspec(dir: &Path) -> Result<()> {
     run(
-        Some(repo_dir),
-        &["worktree", "add", "-b", branch, "--", wt, start_point],
+        Some(dir),
+        &[
+            "config",
+            "remote.ws-mirror.fetch",
+            "+refs/remotes/origin/*:refs/remotes/ws-mirror/*",
+        ],
     )?;
     Ok(())
 }
 
-pub fn worktree_add_existing(repo_dir: &Path, worktree_path: &Path, branch: &str) -> Result<()> {
-    let wt = path_str(worktree_path)?;
-    run(Some(repo_dir), &["worktree", "add", "--", wt, branch])?;
-    Ok(())
-}
-
-pub fn worktree_add_detached(repo_dir: &Path, worktree_path: &Path, git_ref: &str) -> Result<()> {
-    let wt = path_str(worktree_path)?;
+pub fn clone_local(mirror_dir: &Path, dest: &Path) -> Result<()> {
+    let src = path_str(mirror_dir)?;
+    let dst = path_str(dest)?;
     run(
-        Some(repo_dir),
-        &["worktree", "add", "--detach", "--", wt, git_ref],
+        None,
+        &["clone", "--local", "--origin", "ws-mirror", src, dst],
     )?;
     Ok(())
 }
 
-pub fn worktree_move(repo_dir: &Path, old_path: &Path, new_path: &Path) -> Result<()> {
-    let old = path_str(old_path)?;
-    let new = path_str(new_path)?;
-    run(Some(repo_dir), &["worktree", "move", old, new])?;
+pub fn remote_set_origin(dir: &Path, url: &str) -> Result<()> {
+    // Remove origin if it exists (ignore error if it doesn't)
+    let _ = run(Some(dir), &["remote", "remove", "origin"]);
+    run(Some(dir), &["remote", "add", "origin", url])?;
     Ok(())
 }
 
-pub fn worktree_remove(repo_dir: &Path, worktree_path: &Path) -> Result<()> {
-    let wt = path_str(worktree_path)?;
-    run(Some(repo_dir), &["worktree", "remove", "--force", wt])?;
+pub fn fetch_remote(dir: &Path, remote: &str) -> Result<()> {
+    run(Some(dir), &["fetch", remote])?;
     Ok(())
 }
 
-pub fn branch_delete(dir: &Path, branch: &str) -> Result<()> {
-    run(Some(dir), &["branch", "-D", "--", branch])?;
+pub fn checkout_new_branch(dir: &Path, branch: &str, start_point: &str) -> Result<()> {
+    run(Some(dir), &["checkout", "-b", branch, start_point])?;
+    Ok(())
+}
+
+pub fn checkout(dir: &Path, ref_or_branch: &str) -> Result<()> {
+    run(Some(dir), &["checkout", ref_or_branch])?;
+    Ok(())
+}
+
+pub fn checkout_detached(dir: &Path, git_ref: &str) -> Result<()> {
+    run(Some(dir), &["checkout", "--detach", git_ref])?;
+    Ok(())
+}
+
+pub fn set_upstream(dir: &Path, remote_branch: &str) -> Result<()> {
+    run(Some(dir), &["branch", "--set-upstream-to", remote_branch])?;
+    Ok(())
+}
+
+pub fn default_branch_for_remote(dir: &Path, remote: &str) -> Result<String> {
+    let ref_path = format!("refs/remotes/{}/HEAD", remote);
+    let r = run(Some(dir), &["symbolic-ref", &ref_path]);
+    let ref_str = match r {
+        Ok(s) => s,
+        Err(_) => run(Some(dir), &["symbolic-ref", "HEAD"])
+            .map_err(|e| anyhow::anyhow!("cannot detect default branch for {}: {}", remote, e))?,
+    };
+
+    let parts: Vec<&str> = ref_str.split('/').collect();
+    if parts.len() < 3 {
+        bail!("unexpected ref format: {}", ref_str);
+    }
+    Ok(parts[parts.len() - 1].to_string())
+}
+
+pub fn remote_set_head(dir: &Path, remote: &str, branch: &str) -> Result<()> {
+    run(Some(dir), &["remote", "set-head", remote, branch])?;
     Ok(())
 }
 
@@ -304,7 +335,7 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command as StdCommand;
 
-    /// Creates a bare repo with a single commit on main, plus a source worktree.
+    /// Creates a bare repo with a single commit on main, plus a source repo.
     /// Returns (bare_dir, source_dir, TempDir handles to keep alive).
     fn setup_bare_repo() -> (PathBuf, PathBuf, tempfile::TempDir, tempfile::TempDir) {
         let source_tmp = tempfile::tempdir().unwrap();
@@ -493,7 +524,7 @@ mod tests {
         fetch(&bare, true).unwrap();
 
         // Create local branches (refs/heads/*) mirroring the remote tracking refs.
-        // This simulates what workspace worktrees do: the workspace branch is a
+        // This simulates what workspace clones do: the workspace branch is a
         // local branch that may or may not have a corresponding origin/<branch>.
         for name in &["merged-br", "squash-br", "pushed-br"] {
             let sha = run(Some(&bare), &["rev-parse", &format!("origin/{}", name)]).unwrap();

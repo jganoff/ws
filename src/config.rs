@@ -43,6 +43,10 @@ impl Config {
         Ok(cfg)
     }
 
+    pub fn upstream_url(&self, identity: &str) -> Option<&str> {
+        self.repos.get(identity).map(|e| e.url.as_str())
+    }
+
     pub fn save_to(&self, path: &Path) -> Result<()> {
         let dir = path.parent().context("config path has no parent")?;
         fs::create_dir_all(dir)?;

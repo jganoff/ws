@@ -58,7 +58,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     eprintln!("Removing {} repo(s) from workspace...", resolved.len());
-    workspace::remove_repos(&paths.mirrors_dir, &ws_dir, &resolved, force)?;
+    workspace::remove_repos(&ws_dir, &resolved, force)?;
 
     match workspace::load_metadata(&ws_dir) {
         Ok(updated_meta) => crate::lang::run_integrations(&ws_dir, &updated_meta, &cfg),

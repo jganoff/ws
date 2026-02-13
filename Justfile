@@ -37,7 +37,7 @@ release level:
 release-execute level:
     cargo release {{level}} --execute
 
-# install git pre-commit hook (works with worktrees)
+# install git pre-commit hook
 install-hooks:
     #!/usr/bin/env sh
     hooks_dir="$(git rev-parse --git-common-dir)/hooks"

@@ -19,7 +19,7 @@ Use `just` (see `Justfile`). Key recipes:
 - `src/git.rs` - Git command execution wrapper
 - `src/giturl.rs` - URL parsing and shortname resolution
 - `src/mirror.rs` - Bare clone management
-- `src/workspace.rs` - Workspace CRUD and worktree ops
+- `src/workspace.rs` - Workspace CRUD and clone ops
 - `src/group.rs` - Group management
 - `src/output.rs` - Table formatting and status display
 

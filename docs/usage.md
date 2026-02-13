@@ -117,7 +117,7 @@ Deleted group "backend"
 
 ### `ws new <workspace> [repos...] [-g group]`
 
-Create a workspace. Each listed repo gets a worktree checked out to a branch
+Create a workspace. Each listed repo gets a local clone checked out to a branch
 matching the workspace name. Repos with `@ref` are checked out at that ref as
 context repos (no workspace branch created).
 
@@ -176,16 +176,12 @@ Workspace: add-billing  Branch: add-billing
 
 Show `git diff` across all repos in a workspace.
 
-### `ws remove <workspace> [--delete-branches]`
+### `ws remove <workspace>`
 
-Remove a workspace and its worktrees.
-
-| Flag                | Description                                |
-|---------------------|--------------------------------------------|
-| `--delete-branches` | Also delete workspace branches from mirrors |
+Remove a workspace and its clones.
 
 ```
-$ ws remove add-billing --delete-branches
+$ ws remove add-billing
 Removing workspace "add-billing"...
 Workspace "add-billing" removed.
 ```

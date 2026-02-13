@@ -24,6 +24,12 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     if !ws_dir.join(workspace::METADATA_FILE).exists() {
         bail!("workspace '{}' not found", name);
     }
+
+    // Propagate mirror refs to clones
+    if let Ok(meta) = workspace::load_metadata(&ws_dir) {
+        workspace::propagate_mirror_to_clones(&ws_dir, &meta);
+    }
+
     if std::env::var("WS_SHELL").is_err() {
         eprintln!(
             "hint: shell integration not active, printing path only\n\

@@ -11,7 +11,7 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("rm")
         .visible_alias("remove")
-        .about("Remove a workspace and its worktrees")
+        .about("Remove a workspace")
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("force")

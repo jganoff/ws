@@ -31,25 +31,36 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let all = matches.get_flag("all");
     let prune = matches.get_flag("prune");
 
+    // Detect current workspace (if not --all)
+    let current_ws: Option<(std::path::PathBuf, workspace::Metadata)> = if !all {
+        let cwd = std::env::current_dir()?;
+        match workspace::detect(&cwd) {
+            Ok(ws_dir) => {
+                let meta = workspace::load_metadata(&ws_dir)?;
+                Some((ws_dir, meta))
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     let identities: Vec<String> = if all {
         let cfg = config::Config::load_from(&paths.config_path)
             .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
         cfg.repos.keys().cloned().collect()
     } else {
-        let cwd = std::env::current_dir()?;
-        let ws_dir = match workspace::detect(&cwd) {
-            Ok(d) => d,
-            Err(_) => bail!("not in a workspace, use --all to fetch all registered repos"),
-        };
-        let meta = workspace::load_metadata(&ws_dir)?;
-        meta.repos.keys().cloned().collect()
+        match &current_ws {
+            Some((_, meta)) => meta.repos.keys().cloned().collect(),
+            None => bail!("not in a workspace, use --all to fetch all registered repos"),
+        }
     };
 
     if identities.is_empty() {
         return Ok(Output::Fetch(FetchOutput { repos: vec![] }));
     }
 
-    // Resolve each identity to its mirror path
+    // Phase 1: Fetch mirrors (network, parallel)
     let repos: Vec<(String, std::path::PathBuf)> = identities
         .into_iter()
         .filter_map(|id| match giturl::Parsed::from_identity(&id) {
@@ -74,7 +85,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         eprintln!("Fetching {} repos...", repos.len());
     }
 
-    // Parallel fetch with per-repo progress
     let progress = Mutex::new(());
     let results: Vec<(String, Result<()>)> = std::thread::scope(|s| {
         let handles: Vec<_> = repos
@@ -101,6 +111,21 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             .map(|((id, _), h)| (id.clone(), h.join().unwrap()))
             .collect()
     });
+
+    // Phase 2: Propagate mirror refs to workspace clones
+    if all {
+        // Propagate to all workspaces
+        if let Ok(ws_names) = workspace::list_all(&paths.workspaces_dir) {
+            for ws_name in &ws_names {
+                let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
+                if let Ok(meta) = workspace::load_metadata(&ws_dir) {
+                    workspace::propagate_mirror_to_clones(&ws_dir, &meta);
+                }
+            }
+        }
+    } else if let Some((ws_dir, meta)) = &current_ws {
+        workspace::propagate_mirror_to_clones(ws_dir, meta);
+    }
 
     let output = FetchOutput {
         repos: results

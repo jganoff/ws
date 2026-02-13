@@ -3,9 +3,9 @@
 Multi-repo workspace manager. Create isolated, branch-per-feature workspaces
 across multiple repositories in seconds.
 
-`ws` uses bare git mirrors and worktrees under the hood. Registering a repo
-clones it once. Every workspace after that is instant -- no network, no
-conflicts, no juggling branches between features.
+`ws` uses bare git mirrors and local clones under the hood. Registering a repo
+creates a mirror once. Every workspace after that is a fast `git clone --local`
+-- hardlinks, no network, no conflicts, no juggling branches between features.
 
 ## Why
 
@@ -14,8 +14,8 @@ branching, and keeping track of which repos are on which branch. `ws` handles
 all of that:
 
 - **One command** to create a workspace with consistent branches across repos
-- **Instant** -- worktrees from bare mirrors, no re-cloning
-- **Isolated** -- every workspace has its own working tree and branch
+- **Instant** -- local clones from bare mirrors via hardlinks
+- **Isolated** -- every workspace repo is a fully independent git clone
 - **Context repos** -- pin dependencies to a ref without branching them
 
 ## Install
@@ -38,7 +38,7 @@ Registered github.com/acme/api-gateway
 $ ws repo add git@github.com:acme/user-service.git
 ```
 
-Create a workspace. Every repo gets a worktree on the same branch:
+Create a workspace. Every repo gets a local clone on the same branch:
 
 ```
 $ ws new add-billing api-gateway user-service
@@ -58,8 +58,8 @@ $ ws new add-billing api-gateway user-service@main proto@v1.0
 
 ### Work
 
-A workspace is just a directory of git worktrees. Use your normal git workflow
--- commit, push, open PRs, whatever you usually do:
+A workspace is just a directory of git repos. Use your normal git workflow --
+commit, push, open PRs, whatever you usually do:
 
 ```
 $ cd ~/dev/workspaces/add-billing/api-gateway
@@ -92,9 +92,8 @@ Removing workspace "add-billing"...
 Workspace "add-billing" removed.
 ```
 
-This removes the worktrees, deletes the merged branches from your local
-mirrors, and cleans up the workspace directory. Your mirrors stay intact for
-the next workspace.
+This removes the clones and cleans up the workspace directory. Your mirrors
+stay intact for the next workspace.
 
 `ws remove` is safe by default:
 
@@ -132,13 +131,15 @@ names, plus auto-cd into workspaces after `ws new`.
 ~/dev/workspaces/
   add-billing/
     .ws.yaml                 workspace metadata
-    api-gateway/             worktree (branch: add-billing)
-    user-service/            worktree (ref: main)
+    api-gateway/             local clone (branch: add-billing)
+    user-service/            local clone (ref: main)
 ```
 
-Each repo is cloned once as a bare mirror. Workspaces are directories of
-worktrees that share a branch name. Context repos (with `@ref`) check out at
-the pinned ref without creating the workspace branch.
+Each repo is registered once as a bare mirror. Workspaces are directories of
+local clones (via `git clone --local` hardlinks) that share a branch name.
+Each clone has two remotes: `origin` (real upstream for push/pull) and
+`ws-mirror` (local mirror for fast fetch). Context repos (with `@ref`) check
+out at the pinned ref without creating the workspace branch.
 
 ## Documentation
 

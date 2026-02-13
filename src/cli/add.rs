@@ -63,8 +63,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         bail!("no repos specified (use repo args or --group)");
     }
 
+    // Build upstream URL map from config
+    let mut upstream_urls: BTreeMap<String, String> = BTreeMap::new();
+    for identity in repo_refs.keys() {
+        if let Some(url) = cfg.upstream_url(identity) {
+            upstream_urls.insert(identity.clone(), url.to_string());
+        }
+    }
+
     eprintln!("Adding {} repos to workspace...", repo_refs.len());
-    workspace::add_repos(&paths.mirrors_dir, &ws_dir, &repo_refs)?;
+    workspace::add_repos(&paths.mirrors_dir, &ws_dir, &repo_refs, &upstream_urls)?;
 
     match workspace::load_metadata(&ws_dir) {
         Ok(meta) => crate::lang::run_integrations(&ws_dir, &meta, &cfg),
