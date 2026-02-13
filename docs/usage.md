@@ -1,37 +1,37 @@
 # Usage
 
-Full command reference and configuration guide for `ws`.
+Full command reference and configuration guide for `wsp`.
 
 ## Setup
 
-### `ws setup repo add <url>`
+### `wsp setup repo add <url>`
 
 Register a repository and create its bare mirror.
 
 ```
-$ ws setup repo add git@github.com:acme/api-gateway.git
+$ wsp setup repo add git@github.com:acme/api-gateway.git
 Cloning git@github.com:acme/api-gateway.git...
 Registered github.com/acme/api-gateway
 ```
 
-### `ws setup repo list`
+### `wsp setup repo list`
 
 List all registered repositories.
 
 ```
-$ ws setup repo list
+$ wsp setup repo list
   github.com/acme/api-gateway [api-gateway]  (git@github.com:acme/api-gateway.git)
   github.com/acme/user-service [user-service]  (git@github.com:acme/user-service.git)
 ```
 
 Shows identity, shortname (in brackets), and URL.
 
-### `ws setup repo remove <name>`
+### `wsp setup repo remove <name>`
 
 Remove a repository and delete its bare mirror. Accepts a shortname.
 
 ```
-$ ws setup repo remove api-gateway
+$ wsp setup repo remove api-gateway
 Removing mirror for github.com/acme/api-gateway...
 Removed github.com/acme/api-gateway
 ```
@@ -40,77 +40,77 @@ Removed github.com/acme/api-gateway
 
 Save frequently-used sets of repos as groups.
 
-### `ws setup group new <name> <repos...>`
+### `wsp setup group new <name> <repos...>`
 
 Create a named group.
 
 ```
-$ ws setup group new backend api-gateway user-service
+$ wsp setup group new backend api-gateway user-service
 Created group "backend" with 2 repos
 ```
 
-### `ws setup group update <name> --add <repos...> --remove <repos...>`
+### `wsp setup group update <name> --add <repos...> --remove <repos...>`
 
 Add or remove repos from an existing group. At least one of `--add` or
 `--remove` is required. Errors if adding a repo already in the group, or
 removing one that isn't.
 
 ```
-$ ws setup group update backend --add api-gateway user-service
+$ wsp setup group update backend --add api-gateway user-service
 Updated group "backend": added 2
 
-$ ws setup group update backend --remove old-service
+$ wsp setup group update backend --remove old-service
 Updated group "backend": removed 1
 
-$ ws setup group update backend --add new-svc --remove old-svc
+$ wsp setup group update backend --add new-svc --remove old-svc
 Updated group "backend": added 1, removed 1
 ```
 
-### `ws setup group list`
+### `wsp setup group list`
 
 List all groups.
 
 ```
-$ ws setup group list
+$ wsp setup group list
   backend (2 repos)
   frontend (1 repos)
 ```
 
-### `ws setup group show <name>`
+### `wsp setup group show <name>`
 
 Show the repos in a group.
 
 ```
-$ ws setup group show backend
+$ wsp setup group show backend
 Group "backend":
   github.com/acme/api-gateway
   github.com/acme/user-service
 ```
 
-### `ws setup group delete <name>`
+### `wsp setup group delete <name>`
 
 Delete a group. Does not affect the repos themselves.
 
 ```
-$ ws setup group delete backend
+$ wsp setup group delete backend
 Deleted group "backend"
 ```
 
 ### Config
 
-### `ws setup config get <key>`
+### `wsp setup config get <key>`
 
 Get a config value.
 
-### `ws setup config set <key> <value>`
+### `wsp setup config set <key> <value>`
 
 Set a config value.
 
-### `ws setup config unset <key>`
+### `wsp setup config unset <key>`
 
 Unset a config value.
 
-### `ws setup config list`
+### `wsp setup config list`
 
 List all config values.
 
@@ -124,31 +124,31 @@ List all config values.
 
 ### Shell integration
 
-### `ws setup completion <shell>`
+### `wsp setup completion <shell>`
 
 Output shell integration script. Supports `zsh`, `bash`, and `fish`.
 
 ```bash
 # zsh (~/.zshrc)
-eval "$(ws setup completion zsh)"
+eval "$(wsp setup completion zsh)"
 
 # bash (~/.bashrc)
-eval "$(ws setup completion bash)"
+eval "$(wsp setup completion bash)"
 
 # fish (~/.config/fish/config.fish)
-ws setup completion fish | source
+wsp setup completion fish | source
 ```
 
 This provides:
 
 - Tab completion for workspace names, repo shortnames, and group names
-- Auto-cd into the workspace directory after `ws new`
-- Auto-cd out of a workspace directory before `ws rm` if you're inside it
+- Auto-cd into the workspace directory after `wsp new`
+- Auto-cd out of a workspace directory before `wsp rm` if you're inside it
 - All other subcommands pass through to the binary unchanged
 
 ## Workspaces
 
-### `ws new <workspace> [repos...] [-g group]`
+### `wsp new <workspace> [repos...] [-g group]`
 
 Create a workspace. Each listed repo gets a local clone checked out to a branch
 matching the workspace name. Repos with `@ref` are checked out at that ref as
@@ -159,12 +159,12 @@ context repos (no workspace branch created).
 | `-g, --group` | Include repos from a group |
 
 ```
-$ ws new add-billing -g backend web-app proto@v1.0
+$ wsp new add-billing -g backend web-app proto@v1.0
 Creating workspace "add-billing" with 4 repos...
 Workspace created: /Users/you/dev/workspaces/add-billing
 ```
 
-### `ws repo add [repos...] [-g group]`
+### `wsp repo add [repos...] [-g group]`
 
 Add repos to the current workspace. Must be run from inside a workspace
 directory. Supports `@ref` syntax for context repos.
@@ -175,16 +175,16 @@ directory. Supports `@ref` syntax for context repos.
 
 ```
 $ cd ~/dev/workspaces/add-billing
-$ ws repo add proto@v1.0
+$ wsp repo add proto@v1.0
 Adding 1 repos to workspace...
 Done.
 ```
 
-### `ws repo rm <repos...> [-f]`
+### `wsp repo rm <repos...> [-f]`
 
 Remove repos from the current workspace.
 
-### `ws repo fetch [--all] [--prune]`
+### `wsp repo fetch [--all] [--prune]`
 
 Fetch updates for repos. Runs in parallel.
 
@@ -193,24 +193,24 @@ Fetch updates for repos. Runs in parallel.
 | `--all`   | Fetch all registered repos |
 | `--prune` | Prune stale remote branches |
 
-### `ws ls`
+### `wsp ls`
 
 List all workspaces.
 
 ```
-$ ws ls
+$ wsp ls
   add-billing  branch:add-billing  repos:3  /Users/you/dev/workspaces/add-billing
   fix-auth     branch:fix-auth     repos:2  /Users/you/dev/workspaces/fix-auth
 ```
 
-### `ws st [workspace]`
+### `wsp st [workspace]`
 
 Show git branch and working tree status for every repo in a workspace. If no
 workspace name is given, detects the current workspace from the working
 directory.
 
 ```
-$ ws st add-billing
+$ wsp st add-billing
 Workspace: add-billing  Branch: add-billing
 
 [api-gateway  ]  (add-billing)  3 ahead  2 files changed
@@ -218,12 +218,12 @@ Workspace: add-billing  Branch: add-billing
 [proto        ]  (v1.0       )  clean
 ```
 
-### `ws diff [workspace] [-- args]`
+### `wsp diff [workspace] [-- args]`
 
 Show `git diff` across all repos in a workspace. Extra arguments after `--` are
 passed through to `git diff`.
 
-### `ws rm [workspace] [-f]`
+### `wsp rm [workspace] [-f]`
 
 Remove a workspace and its clones. Blocks if any repo has uncommitted work or
 unmerged branches. Detects squash-merged branches automatically.
@@ -233,17 +233,17 @@ unmerged branches. Detects squash-merged branches automatically.
 | `-f, --force` | Force remove even with unmerged branches |
 
 ```
-$ ws rm add-billing
+$ wsp rm add-billing
 Removing workspace "add-billing"...
 Workspace "add-billing" removed.
 ```
 
-### `ws exec <workspace> -- <command...>`
+### `wsp exec <workspace> -- <command...>`
 
 Run a command in every repo directory of a workspace.
 
 ```
-$ ws exec add-billing -- make test
+$ wsp exec add-billing -- make test
 ==> [api-gateway] make test
 ok
 
@@ -251,7 +251,7 @@ ok
 ok
 ```
 
-### `ws cd <workspace>`
+### `wsp cd <workspace>`
 
 Change directory into a workspace. Requires shell integration.
 
@@ -261,7 +261,7 @@ Some repos are just for reference -- you won't change them. Pin them to a
 branch or tag with `@ref`:
 
 ```
-$ ws new add-billing api-gateway user-service@main proto@v1.0
+$ wsp new add-billing api-gateway user-service@main proto@v1.0
 ```
 
 - `api-gateway` -- checked out on the `add-billing` branch (active)
@@ -273,9 +273,9 @@ $ ws new add-billing api-gateway user-service@main proto@v1.0
 Set a global prefix so every workspace branch is created under your namespace:
 
 ```
-$ ws setup config set branch-prefix myname
+$ wsp setup config set branch-prefix myname
 
-$ ws new fix-billing api-gateway
+$ wsp new fix-billing api-gateway
 Creating workspace "fix-billing" (branch: myname/fix-billing) with 1 repos...
 
 $ cd ~/dev/workspaces/fix-billing/api-gateway
@@ -289,7 +289,7 @@ the prefix.
 ## Shortname resolution
 
 Repos are identified by their full identity (`host/owner/repo`). When names are
-unambiguous, `ws` lets you use shorter names.
+unambiguous, `wsp` lets you use shorter names.
 
 | Registered repos                                          | Input         | Resolves to                    |
 |-----------------------------------------------------------|---------------|--------------------------------|
@@ -302,12 +302,12 @@ that uniquely matches one registered repo. If ambiguous, provide more segments.
 
 ## Workspace detection
 
-`ws repo add` and `ws st` (without arguments) detect the current workspace by
+`wsp repo add` and `wsp st` (without arguments) detect the current workspace by
 walking up from the working directory until they find a `.ws.yaml` file:
 
 ```
 $ cd ~/dev/workspaces/add-billing/api-gateway/src
-$ ws st
+$ wsp st
 Workspace: add-billing  Branch: add-billing
 ...
 ```
@@ -316,10 +316,10 @@ Workspace: add-billing  Branch: add-billing
 
 ### Data directory
 
-All `ws` data is stored under `~/.local/share/ws/`. Respects `XDG_DATA_HOME`.
+All `wsp` data is stored under `~/.local/share/wsp/`. Respects `XDG_DATA_HOME`.
 
 ```
-~/.local/share/ws/
+~/.local/share/wsp/
   config.yaml           registered repos, groups, settings
   mirrors/              bare git clones
 ```
@@ -327,7 +327,7 @@ All `ws` data is stored under `~/.local/share/ws/`. Respects `XDG_DATA_HOME`.
 ### Workspaces directory
 
 Workspaces are created under `~/dev/workspaces/` by default. Override with
-`ws setup config set workspaces-dir /path/to/dir`.
+`wsp setup config set workspaces-dir /path/to/dir`.
 
 ### `.ws.yaml` format
 

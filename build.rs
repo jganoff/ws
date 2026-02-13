@@ -23,5 +23,5 @@ fn main() {
         format!("{} ({})", pkg, describe)
     };
 
-    println!("cargo:rustc-env=WS_VERSION_STRING={}", version);
+    println!("cargo:rustc-env=WSP_VERSION_STRING={}", version);
 }

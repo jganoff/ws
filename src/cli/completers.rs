@@ -135,33 +135,33 @@ mod tests {
             Case {
                 name: "normal usage",
                 args: s(&[
-                    "ws", "setup", "group", "update", "backend", "--remove", "repo-a",
+                    "wsp", "setup", "group", "update", "backend", "--remove", "repo-a",
                 ]),
                 want: Some("backend"),
             },
             Case {
                 name: "no update subcommand",
-                args: s(&["ws", "setup", "group", "show", "backend"]),
+                args: s(&["wsp", "setup", "group", "show", "backend"]),
                 want: None,
             },
             Case {
                 name: "update is last token",
-                args: s(&["ws", "setup", "group", "update"]),
+                args: s(&["wsp", "setup", "group", "update"]),
                 want: None,
             },
             Case {
                 name: "flag immediately after update",
-                args: s(&["ws", "setup", "group", "update", "--help"]),
+                args: s(&["wsp", "setup", "group", "update", "--help"]),
                 want: None,
             },
             Case {
                 name: "bare update without group prefix",
-                args: s(&["ws", "update", "backend"]),
+                args: s(&["wsp", "update", "backend"]),
                 want: None,
             },
             Case {
                 name: "group named update",
-                args: s(&["ws", "setup", "group", "update", "update", "--remove"]),
+                args: s(&["wsp", "setup", "group", "update", "update", "--remove"]),
                 want: Some("update"),
             },
         ];

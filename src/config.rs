@@ -99,10 +99,10 @@ impl Paths {
 /// Resolves the ws data directory. Accepts injectable overrides for testing.
 pub fn data_dir_with(xdg_data_home: Option<&str>, home: Option<&Path>) -> Result<PathBuf> {
     if let Some(xdg) = xdg_data_home.filter(|s| !s.is_empty()) {
-        return Ok(PathBuf::from(xdg).join("ws"));
+        return Ok(PathBuf::from(xdg).join("wsp"));
     }
     let home = home.context("cannot determine home directory")?;
-    Ok(home.join(".local").join("share").join("ws"))
+    Ok(home.join(".local").join("share").join("wsp"))
 }
 
 fn data_dir() -> Result<PathBuf> {
@@ -130,19 +130,19 @@ mod tests {
     #[test]
     fn test_data_dir_xdg_set() {
         let dir = data_dir_with(Some("/custom/data"), None).unwrap();
-        assert_eq!(dir, PathBuf::from("/custom/data/ws"));
+        assert_eq!(dir, PathBuf::from("/custom/data/wsp"));
     }
 
     #[test]
     fn test_data_dir_xdg_empty_falls_back_to_home() {
         let dir = data_dir_with(Some(""), Some(Path::new("/home/user"))).unwrap();
-        assert_eq!(dir, PathBuf::from("/home/user/.local/share/ws"));
+        assert_eq!(dir, PathBuf::from("/home/user/.local/share/wsp"));
     }
 
     #[test]
     fn test_data_dir_no_xdg_uses_home() {
         let dir = data_dir_with(None, Some(Path::new("/home/user"))).unwrap();
-        assert_eq!(dir, PathBuf::from("/home/user/.local/share/ws"));
+        assert_eq!(dir, PathBuf::from("/home/user/.local/share/wsp"));
     }
 
     #[test]
@@ -156,7 +156,7 @@ mod tests {
         let p = data_dir_with(Some("/custom/data"), None)
             .unwrap()
             .join("config.yaml");
-        assert_eq!(p, PathBuf::from("/custom/data/ws/config.yaml"));
+        assert_eq!(p, PathBuf::from("/custom/data/wsp/config.yaml"));
     }
 
     #[test]
@@ -164,7 +164,7 @@ mod tests {
         let dir = data_dir_with(Some("/custom/data"), None)
             .unwrap()
             .join("mirrors");
-        assert_eq!(dir, PathBuf::from("/custom/data/ws/mirrors"));
+        assert_eq!(dir, PathBuf::from("/custom/data/wsp/mirrors"));
     }
 
     #[test]

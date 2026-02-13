@@ -686,7 +686,7 @@ mod tests {
         let tmp_data = tempfile::tempdir().unwrap();
         let tmp_home = tempfile::tempdir().unwrap();
 
-        let data_dir = tmp_data.path().join("ws");
+        let data_dir = tmp_data.path().join("wsp");
         let workspaces_dir = tmp_home.path().join("dev").join("workspaces");
         fs::create_dir_all(&workspaces_dir).unwrap();
 
@@ -1097,7 +1097,7 @@ mod tests {
         let tmp_data = tempfile::tempdir().unwrap();
         let tmp_home = tempfile::tempdir().unwrap();
 
-        let data_dir = tmp_data.path().join("ws");
+        let data_dir = tmp_data.path().join("wsp");
         let workspaces_dir = tmp_home.path().join("dev").join("workspaces");
         fs::create_dir_all(&workspaces_dir).unwrap();
 

@@ -32,7 +32,7 @@ mod tests {
         // passes root-level ArgMatches (which lack a "workspace" arg) to
         // status::run. This must not panic — it should gracefully fall
         // through to workspace detection via cwd.
-        let matches = build_cli().get_matches_from(["ws"]);
+        let matches = build_cli().get_matches_from(["wsp"]);
 
         // The only thing we're testing is that this doesn't panic.
         // The result depends on whether tests run inside a workspace.

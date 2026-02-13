@@ -207,9 +207,9 @@ pub fn branch_is_squash_merged(dir: &Path, branch: &str, target: &str) -> Result
     let mb = merge_base(dir, branch, target)?;
     let tree = run(Some(dir), &["rev-parse", &format!("{}^{{tree}}", branch)])?;
     let env = [
-        ("GIT_AUTHOR_NAME", "ws"),
+        ("GIT_AUTHOR_NAME", "wsp"),
         ("GIT_AUTHOR_EMAIL", "ws@localhost"),
-        ("GIT_COMMITTER_NAME", "ws"),
+        ("GIT_COMMITTER_NAME", "wsp"),
         ("GIT_COMMITTER_EMAIL", "ws@localhost"),
     ];
     let temp_commit = run_with_env(
@@ -546,9 +546,9 @@ mod tests {
         // Add a commit to make it diverge
         let tree = run(Some(&bare), &["rev-parse", "local-only^{tree}"]).unwrap();
         let env = [
-            ("GIT_AUTHOR_NAME", "ws"),
+            ("GIT_AUTHOR_NAME", "wsp"),
             ("GIT_AUTHOR_EMAIL", "ws@localhost"),
-            ("GIT_COMMITTER_NAME", "ws"),
+            ("GIT_COMMITTER_NAME", "wsp"),
             ("GIT_COMMITTER_EMAIL", "ws@localhost"),
         ];
         let new_commit = run_with_env(

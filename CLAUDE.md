@@ -1,4 +1,4 @@
-# ws - Multi-Repo Workspace Manager
+# wsp - Multi-Repo Workspace Manager
 
 ## Build & Test
 
@@ -25,17 +25,17 @@ Use `just` (see `Justfile`). Key recipes:
 
 ## Data Storage
 
-- Config: `~/.local/share/ws/config.yaml`
-- Mirrors: `~/.local/share/ws/mirrors/<host>/<user>/<repo>.git/`
+- Config: `~/.local/share/wsp/config.yaml`
+- Mirrors: `~/.local/share/wsp/mirrors/<host>/<user>/<repo>.git/`
 - Workspaces: `~/dev/workspaces/<name>/` with `.ws.yaml` metadata
 
 ## CLI Command Structure
 
-Top-level commands use short aliases: `ws new`, `ws rm`, `ws ls`, `ws st`, `ws diff`, `ws exec`, `ws cd`.
+Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `wsp diff`, `wsp exec`, `wsp cd`.
 
-Workspace-scoped repo ops: `ws repo add`, `ws repo rm`, `ws repo fetch`.
+Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo fetch`.
 
-All admin/setup commands live under `ws setup`: `ws setup repo add/list/remove`, `ws setup group new/list/show/update/delete`, `ws setup config list/get/set/unset`, `ws setup completion zsh|bash|fish`.
+All admin/setup commands live under `wsp setup`: `wsp setup repo add/list/remove`, `wsp setup group new/list/show/update/delete`, `wsp setup config list/get/set/unset`, `wsp setup completion zsh|bash|fish`.
 
 When writing docs or examples, use the actual command names above — not the long forms (`remove`, `list`, `status`).
 

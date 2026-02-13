@@ -75,9 +75,9 @@ pub fn build_cli() -> Command {
         .subcommand(remove::cmd())
         .subcommand(fetch::cmd());
 
-    Command::new("ws")
+    Command::new("wsp")
         .about("Multi-repo workspace manager")
-        .version(env!("WS_VERSION_STRING"))
+        .version(env!("WSP_VERSION_STRING"))
         .arg(
             Arg::new("json")
                 .long("json")
@@ -148,7 +148,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
                 let mut output = list::run(matches, paths)?;
                 if let Output::WorkspaceList(ref mut wl) = output {
                     wl.hint =
-                        Some("Not in a workspace. Use `ws cd <name>` to enter one.".to_string());
+                        Some("Not in a workspace. Use `wsp cd <name>` to enter one.".to_string());
                 }
                 Ok(output)
             }

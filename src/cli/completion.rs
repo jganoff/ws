@@ -46,9 +46,9 @@ fn write_posix(w: &mut dyn Write, bin_str: &str, ws_root: &str, shell: &str) -> 
 
     write!(
         w,
-        "# ws shell integration \u{2014} source with: eval \"$(ws setup completion {shell})\"\n\
+        "# wsp shell integration \u{2014} source with: eval \"$(wsp setup completion {shell})\"\n\
          \n\
-         ws() {{\n\
+         wsp() {{\n\
          \x20 local ws_bin='{bin_str}'\n\
          \x20 local ws_root='{ws_root}'\n\
          \n\
@@ -149,9 +149,9 @@ fn write_fish(w: &mut dyn Write, bin_str: &str, ws_root: &str) -> Result<()> {
     write!(
         w,
         "\
-# ws shell integration \u{2014} source with: ws setup completion fish | source\n\
+# wsp shell integration \u{2014} source with: wsp setup completion fish | source\n\
 \n\
-function ws\n\
+function wsp\n\
     set -l ws_bin '{bin_str}'\n\
     set -l ws_root '{ws_root}'\n\
 \n\
@@ -266,10 +266,10 @@ mod tests {
     #[test]
     fn test_posix_shell_name_in_header() {
         let bash = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "bash"));
-        assert!(bash.contains("eval \"$(ws setup completion bash)\""));
+        assert!(bash.contains("eval \"$(wsp setup completion bash)\""));
 
         let zsh = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "zsh"));
-        assert!(zsh.contains("eval \"$(ws setup completion zsh)\""));
+        assert!(zsh.contains("eval \"$(wsp setup completion zsh)\""));
     }
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn test_fish_header() {
         let out = output(|w| write_fish(w, "/usr/bin/ws", "/home/user/dev"));
-        assert!(out.contains("ws setup completion fish | source"));
+        assert!(out.contains("wsp setup completion fish | source"));
     }
 
     #[test]
