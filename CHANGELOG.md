@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-02-18
+
+### Bug Fixes
+
+- *(workspace)* Validate dirs map on metadata load to prevent path traversal
+- *(cli)* Fall back to identity when shortname lookup misses
+- *(workspace)* Stop setting upstream tracking on new branches
+
+### Documentation
+
+- Fix inconsistent bullet formatting in "why wsp?" section
+- Add feature roadmap with prioritized plan
+
 ## [0.5.1] - 2026-02-13
 
 ### Features
