@@ -50,7 +50,19 @@ proto         (context @v1.0)              skipped
 - [ ] `--force-with-lease` for post-rebase
 - [ ] `--json` output
 
-## P1 — High Value, Low Effort
+## P1 — High Value
+
+### AGENTS.md Generation
+
+**Complexity:** Medium | [Feature spec](features/agent-md.md)
+
+Generate `AGENTS.md` (with `CLAUDE.md` symlink) at the workspace root so AI agents have context about repos, branches, and available `wsp` commands. Uses marked sections (`<!-- wsp:begin/end -->`) to preserve user-written content across updates.
+
+- [ ] New `src/agentmd.rs` module with marked-section parser
+- [ ] `CLAUDE.md` symlink management
+- [ ] Config key `agent-md` (default on)
+- [ ] Call from `new`, `repo add`, `repo rm`
+- [ ] Table-driven tests for marker parsing and FS integration
 
 ### `wsp log`
 
@@ -108,6 +120,27 @@ ok
 
 ## P2 — Team Adoption
 
+### `wsp init`
+
+**Complexity:** Small
+
+First-time setup wizard and/or adopt-existing-directory flow. Could walk through initial config (workspaces dir, add repos) or retroactively adopt an existing directory of clones as a wsp workspace.
+
+- [ ] First-time interactive setup
+- [ ] Adopt existing directory as workspace
+- [ ] Detect already-cloned repos and register them
+
+### `wsp whatsnew` / Tips
+
+**Complexity:** Small
+
+Post-upgrade changelog highlights and contextual tips during normal usage.
+
+- [ ] `wsp whatsnew` subcommand showing recent changes
+- [ ] Contextual hints (e.g., suggest installing Claude Code hooks if detected)
+- [ ] `wsp setup config set tips false` to silence
+- [ ] `wsp setup config set whatsnew false` to silence
+
 ### `wsp export` / `wsp new --from`
 
 **Complexity:** Small
@@ -164,7 +197,27 @@ With `--link`, each PR body includes:
 - [ ] `--link` cross-referencing (create PRs, then update bodies with links)
 - [ ] `--json` output
 
+### Repo Sharing / Seeding
+
+**Complexity:** Small-Medium
+
+Share repo lists between teammates beyond file-based templates. Seed a workspace's repo list from a git repo (e.g., a shared config repo) or from another teammate's config.
+
+- [ ] `wsp export --url` to share via URL/gist
+- [ ] `wsp new --from <url>` to consume shared configs
+- [ ] Seed from a git-hosted config file
+
 ## P3 — Later
+
+### `wsp cd` Sandbox
+
+**Complexity:** Medium
+
+`wsp cd` spawns a subshell with workspace env vars set. Exiting returns you to where you were. Gives workspaces a "sandbox" feel with isolated environment context.
+
+- [ ] Subshell with `WSP_*` env vars
+- [ ] Shell prompt integration showing active workspace
+- [ ] `exit` returns to original directory
 
 ### Workspace Hooks
 
