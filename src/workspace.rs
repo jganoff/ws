@@ -343,8 +343,11 @@ pub fn remove_repos(ws_dir: &Path, identities_to_remove: &[String], force: bool)
                 continue;
             }
 
-            // Fetch origin in the clone for up-to-date merge detection
-            let _ = git::fetch_remote(&clone_dir, "origin");
+            // Fetch origin with prune for up-to-date merge detection
+            let fetch_failed = git::fetch_remote_prune(&clone_dir, "origin").is_err();
+            if fetch_failed {
+                eprintln!("  warning: fetch failed for {}, using local data", identity);
+            }
 
             if git::branch_exists(&clone_dir, &meta.branch) {
                 let default_branch = git::default_branch_for_remote(&clone_dir, "origin")
@@ -360,13 +363,19 @@ pub fn remove_repos(ws_dir: &Path, identities_to_remove: &[String], force: bool)
                     match git::branch_safety(&clone_dir, &meta.branch, &target) {
                         git::BranchSafety::Merged | git::BranchSafety::SquashMerged => {}
                         git::BranchSafety::PushedToRemote => {
-                            problems.push(format!(
-                                "{} (unmerged branch, but pushed to remote)",
-                                identity
-                            ));
+                            let mut msg =
+                                format!("{} (unmerged branch, but pushed to remote)", identity);
+                            if fetch_failed {
+                                msg.push_str(" (fetch failed, local data may be stale)");
+                            }
+                            problems.push(msg);
                         }
                         git::BranchSafety::Unmerged => {
-                            problems.push(format!("{} (unmerged branch)", identity));
+                            let mut msg = format!("{} (unmerged branch)", identity);
+                            if fetch_failed {
+                                msg.push_str(" (fetch failed, local data may be stale)");
+                            }
+                            problems.push(msg);
                         }
                     }
                 }
@@ -465,69 +474,40 @@ pub fn propagate_mirror_to_clones(ws_dir: &Path, meta: &Metadata) {
     });
 }
 
-pub fn has_pending_changes(ws_dir: &Path) -> Result<Vec<String>> {
-    let meta = load_metadata(ws_dir)?;
-    let mut dirty = Vec::new();
-
-    for identity in meta.repos.keys() {
-        let dn = match meta.dir_name(identity) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let repo_dir = ws_dir.join(&dn);
-
-        let changed = git::changed_file_count(&repo_dir).unwrap_or(0);
-        let ahead = git::ahead_count(&repo_dir).unwrap_or(0);
-
-        if changed > 0 || ahead > 0 {
-            dirty.push(dn);
-        }
-    }
-
-    Ok(dirty)
-}
-
 pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
     let ws_dir = dir(&paths.workspaces_dir, name);
     let meta =
         load_metadata(&ws_dir).map_err(|e| anyhow::anyhow!("reading workspace metadata: {}", e))?;
 
-    struct ActiveRepo {
-        identity: String,
-        dir_name: String,
-        fetch_failed: bool,
-    }
+    if !force {
+        let mut problems: Vec<String> = Vec::new();
 
-    let mut active_repos: Vec<ActiveRepo> = Vec::new();
+        for (identity, entry) in &meta.repos {
+            let is_active = match entry {
+                None => true,
+                Some(re) => re.r#ref.is_empty(),
+            };
+            if !is_active {
+                continue;
+            }
 
-    for (identity, entry) in &meta.repos {
-        let dn = meta.dir_name(identity)?;
-
-        let is_active = match entry {
-            None => true,
-            Some(re) => re.r#ref.is_empty(),
-        };
-
-        if is_active {
+            let dn = meta.dir_name(identity)?;
             let clone_dir = ws_dir.join(&dn);
-            // Best-effort fetch origin to detect remote merges
-            let fetch_failed = git::fetch_remote(&clone_dir, "origin").is_err();
+
+            // Check for pending local changes first
+            let changed = git::changed_file_count(&clone_dir).unwrap_or(0);
+            let ahead = git::ahead_count(&clone_dir).unwrap_or(0);
+            if changed > 0 || ahead > 0 {
+                problems.push(format!("{} (pending changes)", identity));
+                continue;
+            }
+
+            // Best-effort fetch origin with prune to detect remote merges
+            let fetch_failed = git::fetch_remote_prune(&clone_dir, "origin").is_err();
             if fetch_failed {
                 eprintln!("  warning: fetch failed for {}, using local data", identity);
             }
-            active_repos.push(ActiveRepo {
-                identity: identity.clone(),
-                dir_name: dn,
-                fetch_failed,
-            });
-        }
-    }
 
-    // Pre-flight: check if all active branches are merged (on clone, not mirror)
-    if !force {
-        let mut unmerged: Vec<(String, bool)> = Vec::new();
-        for ar in &active_repos {
-            let clone_dir = ws_dir.join(&ar.dir_name);
             if !git::branch_exists(&clone_dir, &meta.branch) {
                 continue;
             }
@@ -538,7 +518,7 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
                     Err(e) => {
                         eprintln!(
                             "  warning: cannot detect default branch for {}: {}",
-                            ar.identity, e
+                            identity, e
                         );
                         continue;
                     }
@@ -553,37 +533,35 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
             match git::branch_safety(&clone_dir, &meta.branch, &target) {
                 git::BranchSafety::Merged | git::BranchSafety::SquashMerged => {}
                 git::BranchSafety::PushedToRemote => {
-                    unmerged.push((
-                        format!("{} (unmerged, but pushed to remote)", ar.identity),
-                        ar.fetch_failed,
-                    ));
+                    let mut msg = format!("{} (unmerged branch, but pushed to remote)", identity);
+                    if fetch_failed {
+                        msg.push_str(" (fetch failed, local data may be stale)");
+                    }
+                    problems.push(msg);
                 }
                 git::BranchSafety::Unmerged => {
-                    unmerged.push((ar.identity.clone(), ar.fetch_failed));
+                    let mut msg = format!("{} (unmerged branch)", identity);
+                    if fetch_failed {
+                        msg.push_str(" (fetch failed, local data may be stale)");
+                    }
+                    problems.push(msg);
                 }
             }
         }
 
-        if !unmerged.is_empty() {
+        if !problems.is_empty() {
+            let mut sorted = problems;
+            sorted.sort();
             let mut list = String::new();
-            let mut any_fetch_failed = false;
-            for (repo, fetch_failed) in &unmerged {
-                list.push_str(&format!("\n  - {}", repo));
-                if *fetch_failed {
-                    list.push_str(" (fetch failed, local data may be stale)");
-                    any_fetch_failed = true;
-                }
+            for p in &sorted {
+                list.push_str(&format!("\n  - {}", p));
             }
-            let mut msg = format!(
-                "workspace {:?} has unmerged branches ({}):{}\n\nUse --force to remove anyway",
-                name, meta.branch, list
+            bail!(
+                "workspace {:?} has pending changes or unmerged branches ({}):{}\n\nUse --force to remove anyway",
+                name,
+                meta.branch,
+                list
             );
-            if any_fetch_failed {
-                msg.push_str(
-                    "\n\nNote: some fetches failed; the branch may already be merged remotely",
-                );
-            }
-            bail!("{}", msg);
         }
     }
 
@@ -1033,6 +1011,28 @@ mod tests {
     }
 
     #[test]
+    fn test_remove_blocks_pending_changes() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity, String::new())]);
+        create(&paths, "rm-dirty", &refs, None, &upstream_urls).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "rm-dirty");
+        let repo_dir = ws_dir.join("test-repo");
+        fs::write(repo_dir.join("dirty.txt"), "x").unwrap();
+
+        let result = remove(&paths, "rm-dirty", false);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("pending changes"),
+            "expected 'pending changes' in error: {}",
+            err
+        );
+        assert!(ws_dir.exists());
+    }
+
+    #[test]
     fn test_list_all() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
@@ -1284,33 +1284,6 @@ mod tests {
             result.is_err(),
             "repo added via add_repos should have no upstream tracking"
         );
-    }
-
-    #[test]
-    fn test_has_pending_changes_clean() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-
-        let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "pending-clean", &refs, None, &upstream_urls).unwrap();
-
-        let ws_dir = dir(&paths.workspaces_dir, "pending-clean");
-        let dirty = has_pending_changes(&ws_dir).unwrap();
-        assert!(dirty.is_empty());
-    }
-
-    #[test]
-    fn test_has_pending_changes_uncommitted() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-
-        let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "pending-dirty", &refs, None, &upstream_urls).unwrap();
-
-        let ws_dir = dir(&paths.workspaces_dir, "pending-dirty");
-        let repo_dir = ws_dir.join("test-repo");
-        fs::write(repo_dir.join("dirty.txt"), "x").unwrap();
-
-        let dirty = has_pending_changes(&ws_dir).unwrap();
-        assert!(dirty.contains(&"test-repo".to_string()));
     }
 
     #[test]

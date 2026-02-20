@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
@@ -34,24 +34,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             .map_err(|e| anyhow::anyhow!("reading workspace: {}", e))?;
         meta.name
     };
-
-    if !force {
-        let ws_dir = workspace::dir(&paths.workspaces_dir, &name);
-        let dirty = workspace::has_pending_changes(&ws_dir)?;
-        if !dirty.is_empty() {
-            let mut sorted = dirty;
-            sorted.sort();
-            let mut list = String::new();
-            for r in &sorted {
-                list.push_str(&format!("\n  - {}", r));
-            }
-            bail!(
-                "workspace {:?} has pending changes:{}\n\nUse --force to remove anyway",
-                name,
-                list
-            );
-        }
-    }
 
     eprintln!("Removing workspace {:?}...", name);
     workspace::remove(paths, &name, force)?;

@@ -138,6 +138,11 @@ pub fn fetch_remote(dir: &Path, remote: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn fetch_remote_prune(dir: &Path, remote: &str) -> Result<()> {
+    run(Some(dir), &["fetch", "--prune", remote])?;
+    Ok(())
+}
+
 pub fn checkout_new_branch(dir: &Path, branch: &str, start_point: &str) -> Result<()> {
     run(
         Some(dir),
