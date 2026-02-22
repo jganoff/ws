@@ -163,6 +163,30 @@ pub struct RepoDiffEntry {
 }
 
 #[derive(Serialize)]
+pub struct LogOutput {
+    #[serde(skip)]
+    pub oneline: bool,
+    pub repos: Vec<RepoLogEntry>,
+}
+
+#[derive(Serialize)]
+pub struct RepoLogEntry {
+    pub name: String,
+    pub commits: Vec<LogCommit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct LogCommit {
+    pub hash: String,
+    pub timestamp: i64,
+    pub subject: String,
+}
+
+#[derive(Serialize)]
 pub struct ConfigListOutput {
     pub entries: Vec<ConfigListEntry>,
 }
@@ -235,6 +259,7 @@ pub enum Output {
     WorkspaceRepoList(WorkspaceRepoListOutput),
     Status(StatusOutput),
     Diff(DiffOutput),
+    Log(LogOutput),
     Fetch(FetchOutput),
     ConfigList(ConfigListOutput),
     ConfigGet(ConfigGetOutput),
@@ -258,6 +283,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::WorkspaceRepoList(v) => print_json(&v),
             Output::Status(v) => print_json(&v),
             Output::Diff(v) => print_json(&v),
+            Output::Log(v) => print_json(&v),
             Output::Fetch(v) => print_json(&v),
             Output::ConfigList(v) => print_json(&v),
             Output::ConfigGet(v) => print_json(&v),
@@ -274,6 +300,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::WorkspaceRepoList(v) => render_workspace_repo_list_table(v),
         Output::Status(v) => render_status_table(v),
         Output::Diff(v) => render_diff_text(v),
+        Output::Log(v) => render_log_text(v),
         Output::Fetch(v) => render_fetch_text(v),
         Output::ConfigList(v) => render_config_list_text(v),
         Output::ConfigGet(v) => render_config_get_text(v),
@@ -477,6 +504,116 @@ fn render_mutation_text(v: MutationOutput) -> Result<()> {
 fn render_path_text(v: PathOutput) -> Result<()> {
     println!("{}", v.path);
     Ok(())
+}
+
+fn render_log_text(v: LogOutput) -> Result<()> {
+    if v.oneline {
+        render_log_oneline(&v.repos)
+    } else {
+        render_log_grouped(&v.repos)
+    }
+}
+
+fn render_log_grouped(repos: &[RepoLogEntry]) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    let mut first = true;
+    for entry in repos {
+        if !first {
+            println!();
+        }
+        println!("==> [{}]", entry.name);
+
+        if let Some(ref e) = entry.error {
+            eprintln!("  error: {}", e);
+            first = false;
+            continue;
+        }
+
+        if let Some(ref raw) = entry.raw {
+            if raw.is_empty() {
+                println!("  (no output)");
+            } else {
+                println!("{}", raw);
+            }
+            first = false;
+            continue;
+        }
+
+        if entry.commits.is_empty() {
+            println!("  (no commits on workspace branch)");
+        } else {
+            for c in &entry.commits {
+                println!(
+                    "  {}  {}  ({})",
+                    &c.hash[..7.min(c.hash.len())],
+                    c.subject,
+                    format_relative_time(c.timestamp, now)
+                );
+            }
+        }
+        first = false;
+    }
+    Ok(())
+}
+
+fn render_log_oneline(repos: &[RepoLogEntry]) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    let mut all: Vec<(&str, &LogCommit)> = Vec::new();
+    for entry in repos {
+        if entry.error.is_some() {
+            eprintln!(
+                "[{}] error: {}",
+                entry.name,
+                entry.error.as_deref().unwrap_or("")
+            );
+            continue;
+        }
+        if let Some(ref raw) = entry.raw {
+            if !raw.is_empty() {
+                println!("==> [{}]", entry.name);
+                println!("{}", raw);
+            }
+            continue;
+        }
+        for c in &entry.commits {
+            all.push((&entry.name, c));
+        }
+    }
+
+    all.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp).then_with(|| a.0.cmp(b.0)));
+
+    if all.is_empty() {
+        return Ok(());
+    }
+
+    let mut tw = TabWriter::new(std::io::stdout()).minwidth(0).padding(2);
+    for (repo, c) in &all {
+        writeln!(
+            tw,
+            "{}\t{}\t{}\t{}",
+            repo,
+            &c.hash[..7.min(c.hash.len())],
+            c.subject,
+            format_relative_time(c.timestamp, now)
+        )?;
+    }
+    tw.flush()?;
+    Ok(())
+}
+
+pub fn format_relative_time(ts: i64, now: i64) -> String {
+    let delta = now.saturating_sub(ts);
+    if delta < 0 {
+        return "in the future".to_string();
+    }
+    let delta = delta as u64;
+    match delta {
+        0..=59 => format!("{}s ago", delta),
+        60..=3599 => format!("{}m ago", delta / 60),
+        3600..=86399 => format!("{}h ago", delta / 3600),
+        86400..=604799 => format!("{}d ago", delta / 86400),
+        _ => format!("{}w ago", delta / 604800),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -819,5 +956,108 @@ mod tests {
         };
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["error"], "something went wrong");
+    }
+
+    #[test]
+    fn test_json_log() {
+        let cases: Vec<(&str, LogOutput, serde_json::Value)> = vec![
+            (
+                "structured commits",
+                LogOutput {
+                    oneline: false,
+                    repos: vec![RepoLogEntry {
+                        name: "api-gateway".into(),
+                        commits: vec![LogCommit {
+                            hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".into(),
+                            timestamp: 1700000000,
+                            subject: "feat: add billing".into(),
+                        }],
+                        raw: None,
+                        error: None,
+                    }],
+                },
+                serde_json::json!({
+                    "repos": [{
+                        "name": "api-gateway",
+                        "commits": [{
+                            "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+                            "timestamp": 1700000000,
+                            "subject": "feat: add billing"
+                        }]
+                    }]
+                }),
+            ),
+            (
+                "raw passthrough",
+                LogOutput {
+                    oneline: false,
+                    repos: vec![RepoLogEntry {
+                        name: "api-gateway".into(),
+                        commits: vec![],
+                        raw: Some("a1b2c3d feat: add billing\n".into()),
+                        error: None,
+                    }],
+                },
+                serde_json::json!({
+                    "repos": [{
+                        "name": "api-gateway",
+                        "commits": [],
+                        "raw": "a1b2c3d feat: add billing\n"
+                    }]
+                }),
+            ),
+            (
+                "error entry",
+                LogOutput {
+                    oneline: false,
+                    repos: vec![RepoLogEntry {
+                        name: "broken".into(),
+                        commits: vec![],
+                        raw: None,
+                        error: Some("repo not found".into()),
+                    }],
+                },
+                serde_json::json!({
+                    "repos": [{
+                        "name": "broken",
+                        "commits": [],
+                        "error": "repo not found"
+                    }]
+                }),
+            ),
+            (
+                "empty repos",
+                LogOutput {
+                    oneline: true,
+                    repos: vec![],
+                },
+                serde_json::json!({ "repos": [] }),
+            ),
+        ];
+        for (name, output, want) in cases {
+            let val = serde_json::to_value(&output).unwrap();
+            assert_eq!(val, want, "{}", name);
+        }
+    }
+
+    #[test]
+    fn test_format_relative_time() {
+        let now = 1700000000i64;
+        let cases = vec![
+            ("just now", now, "0s ago"),
+            ("30 seconds", now - 30, "30s ago"),
+            ("1 minute", now - 60, "1m ago"),
+            ("5 minutes", now - 300, "5m ago"),
+            ("1 hour", now - 3600, "1h ago"),
+            ("3 hours", now - 10800, "3h ago"),
+            ("1 day", now - 86400, "1d ago"),
+            ("6 days", now - 518400, "6d ago"),
+            ("1 week", now - 604800, "1w ago"),
+            ("3 weeks", now - 1814400, "3w ago"),
+            ("future", now + 100, "in the future"),
+        ];
+        for (name, ts, want) in cases {
+            assert_eq!(format_relative_time(ts, now), want, "{}", name);
+        }
     }
 }

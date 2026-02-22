@@ -9,6 +9,7 @@ pub mod exec;
 pub mod fetch;
 pub mod group;
 pub mod list;
+pub mod log;
 pub mod new;
 pub mod remove;
 pub mod repo;
@@ -93,6 +94,7 @@ pub fn build_cli() -> Command {
         .subcommand(list::cmd())
         .subcommand(status::cmd())
         .subcommand(diff::cmd())
+        .subcommand(log::cmd())
         .subcommand(exec::cmd())
         .subcommand(cd::cmd())
         .subcommand(setup)
@@ -142,6 +144,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("ls", m)) => list::run(m, paths),
         Some(("st", m)) => status::run(m, paths),
         Some(("diff", m)) => diff::run(m, paths),
+        Some(("log", m)) => log::run(m, paths),
         Some(("exec", m)) => exec::run(m, paths),
         None => {
             let cwd = std::env::current_dir()?;
