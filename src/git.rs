@@ -425,6 +425,19 @@ pub fn push(
     Ok(())
 }
 
+pub fn set_upstream(dir: &Path, branch: &str, upstream: &str) -> Result<()> {
+    run(
+        Some(dir),
+        &["branch", "--set-upstream-to", upstream, branch],
+    )?;
+    Ok(())
+}
+
+pub fn unset_upstream(dir: &Path, branch: &str) -> Result<()> {
+    run(Some(dir), &["branch", "--unset-upstream", branch])?;
+    Ok(())
+}
+
 pub fn changed_file_count(dir: &Path) -> Result<u32> {
     let out = run(Some(dir), &["status", "--short"])?;
     if out.is_empty() {

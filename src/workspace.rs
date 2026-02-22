@@ -639,6 +639,19 @@ pub fn list_all(workspaces_dir: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// Clone a repo into the workspace from its bare mirror.
+///
+/// Steps:
+///   1. `git clone --origin wsp-mirror` from the bare mirror (hardlinks)
+///   2. Configure wsp-mirror refspec for `refs/remotes/origin/*`
+///   3. Set `origin` remote to the real upstream URL
+///   4. Copy default branch HEAD from wsp-mirror to origin
+///   5. Fetch origin so `origin/main` etc. exist locally
+///   6. Fix default branch tracking: re-point from `wsp-mirror/main`
+///      to `origin/main` (or unset if no origin)
+///   7. Checkout: context repos get pinned ref; active repos get workspace
+///      branch via `--no-track` (intentional: tracking `origin/main`
+///      would cause bare `git push` to target the wrong branch)
 fn clone_from_mirror(
     mirrors_dir: &Path,
     ws_dir: &Path,
@@ -665,13 +678,26 @@ fn clone_from_mirror(
     }
 
     // 4. Copy default branch info from wsp-mirror to origin
-    if let Ok(default_br) = git::default_branch_for_remote(&dest, "wsp-mirror") {
-        let _ = git::remote_set_head(&dest, "origin", &default_br);
+    let mirror_default_br = git::default_branch_for_remote(&dest, "wsp-mirror").ok();
+    if let Some(ref default_br) = mirror_default_br {
+        let _ = git::remote_set_head(&dest, "origin", default_br);
     }
 
     // 4b. Fetch origin so remote tracking branches (origin/main etc.) exist
     if !upstream_url.is_empty() {
         git::fetch_remote(&dest, "origin")?;
+    }
+
+    // 4c. Fix default branch tracking: git clone --origin wsp-mirror sets
+    // main to track wsp-mirror/main. Re-point it to origin/main so that
+    // git pull on main works against the real upstream.
+    if let Some(ref default_br) = mirror_default_br {
+        let origin_ref = format!("origin/{}", default_br);
+        if git::ref_exists(&dest, &format!("refs/remotes/{}", origin_ref)) {
+            let _ = git::set_upstream(&dest, default_br, &origin_ref);
+        } else {
+            let _ = git::unset_upstream(&dest, default_br);
+        }
     }
 
     // 5. Checkout the right ref/branch
@@ -840,19 +866,57 @@ mod tests {
     }
 
     #[test]
-    fn test_context_repo_has_no_upstream_tracking() {
+    fn test_context_repo_default_branch_tracks_origin() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
+        // Context repo pinned to "main" — same as default branch
         let refs = BTreeMap::from([(identity, "main".into())]);
-        create(&paths, "ctx-no-track", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ctx-track", &refs, None, &upstream_urls).unwrap();
 
-        let ws_dir = dir(&paths.workspaces_dir, "ctx-no-track");
+        let ws_dir = dir(&paths.workspaces_dir, "ctx-track");
         let clone_dir = ws_dir.join("test-repo");
 
-        let result = git::run(Some(&clone_dir), &["rev-parse", "--verify", "@{upstream}"]);
-        assert!(
-            result.is_err(),
-            "context repo branch should have no upstream tracking"
+        // main should track origin/main (the real upstream), not wsp-mirror/main
+        let upstream = git::run(
+            Some(&clone_dir),
+            &[
+                "for-each-ref",
+                "--format=%(upstream:short)",
+                "refs/heads/main",
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            upstream, "origin/main",
+            "context repo main should track origin/main, got {:?}",
+            upstream
+        );
+    }
+
+    #[test]
+    fn test_default_branch_tracks_origin_not_mirror() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity, String::new())]);
+        create(&paths, "track-origin", &refs, None, &upstream_urls).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "track-origin");
+        let clone_dir = ws_dir.join("test-repo");
+
+        // main should track origin/main, not wsp-mirror/main
+        let upstream = git::run(
+            Some(&clone_dir),
+            &[
+                "for-each-ref",
+                "--format=%(upstream:short)",
+                "refs/heads/main",
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            upstream, "origin/main",
+            "main should track origin/main, got {:?}",
+            upstream
         );
     }
 
