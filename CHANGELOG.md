@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2026-02-27
+
+### Features
+
+- *(cli)* Add `wsp log` command for cross-repo commit log
+- *(cli)* Add `wsp sync` command for fetch + rebase/merge
+- *(cli)* Add `wsp push` command with RepoInfo consolidation
+
+### Bug Fixes
+
+- *(workspace)* Default branch tracks origin instead of wsp-mirror
+
+### Refactor
+
+- *(workspace)* Consolidate removal safety checks and improve fetch accuracy
+
+### Documentation
+
+- Add AGENTS.md feature spec and expand roadmap
+- Document removal safety checks and expected workflow
+- Update roadmap after shipping sync/push/log
+
 ## [0.5.2] - 2026-02-18
 
 ### Bug Fixes
