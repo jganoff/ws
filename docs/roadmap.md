@@ -17,14 +17,12 @@ $ wsp st
 api-gateway   feature  +2 ahead  1 changed
 user-service  feature  (clean)
 
-Tip: run `wsp push` to push all repos with unpushed commits
+Tip: run `wsp sync` to fetch and rebase all repos
 ```
 
 Examples:
-- `wsp st` shows repos ahead → suggest `wsp push`
 - `wsp st` shows repos behind → suggest `wsp sync`
 - `wsp new` completes → suggest `wsp st` or `wsp sync`
-- `wsp push` completes → suggest `wsp pr` (once implemented)
 
 **Random hints** — shown occasionally (~20% of runs) when no contextual hint fires:
 
@@ -41,10 +39,10 @@ Tip: `wsp sync --strategy merge` uses merge instead of rebase
 // Contextual: fires when a condition on the Output is true
 hints::contextual(
     |out| match out {
-        Output::Status(s) => s.repos.iter().any(|r| r.ahead > 0),
+        Output::Status(s) => s.repos.iter().any(|r| r.behind > 0),
         _ => false,
     },
-    "run `wsp push` to push all repos with unpushed commits",
+    "run `wsp sync` to fetch and rebase all repos",
 );
 
 // Random: just a static string
@@ -62,7 +60,7 @@ All hints registered in one place (`src/hints.rs`) via a `pub fn all() -> HintRe
 - [ ] New `src/hints.rs` with `HintRegistry` builder and `contextual()`/`random()` API
 - [ ] Wire into `main.rs` after `output::render()`
 - [ ] Config key `hints` (default true)
-- [ ] Seed initial contextual hints (st→push, st→sync, new→sync)
+- [ ] Seed initial contextual hints (st→sync, new→sync)
 - [ ] Seed initial random hint pool (~10 tips)
 - [ ] Tests for hint selection and suppression logic
 
@@ -79,34 +77,6 @@ Generate `AGENTS.md` (with `CLAUDE.md` symlink) at the workspace root so AI agen
 - [ ] Config key `agent-md` (default on)
 - [ ] Call from `new`, `repo add`, `repo rm`
 - [ ] Table-driven tests for marker parsing and FS integration
-
-### `wsp pr`
-
-**Complexity:** Medium-Large
-
-Open PRs across all active repos via `gh`, with cross-repo linking.
-
-```
-$ wsp pr --link
-api-gateway    https://github.com/acme/api-gateway/pull/42      created
-user-service   (no commits ahead)                                 skipped
-
-$ wsp pr --title "Add billing" --draft --link
-```
-
-With `--link`, each PR body includes:
-
-```
-## Related PRs (wsp workspace: add-billing)
-- acme/api-gateway#42
-- acme/user-service#43
-```
-
-- [ ] Detect repos with commits ahead (reuse push logic)
-- [ ] Shell out to `gh pr create`
-- [ ] `--title`, `--body`, `--draft` flags
-- [ ] `--link` cross-referencing (create PRs, then update bodies with links)
-- [ ] `--json` output
 
 ## P2 — Team Adoption
 
@@ -198,7 +168,7 @@ $ wsp import github.com/acme --all
 ## Design Principles
 
 - Every command is **workspace-aware** (active vs. context repos, workspace vs. upstream branches)
-- Daily ops are **top-level short commands** (`sync`, `push`, `log`, `pr`)
+- Daily ops are **top-level short commands** (`sync`, `log`)
 - **Always support `--json`** for scripting and AI agents
 - **Parallel by default** for reads, serial for writes
 - No new external dependencies unless justified (`gh` for PR ops is the exception)

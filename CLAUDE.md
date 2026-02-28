@@ -31,7 +31,7 @@ Use `just` (see `Justfile`). Key recipes:
 
 ## CLI Command Structure
 
-Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `wsp diff`, `wsp exec`, `wsp cd`, `wsp sync`, `wsp push`, `wsp log`.
+Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `wsp diff`, `wsp exec`, `wsp cd`, `wsp sync`, `wsp log`.
 
 Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo ls`, `wsp repo fetch`.
 
@@ -59,7 +59,7 @@ When writing docs or examples, use the actual command names above — not the lo
 ### Expected workflow
 
 1. `wsp new my-feature` — creates workspace with branch
-2. Make changes, commit, push, open PR
+2. Make changes, commit, push, open PR (using git directly)
 3. PR gets merged (regular, squash, or rebase merge)
 4. `wsp rm` — fetches origin (with prune), detects merge via the three-layer check (`branch_is_merged` → `branch_is_squash_merged` → `is_content_merged`), removes workspace
 
