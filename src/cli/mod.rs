@@ -54,6 +54,9 @@ pub fn build_cli() -> Command {
         .subcommand_required(true)
         .subcommand(skill::install_cmd());
 
+    #[cfg(feature = "codegen")]
+    let skill_cmd = skill_cmd.subcommand(skill::generate_cmd());
+
     let setup = Command::new("setup")
         .about("Configure repos, groups, and settings")
         .subcommand_required(true)
@@ -128,6 +131,8 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
             },
             Some(("skill", sub2)) => match sub2.subcommand() {
                 Some(("install", m)) => skill::run_install(m, paths),
+                #[cfg(feature = "codegen")]
+                Some(("generate", m)) => skill::run_generate(m, paths),
                 _ => unreachable!(),
             },
             Some(("completion", m)) => completion::run(m, paths),

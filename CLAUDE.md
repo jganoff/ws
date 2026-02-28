@@ -5,11 +5,14 @@
 Use `just` (see `Justfile`). Key recipes:
 
 - `just` - Default: runs `check` (fmt --check + clippy)
-- `just build` - Build release binary (runs check first)
+- `just build` - Build release binary (runs check first, regenerates SKILL.md)
 - `just test` - Run all tests
-- `just ci` - Full CI pipeline (check + build + test)
+- `just ci` - Full CI pipeline (check + build + test + SKILL.md freshness check)
+- `just skill` - Regenerate `skills/wsp-manage/SKILL.md` from CLI introspection
 - `just fix` - Auto-fix formatting and lint
 - `just install-hooks` - Install git pre-commit hook
+
+The `codegen` Cargo feature gates `wsp setup skill generate`, which introspects clap and serializes sample outputs to produce SKILL.md. `just check` runs clippy with and without this feature. Adding a new command, flag, or output struct automatically updates SKILL.md on next `just build`.
 
 ## Architecture
 
@@ -101,6 +104,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 ## Gotchas
 
 - **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code, but `src/group.rs` tests have a manual `Config { ... }` initializer. Search for `Config {` across the codebase when adding new fields.
+- **Adding commands or output structs**: The `codegen` feature gates SKILL.md generation. When adding a new command, it appears in SKILL.md automatically via clap introspection. When adding a new output struct, add a `#[cfg(feature = "codegen")] sample()` method in `src/output.rs` and wire it in `src/cli/skill.rs`. Run `just skill` to regenerate. `just ci` will fail if SKILL.md is stale.
 
 ## Releasing
 

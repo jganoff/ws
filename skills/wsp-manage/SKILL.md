@@ -15,85 +15,245 @@ Use `wsp` to manage workspaces that span multiple git repositories. Each workspa
 ### Repos (global registry)
 
 ```bash
-wsp setup repo add <git-url>        # Register + bare-clone a repo
-wsp setup repo list --json          # List registered repos
-wsp setup repo remove <name>        # Remove repo + mirror
+wsp setup repo add <url>                        # Register and bare-clone a repository
+wsp setup repo list                             # List registered repositories
+wsp setup repo remove <name>                    # Remove a repository and its mirror
 ```
 
 ### Groups (named sets of repos)
 
 ```bash
-wsp setup group new <name> <repo>...      # Create a group
-wsp setup group list --json               # List groups
-wsp setup group show <name> --json        # Show repos in a group
-wsp setup group delete <name>             # Delete a group
-wsp setup group update <name> --add <repo>... --remove <repo>...
+wsp setup group new <name> <repos>...           # Create a new repo group
+wsp setup group list                            # List all groups
+wsp setup group show <name>                     # Show repos in a group
+wsp setup group delete <name>                   # Delete a group
+wsp setup group update <name> [--add <add>]... [--remove <remove>]... # Add or remove repos from a group
 ```
 
 ### Workspaces
 
 ```bash
-wsp new <name> <repo>... [--group <g>]   # Create workspace with local clones
-wsp ls --json                             # List all workspaces
-wsp st [<name>] --json                   # Git status across repos
-wsp diff [<name>] [-- <git-diff-args>] --json  # Git diff across repos
-wsp repo add <repo>... [--group <g>]     # Add repos to current workspace
-wsp repo rm <repo>... [-f]               # Remove repos from current workspace
-wsp repo fetch [--all] [--prune]         # Fetch updates (parallel)
-wsp rm [<name>] [-f]                     # Remove workspace + clones
-wsp exec <name> -- <command>             # Run command in each repo
-wsp cd <name>                            # cd into workspace (shell integration)
+wsp new <workspace> [<repos>]... [-g <group>] [--no-fetch] # Create a new workspace
+wsp ls                                          # List active workspaces (alias: list)
+wsp st [<workspace>]                            # Git status across workspace repos (alias: status)
+wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos
+wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo
+wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] # Fetch and rebase/merge all workspace repos
+wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
+wsp cd <workspace>                              # Change directory into a workspace
+wsp rm [<workspace>] [-f]                       # Remove a workspace (alias: remove)
+wsp repo add [<repos>]... [-g <group>]          # Add repos to current workspace
+wsp repo rm <repos>... [-f]                     # Remove repo(s) from the current workspace (alias: remove)
+wsp repo fetch [--all] [--prune]                # Fetch updates for workspace repos
+wsp repo ls                                     # List repos in the current workspace (alias: list)
 ```
 
 ### Config
 
 ```bash
-wsp setup config get branch-prefix --json
-wsp setup config set branch-prefix <value>
-wsp setup config unset branch-prefix
+wsp setup config list                           # List all config values
+wsp setup config get <key>                      # Get a config value
+wsp setup config set <key> <value>              # Set a config value
+wsp setup config unset <key>                    # Unset a config value
 ```
 
 ### Skill management
 
 ```bash
-wsp setup skill install                 # Install this skill to ~/.claude/skills/
+wsp setup skill install                         # Install wsp Claude Code skill to ~/.claude/skills/
 ```
 
 ## JSON Output Schemas
 
 ### `wsp setup repo list --json`
 ```json
-{"repos": [{"identity": "github.com/org/repo", "shortname": "repo", "url": "git@github.com:org/repo.git"}]}
+{
+  "repos": [
+    {
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "url": "git@github.com:acme/api-gateway.git"
+    }
+  ]
+}
 ```
 
 ### `wsp ls --json`
 ```json
-{"workspaces": [{"name": "my-ws", "branch": "my-ws", "repo_count": 3, "path": "/home/user/dev/workspaces/my-ws"}]}
+{
+  "workspaces": [
+    {
+      "name": "my-feature",
+      "branch": "my-feature",
+      "repo_count": 2,
+      "path": "~/dev/workspaces/my-feature"
+    }
+  ]
+}
 ```
 
 ### `wsp st --json`
 ```json
-{"workspace": "my-ws", "branch": "my-ws", "repos": [{"name": "repo-a", "branch": "my-ws", "ahead": 0, "changed": 2, "status": "2 modified"}]}
+{
+  "workspace": "my-feature",
+  "branch": "my-feature",
+  "repos": [
+    {
+      "name": "api-gateway",
+      "branch": "my-feature",
+      "ahead": 2,
+      "changed": 1,
+      "has_upstream": true,
+      "status": "2 ahead, 1 modified"
+    }
+  ]
+}
 ```
 
 ### `wsp diff --json`
 ```json
-{"repos": [{"name": "repo-a", "diff": "--- a/file\n+++ b/file\n..."}]}
+{
+  "repos": [
+    {
+      "name": "api-gateway",
+      "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n+use std::io;\n ..."
+    }
+  ]
+}
+```
+
+### `wsp log --json`
+```json
+{
+  "repos": [
+    {
+      "name": "api-gateway",
+      "commits": [
+        {
+          "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+          "timestamp": 1700000000,
+          "subject": "feat: add billing endpoint"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### `wsp sync --json`
+```json
+{
+  "workspace": "my-feature",
+  "branch": "my-feature",
+  "dry_run": false,
+  "repos": [
+    {
+      "name": "api-gateway",
+      "action": "rebase onto origin/main",
+      "ok": true,
+      "detail": "2 commit(s) rebased"
+    }
+  ]
+}
+```
+
+### `wsp repo ls --json`
+```json
+{
+  "repos": [
+    {
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "dir_name": "api-gateway"
+    },
+    {
+      "identity": "github.com/acme/shared-lib",
+      "shortname": "shared-lib",
+      "dir_name": "shared-lib",
+      "git_ref": "main"
+    }
+  ]
+}
+```
+
+### `wsp repo fetch --json`
+```json
+{
+  "repos": [
+    {
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "ok": true
+    }
+  ]
+}
+```
+
+### `wsp setup group list --json`
+```json
+{
+  "groups": [
+    {
+      "name": "backend",
+      "repo_count": 3
+    }
+  ]
+}
+```
+
+### `wsp setup group show <name> --json`
+```json
+{
+  "name": "backend",
+  "repos": [
+    "api-gateway",
+    "user-service",
+    "shared-lib"
+  ]
+}
+```
+
+### `wsp setup config list --json`
+```json
+{
+  "entries": [
+    {
+      "key": "branch-prefix",
+      "value": "jg"
+    },
+    {
+      "key": "workspaces-dir",
+      "value": "~/dev/workspaces"
+    },
+    {
+      "key": "sync-strategy",
+      "value": "rebase"
+    }
+  ]
+}
 ```
 
 ### `wsp setup config get <key> --json`
 ```json
-{"key": "branch-prefix", "value": "myname"}
+{
+  "key": "branch-prefix",
+  "value": "jg"
+}
 ```
 
-### Mutation commands (add, remove, new, etc.)
+### `Mutation commands (new, rm, add, remove, set, etc.)`
 ```json
-{"ok": true, "message": "Registered github.com/org/repo"}
+{
+  "ok": true,
+  "message": "Registered github.com/acme/api-gateway"
+}
 ```
 
-### Errors
+### `Errors`
 ```json
-{"error": "repo \"foo\" not found"}
+{
+  "error": "repo \"foo\" not found"
+}
 ```
 
 ## Shortname Resolution
@@ -133,6 +293,12 @@ cd ~/dev/workspaces/my-feature                # Enter workspace
 ```bash
 wsp st --json          # From inside a workspace
 wsp diff --json        # See all diffs
+```
+
+### Sync with upstream
+```bash
+wsp sync --json        # Fetch + rebase all repos
+wsp sync --strategy merge --json  # Use merge instead of rebase
 ```
 
 ### Run tests across all repos

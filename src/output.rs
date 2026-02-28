@@ -277,6 +277,224 @@ pub struct SyncRepoResult {
 }
 
 // ---------------------------------------------------------------------------
+// Sample constructors for SKILL.md generation (codegen only)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "codegen")]
+impl RepoListOutput {
+    pub fn sample() -> Self {
+        Self {
+            repos: vec![RepoListEntry {
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                url: "git@github.com:acme/api-gateway.git".into(),
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl GroupListOutput {
+    pub fn sample() -> Self {
+        Self {
+            groups: vec![GroupListEntry {
+                name: "backend".into(),
+                repo_count: 3,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl GroupShowOutput {
+    pub fn sample() -> Self {
+        Self {
+            name: "backend".into(),
+            repos: vec![
+                "api-gateway".into(),
+                "user-service".into(),
+                "shared-lib".into(),
+            ],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl WorkspaceListOutput {
+    pub fn sample() -> Self {
+        Self {
+            hint: None,
+            workspaces: vec![WorkspaceListEntry {
+                name: "my-feature".into(),
+                branch: "my-feature".into(),
+                repo_count: 2,
+                path: "~/dev/workspaces/my-feature".into(),
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl StatusOutput {
+    pub fn sample() -> Self {
+        Self {
+            workspace: "my-feature".into(),
+            branch: "my-feature".into(),
+            repos: vec![RepoStatusEntry {
+                name: "api-gateway".into(),
+                branch: "my-feature".into(),
+                ahead: 2,
+                changed: 1,
+                has_upstream: true,
+                status: "2 ahead, 1 modified".into(),
+                error: None,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl DiffOutput {
+    pub fn sample() -> Self {
+        Self {
+            repos: vec![RepoDiffEntry {
+                name: "api-gateway".into(),
+                diff: "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n+use std::io;\n ..."
+                    .into(),
+                error: None,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl LogOutput {
+    pub fn sample() -> Self {
+        Self {
+            oneline: false,
+            repos: vec![RepoLogEntry {
+                name: "api-gateway".into(),
+                commits: vec![LogCommit {
+                    hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".into(),
+                    timestamp: 1700000000,
+                    subject: "feat: add billing endpoint".into(),
+                }],
+                raw: None,
+                error: None,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl SyncOutput {
+    pub fn sample() -> Self {
+        Self {
+            workspace: "my-feature".into(),
+            branch: "my-feature".into(),
+            dry_run: false,
+            repos: vec![SyncRepoResult {
+                name: "api-gateway".into(),
+                action: "rebase onto origin/main".into(),
+                ok: true,
+                detail: Some("2 commit(s) rebased".into()),
+                error: None,
+                repo_dir: PathBuf::from("/tmp"),
+                target: String::new(),
+                strategy: String::new(),
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl ConfigListOutput {
+    pub fn sample() -> Self {
+        Self {
+            entries: vec![
+                ConfigListEntry {
+                    key: "branch-prefix".into(),
+                    value: "jg".into(),
+                },
+                ConfigListEntry {
+                    key: "workspaces-dir".into(),
+                    value: "~/dev/workspaces".into(),
+                },
+                ConfigListEntry {
+                    key: "sync-strategy".into(),
+                    value: "rebase".into(),
+                },
+            ],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl ConfigGetOutput {
+    pub fn sample() -> Self {
+        Self {
+            key: "branch-prefix".into(),
+            value: Some("jg".into()),
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl WorkspaceRepoListOutput {
+    pub fn sample() -> Self {
+        Self {
+            repos: vec![
+                WorkspaceRepoListEntry {
+                    identity: "github.com/acme/api-gateway".into(),
+                    shortname: "api-gateway".into(),
+                    dir_name: "api-gateway".into(),
+                    git_ref: None,
+                },
+                WorkspaceRepoListEntry {
+                    identity: "github.com/acme/shared-lib".into(),
+                    shortname: "shared-lib".into(),
+                    dir_name: "shared-lib".into(),
+                    git_ref: Some("main".into()),
+                },
+            ],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl FetchOutput {
+    pub fn sample() -> Self {
+        Self {
+            repos: vec![FetchRepoResult {
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                ok: true,
+                error: None,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl MutationOutput {
+    pub fn sample() -> Self {
+        Self {
+            ok: true,
+            message: "Registered github.com/acme/api-gateway".into(),
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl ErrorOutput {
+    pub fn sample() -> Self {
+        Self {
+            error: "repo \"foo\" not found".into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Output enum — returned by all command handlers
 // ---------------------------------------------------------------------------
 

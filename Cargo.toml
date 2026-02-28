@@ -21,6 +21,9 @@ tabwriter = "1"
 tempfile = "3"
 url = "2"
 
+[features]
+codegen = []
+
 [dev-dependencies]
 assert_cmd = "2"
 
