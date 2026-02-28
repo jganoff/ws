@@ -14,6 +14,7 @@ all of that:
 - **One command** — create a workspace with consistent branches across repos
 - **Safe cleanup** — detects uncommitted work, unmerged and squash-merged branches
 - **Context repos** — pin dependencies to a ref without branching them
+- **AI-agent aware** — `--json` on every command, agent context generation planned
 
 ## Quick start
 
@@ -110,6 +111,8 @@ unmerged branches (including squash-merged PRs). Use `--force` to override.
 | `wsp diff [workspace] [-- args]` | Git diff across repos |
 | `wsp rm [workspace] [-f]` | Remove a workspace |
 | `wsp cd <workspace>` | Change directory into a workspace |
+| `wsp sync [workspace] [--strategy merge]` | Fetch and rebase/merge all repos |
+| `wsp log [workspace] [-- args]` | Git log across repos |
 | `wsp exec <workspace> -- <cmd>` | Run a command in each repo |
 | `wsp repo add [repos...] [-g group]` | Add repos to current workspace |
 | `wsp repo rm <repos...> [-f]` | Remove repos from current workspace |
