@@ -7,6 +7,16 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+const CURRENT_CONFIG_VERSION: u32 = 0;
+
+fn default_version() -> u32 {
+    CURRENT_CONFIG_VERSION
+}
+
+fn is_current_version(v: &u32) -> bool {
+    *v == CURRENT_CONFIG_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoEntry {
     pub url: String,
@@ -20,6 +30,11 @@ pub struct GroupEntry {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(
+        default = "default_version",
+        skip_serializing_if = "is_current_version"
+    )]
+    pub version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_prefix: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -42,6 +57,12 @@ impl Config {
 
         let data = fs::read_to_string(path)?;
         let cfg: Config = serde_yaml_ng::from_str(&data)?;
+        if cfg.version > CURRENT_CONFIG_VERSION {
+            eprintln!(
+                "warning: config.yaml has version {}, but this wsp only supports version {}. Some fields may be ignored.",
+                cfg.version, CURRENT_CONFIG_VERSION
+            );
+        }
         Ok(cfg)
     }
 
@@ -331,5 +352,48 @@ mod tests {
 
         let ws_dir = default_workspaces_dir_with(Some(Path::new("/home/user"))).unwrap();
         assert_eq!(ws_dir, PathBuf::from("/home/user/dev/workspaces"));
+    }
+
+    #[test]
+    fn test_version_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+
+        let cfg = Config::default();
+        assert_eq!(cfg.version, 0);
+        cfg.save_to(&cfg_path).unwrap();
+
+        // version 0 should be omitted from YAML via skip_serializing_if
+        let yaml = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(
+            !yaml.contains("version"),
+            "version 0 should be omitted from YAML"
+        );
+
+        let loaded = Config::load_from(&cfg_path).unwrap();
+        assert_eq!(loaded.version, 0);
+    }
+
+    #[test]
+    fn test_backward_compat_no_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+
+        std::fs::write(&cfg_path, "branch_prefix: test\n").unwrap();
+
+        let cfg = Config::load_from(&cfg_path).unwrap();
+        assert_eq!(cfg.version, 0);
+    }
+
+    #[test]
+    fn test_unknown_version_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+
+        std::fs::write(&cfg_path, "version: 99\nbranch_prefix: test\n").unwrap();
+
+        let cfg = Config::load_from(&cfg_path).unwrap();
+        assert_eq!(cfg.version, 99);
+        assert_eq!(cfg.branch_prefix.as_deref(), Some("test"));
     }
 }

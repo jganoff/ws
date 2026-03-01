@@ -358,6 +358,7 @@ mod tests {
             map.insert(id.to_string(), None);
         }
         Metadata {
+            version: 0,
             name: "test".into(),
             branch: "test".into(),
             repos: map,
@@ -384,6 +385,7 @@ mod tests {
             }
         }
         Metadata {
+            version: 0,
             name: "test".into(),
             branch: "test".into(),
             repos: map,

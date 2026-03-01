@@ -12,6 +12,16 @@ use crate::git;
 use crate::giturl;
 use crate::mirror;
 
+const CURRENT_METADATA_VERSION: u32 = 0;
+
+fn default_version() -> u32 {
+    CURRENT_METADATA_VERSION
+}
+
+fn is_current_version(v: &u32) -> bool {
+    *v == CURRENT_METADATA_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceRepoRef {
     #[serde(skip_serializing_if = "String::is_empty", default)]
@@ -20,6 +30,11 @@ pub struct WorkspaceRepoRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
+    #[serde(
+        default = "default_version",
+        skip_serializing_if = "is_current_version"
+    )]
+    pub version: u32,
     pub name: String,
     pub branch: String,
     pub repos: BTreeMap<String, Option<WorkspaceRepoRef>>,
@@ -93,6 +108,12 @@ pub fn validate_name(name: &str) -> Result<()> {
 pub fn load_metadata(ws_dir: &Path) -> Result<Metadata> {
     let data = fs::read_to_string(ws_dir.join(METADATA_FILE))?;
     let m: Metadata = serde_yaml_ng::from_str(&data)?;
+    if m.version > CURRENT_METADATA_VERSION {
+        eprintln!(
+            "warning: .wsp.yaml has version {}, but this wsp only supports version {}. Some fields may be ignored.",
+            m.version, CURRENT_METADATA_VERSION
+        );
+    }
     for (identity, dir_name) in &m.dirs {
         validate_dir_name(dir_name)
             .map_err(|e| anyhow::anyhow!("invalid dir override for {}: {}", identity, e))?;
@@ -204,6 +225,7 @@ fn create_inner(
     let dirs = compute_dir_names(&identities)?;
 
     let meta = Metadata {
+        version: CURRENT_METADATA_VERSION,
         name: name.to_string(),
         branch: branch.to_string(),
         repos,
@@ -1164,6 +1186,7 @@ mod tests {
     fn test_save_and_load_metadata_round_trip() {
         let tmp = tempfile::tempdir().unwrap();
         let meta = Metadata {
+            version: CURRENT_METADATA_VERSION,
             name: "my-ws".into(),
             branch: "my-ws".into(),
             repos: BTreeMap::from([
@@ -1189,6 +1212,7 @@ mod tests {
     fn test_save_and_load_metadata_round_trip_with_refs() {
         let tmp = tempfile::tempdir().unwrap();
         let meta = Metadata {
+            version: CURRENT_METADATA_VERSION,
             name: "my-ws".into(),
             branch: "my-ws".into(),
             repos: BTreeMap::from([
@@ -1475,6 +1499,7 @@ mod tests {
     #[test]
     fn test_dir_name_with_override() {
         let meta = Metadata {
+            version: CURRENT_METADATA_VERSION,
             name: "test".into(),
             branch: "test".into(),
             repos: BTreeMap::from([("github.com/acme/utils".into(), None)]),
@@ -1490,6 +1515,7 @@ mod tests {
     #[test]
     fn test_dir_name_without_override() {
         let meta = Metadata {
+            version: CURRENT_METADATA_VERSION,
             name: "test".into(),
             branch: "test".into(),
             repos: BTreeMap::from([("github.com/acme/utils".into(), None)]),
@@ -2043,5 +2069,51 @@ mod tests {
         // Remove should succeed without --force
         remove(&paths, "rm-div-squash", false).unwrap();
         assert!(!ws_dir.exists());
+    }
+
+    #[test]
+    fn test_metadata_version_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let meta = Metadata {
+            version: CURRENT_METADATA_VERSION,
+            name: "my-ws".into(),
+            branch: "my-ws".into(),
+            repos: BTreeMap::from([("github.com/user/repo-a".into(), None)]),
+            created: Utc::now(),
+            dirs: BTreeMap::new(),
+        };
+
+        save_metadata(tmp.path(), &meta).unwrap();
+
+        // version 0 should be omitted from YAML via skip_serializing_if
+        let yaml = fs::read_to_string(tmp.path().join(METADATA_FILE)).unwrap();
+        assert!(
+            !yaml.contains("version"),
+            "version 0 should be omitted from YAML"
+        );
+
+        let loaded = load_metadata(tmp.path()).unwrap();
+        assert_eq!(loaded.version, 0);
+    }
+
+    #[test]
+    fn test_metadata_backward_compat_no_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let yaml = "name: old-ws\nbranch: old-ws\nrepos:\n  github.com/acme/api:\ncreated: '2024-01-01T00:00:00Z'\n";
+        fs::write(tmp.path().join(METADATA_FILE), yaml).unwrap();
+
+        let meta = load_metadata(tmp.path()).unwrap();
+        assert_eq!(meta.version, 0);
+    }
+
+    #[test]
+    fn test_metadata_unknown_version_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let yaml = "version: 99\nname: future-ws\nbranch: future-ws\nrepos:\n  github.com/acme/api:\ncreated: '2024-01-01T00:00:00Z'\n";
+        fs::write(tmp.path().join(METADATA_FILE), yaml).unwrap();
+
+        let meta = load_metadata(tmp.path()).unwrap();
+        assert_eq!(meta.version, 99);
+        assert_eq!(meta.name, "future-ws");
     }
 }

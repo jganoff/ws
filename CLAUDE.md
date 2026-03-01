@@ -104,6 +104,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 ## Gotchas
 
 - **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code, but `src/group.rs` tests have a manual `Config { ... }` initializer. Search for `Config {` across the codebase when adding new fields.
+- **Adding fields to `Metadata`**: Test helpers in `src/lang/go.rs`, `src/lang/mod.rs`, and `src/workspace.rs` tests have manual `Metadata { ... }` initializers. Search for `Metadata {` across the codebase when adding new fields.
 - **Adding commands or output structs**: The `codegen` feature gates SKILL.md generation. When adding a new command, it appears in SKILL.md automatically via clap introspection. When adding a new output struct, add a `#[cfg(feature = "codegen")] sample()` method in `src/output.rs` and wire it in `src/cli/skill.rs`. Run `just skill` to regenerate. `just ci` will fail if SKILL.md is stale.
 
 ## Releasing

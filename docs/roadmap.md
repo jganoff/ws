@@ -16,16 +16,6 @@ Generate `AGENTS.md` (with `CLAUDE.md` symlink) at the workspace root so AI agen
 - [ ] Call from `new`, `repo add`, `repo rm`
 - [ ] Table-driven tests for marker parsing and FS integration
 
-### Config/Metadata Version Field
-
-**Complexity:** Small
-
-Add `version: 1` to both `config.yaml` and `.wsp.yaml`. Enables safe schema migration for all future changes. Must land before 1.0.
-
-- [ ] Add `version` field to `Config` struct (default 1, skip_serializing_if matches current)
-- [ ] Add `version` field to `Metadata` struct
-- [ ] Warn on unknown version (future-proofing)
-- [ ] Tests for version round-trip and unknown-version warning
 
 ## P1 — Adoption
 
