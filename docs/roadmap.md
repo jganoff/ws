@@ -91,6 +91,16 @@ Diagnostic and recovery command. Detects and optionally fixes common state probl
 - [ ] `--fix` flag to auto-repair what it can
 - [ ] Report disk usage for mirrors and workspaces
 
+### `.wspignore`
+
+**Complexity:** Small
+
+Suppress workspace root safety check warnings for specific paths. Two layers: global (`~/.local/share/wsp/wspignore`) and per-workspace (`.wspignore` at workspace root). Simple format: one path per line, `#` comments, trailing `/` for directory prefix match. No globs.
+
+- [ ] Per-workspace `.wspignore` file
+- [ ] Global `~/.local/share/wsp/wspignore` file
+- [ ] Integrate with `check_root_content()` in `src/workspace.rs`
+
 ### `.code-workspace` Generation
 
 **Complexity:** Small
