@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 
 use crate::workspace::Metadata;
 
-const MARKER_BEGIN: &str = "<!-- wsp:begin -->";
-const MARKER_END: &str = "<!-- wsp:end -->";
+pub(crate) const MARKER_BEGIN: &str = "<!-- wsp:begin -->";
+pub(crate) const MARKER_END: &str = "<!-- wsp:end -->";
 const SKILL_CONTENT: &str = include_str!("../skills/wsp-manage/SKILL.md");
 
 /// Generate or update AGENTS.md, CLAUDE.md symlink, and workspace skill.

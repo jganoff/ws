@@ -1,4 +1,5 @@
 mod go;
+pub(crate) use go::GO_WORK_HEADER;
 
 use std::path::Path;
 
