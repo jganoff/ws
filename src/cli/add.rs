@@ -74,9 +74,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     eprintln!("Adding {} repos to workspace...", repo_refs.len());
     workspace::add_repos(&paths.mirrors_dir, &ws_dir, &repo_refs, &upstream_urls)?;
 
-    match workspace::load_metadata(&ws_dir) {
-        Ok(meta) => crate::lang::run_integrations(&ws_dir, &meta, &cfg),
+    let meta_result = workspace::load_metadata(&ws_dir);
+    match &meta_result {
+        Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &cfg),
         Err(e) => eprintln!("warning: skipping language integrations: {}", e),
+    }
+    if cfg.agent_md.unwrap_or(true)
+        && let Ok(meta) = &meta_result
+        && let Err(e) = crate::agentmd::update(&ws_dir, meta)
+    {
+        eprintln!("warning: AGENTS.md generation failed: {}", e);
     }
 
     Ok(Output::Mutation(MutationOutput {

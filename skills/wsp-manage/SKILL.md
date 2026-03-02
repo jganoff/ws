@@ -16,7 +16,7 @@ Use `wsp` to manage workspaces that span multiple git repositories. Each workspa
 
 ```bash
 wsp setup repo add <url>                        # Register and bare-clone a repository
-wsp setup repo list                             # List registered repositories
+wsp setup repo list                             # List registered repositories [read-only]
 wsp setup repo remove <name>                    # Remove a repository and its mirror
 ```
 
@@ -24,8 +24,8 @@ wsp setup repo remove <name>                    # Remove a repository and its mi
 
 ```bash
 wsp setup group new <name> <repos>...           # Create a new repo group
-wsp setup group list                            # List all groups
-wsp setup group show <name>                     # Show repos in a group
+wsp setup group list                            # List all groups [read-only]
+wsp setup group show <name>                     # Show repos in a group [read-only]
 wsp setup group delete <name>                   # Delete a group
 wsp setup group update <name> [--add <add>]... [--remove <remove>]... # Add or remove repos from a group
 ```
@@ -34,25 +34,25 @@ wsp setup group update <name> [--add <add>]... [--remove <remove>]... # Add or r
 
 ```bash
 wsp new <workspace> [<repos>]... [-g <group>] [--no-fetch] # Create a new workspace
-wsp ls                                          # List active workspaces (alias: list)
-wsp st [<workspace>]                            # Git status across workspace repos (alias: status)
-wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos
-wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo
+wsp ls                                          # List active workspaces [read-only] (alias: list)
+wsp st [<workspace>]                            # Git status across workspace repos [read-only] (alias: status)
+wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
+wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo [read-only]
 wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] # Fetch and rebase/merge all workspace repos
 wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
-wsp cd <workspace>                              # Change directory into a workspace
+wsp cd <workspace>                              # Change directory into a workspace [read-only]
 wsp rm [<workspace>] [-f]                       # Remove a workspace (alias: remove)
 wsp repo add [<repos>]... [-g <group>]          # Add repos to current workspace
 wsp repo rm <repos>... [-f]                     # Remove repo(s) from the current workspace (alias: remove)
 wsp repo fetch [--all] [--prune]                # Fetch updates for workspace repos
-wsp repo ls                                     # List repos in the current workspace (alias: list)
+wsp repo ls                                     # List repos in the current workspace [read-only] (alias: list)
 ```
 
 ### Config
 
 ```bash
-wsp setup config list                           # List all config values
-wsp setup config get <key>                      # Get a config value
+wsp setup config list                           # List all config values [read-only]
+wsp setup config get <key>                      # Get a config value [read-only]
 wsp setup config set <key> <value>              # Set a config value
 wsp setup config unset <key>                    # Unset a config value
 ```

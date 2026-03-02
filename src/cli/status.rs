@@ -43,7 +43,7 @@ mod tests {
 pub fn cmd() -> Command {
     Command::new("st")
         .visible_alias("status")
-        .about("Git status across workspace repos")
+        .about("Git status across workspace repos [read-only]")
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
 }
 

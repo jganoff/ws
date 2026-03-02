@@ -9,7 +9,7 @@ use crate::workspace;
 pub fn cmd() -> Command {
     Command::new("ls")
         .visible_alias("list")
-        .about("List repos in the current workspace")
+        .about("List repos in the current workspace [read-only]")
 }
 
 pub fn run(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {

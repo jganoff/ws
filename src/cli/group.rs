@@ -22,15 +22,17 @@ pub fn new_cmd() -> Command {
 }
 
 pub fn list_cmd() -> Command {
-    Command::new("list").about("List all groups")
+    Command::new("list").about("List all groups [read-only]")
 }
 
 pub fn show_cmd() -> Command {
-    Command::new("show").about("Show repos in a group").arg(
-        Arg::new("name")
-            .required(true)
-            .add(ArgValueCandidates::new(completers::complete_groups)),
-    )
+    Command::new("show")
+        .about("Show repos in a group [read-only]")
+        .arg(
+            Arg::new("name")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_groups)),
+        )
 }
 
 pub fn delete_cmd() -> Command {

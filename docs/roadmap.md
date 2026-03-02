@@ -2,21 +2,6 @@
 
 Prioritized feature plan for wsp, organized by shipping priority.
 
-## P0 — Differentiation
-
-### AGENTS.md Generation
-
-**Complexity:** Medium | [Feature spec](features/agent-md.md)
-
-Generate `AGENTS.md` (with `CLAUDE.md` symlink) at the workspace root so AI agents have context about repos, branches, and available `wsp` commands. Uses marked sections (`<!-- wsp:begin/end -->`) to preserve user-written content across updates.
-
-- [ ] New `src/agentmd.rs` module with marked-section parser
-- [ ] `CLAUDE.md` symlink management
-- [ ] Config key `agent-md` (default on)
-- [ ] Call from `new`, `repo add`, `repo rm`
-- [ ] Table-driven tests for marker parsing and FS integration
-
-
 ## P1 — Adoption
 
 ### `wsp import`

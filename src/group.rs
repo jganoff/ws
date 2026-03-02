@@ -82,6 +82,7 @@ mod tests {
             language_integrations: None,
             workspaces_dir: None,
             sync_strategy: None,
+            agent_md: None,
         }
     }
 

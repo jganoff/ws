@@ -10,7 +10,7 @@ use super::completers;
 
 pub fn cmd() -> Command {
     Command::new("cd")
-        .about("Change directory into a workspace")
+        .about("Change directory into a workspace [read-only]")
         .arg(
             Arg::new("workspace")
                 .required(true)

@@ -13,7 +13,7 @@ use crate::workspace;
 
 pub fn cmd() -> Command {
     Command::new("log")
-        .about("Show commits ahead of upstream per workspace repo")
+        .about("Show commits ahead of upstream per workspace repo [read-only]")
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("oneline")

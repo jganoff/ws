@@ -11,7 +11,7 @@ use crate::workspace;
 
 pub fn cmd() -> Command {
     Command::new("diff")
-        .about("Show git diff across workspace repos")
+        .about("Show git diff across workspace repos [read-only]")
         .arg(Arg::new("workspace"))
         .arg(
             Arg::new("args")

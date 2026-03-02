@@ -7,12 +7,12 @@ use crate::config::{self, Paths};
 use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, MutationOutput, Output};
 
 pub fn list_cmd() -> Command {
-    Command::new("list").about("List all config values")
+    Command::new("list").about("List all config values [read-only]")
 }
 
 pub fn get_cmd() -> Command {
     Command::new("get")
-        .about("Get a config value")
+        .about("Get a config value [read-only]")
         .arg(Arg::new("key").required(true))
 }
 
@@ -31,29 +31,28 @@ pub fn unset_cmd() -> Command {
 
 pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let cfg = config::Config::load_from(&paths.config_path)?;
-    let mut entries = Vec::new();
-
-    // branch-prefix: show value or (not set)
-    entries.push(ConfigListEntry {
-        key: "branch-prefix".into(),
-        value: cfg
-            .branch_prefix
-            .as_deref()
-            .unwrap_or("(not set)")
-            .to_string(),
-    });
-
-    // workspaces-dir: show effective value (explicit or resolved default)
-    entries.push(ConfigListEntry {
-        key: "workspaces-dir".into(),
-        value: paths.workspaces_dir.display().to_string(),
-    });
-
-    // sync-strategy
-    entries.push(ConfigListEntry {
-        key: "sync-strategy".into(),
-        value: cfg.sync_strategy.as_deref().unwrap_or("rebase").to_string(),
-    });
+    let mut entries = vec![
+        ConfigListEntry {
+            key: "branch-prefix".into(),
+            value: cfg
+                .branch_prefix
+                .as_deref()
+                .unwrap_or("(not set)")
+                .to_string(),
+        },
+        ConfigListEntry {
+            key: "workspaces-dir".into(),
+            value: paths.workspaces_dir.display().to_string(),
+        },
+        ConfigListEntry {
+            key: "sync-strategy".into(),
+            value: cfg.sync_strategy.as_deref().unwrap_or("rebase").to_string(),
+        },
+        ConfigListEntry {
+            key: "agent-md".into(),
+            value: cfg.agent_md.unwrap_or(true).to_string(),
+        },
+    ];
 
     // language integrations: show effective value for all known integrations
     for name in crate::lang::integration_names() {
@@ -88,6 +87,10 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         "sync-strategy" => Ok(Output::ConfigGet(ConfigGetOutput {
             key: key.clone(),
             value: Some(cfg.sync_strategy.as_deref().unwrap_or("rebase").to_string()),
+        })),
+        "agent-md" => Ok(Output::ConfigGet(ConfigGetOutput {
+            key: key.clone(),
+            value: Some(cfg.agent_md.unwrap_or(true).to_string()),
         })),
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
@@ -144,6 +147,17 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 message: format!("sync-strategy = {}", value),
             }))
         }
+        "agent-md" => {
+            let enabled: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
+            cfg.agent_md = Some(enabled);
+            cfg.save_to(&paths.config_path)?;
+            Ok(Output::Mutation(MutationOutput {
+                ok: true,
+                message: format!("agent-md = {}", enabled),
+            }))
+        }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
             let known = crate::lang::integration_names();
@@ -192,6 +206,14 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(Output::Mutation(MutationOutput {
                 ok: true,
                 message: "sync-strategy unset (default: rebase)".into(),
+            }))
+        }
+        "agent-md" => {
+            cfg.agent_md = None;
+            cfg.save_to(&paths.config_path)?;
+            Ok(Output::Mutation(MutationOutput {
+                ok: true,
+                message: "agent-md unset (default: true)".into(),
             }))
         }
         k if k.starts_with("language-integrations.") => {

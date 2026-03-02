@@ -100,10 +100,11 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - When capturing git output that includes tty-dependent formatting (colors, pagers), pass `--color=always` gated on `std::io::stdout().is_terminal() && !is_json` — see `src/cli/diff.rs` for the pattern
 - `build.rs` embeds `git describe` into `WSP_VERSION_STRING` for dev/release differentiation
 - Clap `visible_alias`/`alias` dispatches under the primary command name — only match the primary name in dispatch arms (e.g., `Some(("ls", m))` not `Some(("ls", m)) | Some(("list", m))`)
+- Commands that don't modify workspace/config/repo state get `[read-only]` in their `.about()` text. This propagates to `--help` and SKILL.md automatically via clap introspection. Add it when creating new read-only commands.
 
 ## Gotchas
 
-- **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code, but `src/group.rs` tests have a manual `Config { ... }` initializer. Search for `Config {` across the codebase when adding new fields.
+- **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code, but `src/group.rs` tests have a manual `Config { ... }` initializer. Search for `Config {` across the codebase when adding new fields. Also update `src/cli/cfg.rs` (`run_list`, `run_get`, `run_set`, `run_unset`) to handle the new config key.
 - **Adding fields to `Metadata`**: Test helpers in `src/lang/go.rs`, `src/lang/mod.rs`, and `src/workspace.rs` tests have manual `Metadata { ... }` initializers. Search for `Metadata {` across the codebase when adding new fields.
 - **Adding commands or output structs**: The `codegen` feature gates SKILL.md generation. When adding a new command, it appears in SKILL.md automatically via clap introspection. When adding a new output struct, add a `#[cfg(feature = "codegen")] sample()` method in `src/output.rs` and wire it in `src/cli/skill.rs`. Run `just skill` to regenerate. `just ci` will fail if SKILL.md is stale.
 

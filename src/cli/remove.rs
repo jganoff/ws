@@ -62,9 +62,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     eprintln!("Removing {} repo(s) from workspace...", resolved.len());
     workspace::remove_repos(&ws_dir, &resolved, force)?;
 
-    match workspace::load_metadata(&ws_dir) {
-        Ok(updated_meta) => crate::lang::run_integrations(&ws_dir, &updated_meta, &cfg),
+    let meta_result = workspace::load_metadata(&ws_dir);
+    match &meta_result {
+        Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &cfg),
         Err(e) => eprintln!("warning: skipping language integrations: {}", e),
+    }
+    if cfg.agent_md.unwrap_or(true)
+        && let Ok(meta) = &meta_result
+        && let Err(e) = crate::agentmd::update(&ws_dir, meta)
+    {
+        eprintln!("warning: AGENTS.md generation failed: {}", e);
     }
 
     Ok(Output::Mutation(MutationOutput {

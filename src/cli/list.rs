@@ -8,7 +8,7 @@ use crate::workspace;
 pub fn cmd() -> Command {
     Command::new("ls")
         .visible_alias("list")
-        .about("List active workspaces")
+        .about("List active workspaces [read-only]")
 }
 
 pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {

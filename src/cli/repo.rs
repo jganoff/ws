@@ -17,7 +17,7 @@ pub fn add_cmd() -> Command {
 }
 
 pub fn list_cmd() -> Command {
-    Command::new("list").about("List registered repositories")
+    Command::new("list").about("List registered repositories [read-only]")
 }
 
 pub fn remove_cmd() -> Command {

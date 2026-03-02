@@ -66,7 +66,7 @@ pub fn build_cli() -> Command {
         .subcommand(skill_cmd)
         .subcommand(
             Command::new("completion")
-                .about("Output shell integration (completions + wrapper function)")
+                .about("Output shell integration (completions + wrapper function) [read-only]")
                 .arg(
                     Arg::new("shell")
                         .required(true)
