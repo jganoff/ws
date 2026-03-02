@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.4] - 2026-03-02
+
+### Features
+
+- *(cli)* Auto-generate SKILL.md from clap introspection
+- *(config)* Add version field to Config and Metadata structs
+- *(agentmd)* Generate AGENTS.md, CLAUDE.md symlink, and workspace skill
+- *(status)* Add verbose file lists and workspace root visibility
+
+### Refactor
+
+- *(cli)* Remove `wsp push` command and drop `wsp pr` from roadmap
+- Expose marker and header constants as pub(crate)
+
+### Documentation
+
+- Reprioritize roadmap based on strategic analysis
+- *(roadmap)* Add .wspignore feature
+
 ## [0.5.3] - 2026-02-27
 
 ### Features
