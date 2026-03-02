@@ -40,8 +40,8 @@ pub fn generate_cmd() -> Command {
 pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     use crate::output::{
         ConfigGetOutput, ConfigListOutput, DiffOutput, ErrorOutput, FetchOutput, GroupListOutput,
-        GroupShowOutput, LogOutput, MutationOutput, RepoListOutput, StatusOutput, SyncOutput,
-        WorkspaceListOutput, WorkspaceRepoListOutput,
+        GroupShowOutput, ImportOutput, LogOutput, MutationOutput, RepoListOutput, StatusOutput,
+        SyncOutput, WorkspaceListOutput, WorkspaceRepoListOutput,
     };
 
     let cli = super::build_cli();
@@ -114,6 +114,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
         &mut out,
         "Mutation commands (new, rm, add, remove, set, etc.)",
     );
+    write_schema::<ImportOutput>(&mut out, "wsp setup repo add --from <org> --all --json");
     write_schema::<ErrorOutput>(&mut out, "Errors");
 
     // --- Static reference sections ---
@@ -152,6 +153,7 @@ impl_sample!(
     crate::output::WorkspaceRepoListOutput,
     crate::output::FetchOutput,
     crate::output::MutationOutput,
+    crate::output::ImportOutput,
     crate::output::ErrorOutput,
 );
 

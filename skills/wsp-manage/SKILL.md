@@ -15,7 +15,7 @@ Use `wsp` to manage workspaces that span multiple git repositories. Each workspa
 ### Repos (global registry)
 
 ```bash
-wsp setup repo add <url>                        # Register and bare-clone a repository
+wsp setup repo add [<url>] [--from <from>] [--pattern <pattern>] [--all] [--https] # Register and bare-clone a repository
 wsp setup repo list                             # List registered repositories [read-only]
 wsp setup repo remove <name>                    # Remove a repository and its mirror
 ```
@@ -246,6 +246,19 @@ wsp setup skill install                         # Install wsp Claude Code skill 
 {
   "ok": true,
   "message": "Registered github.com/acme/api-gateway"
+}
+```
+
+### `wsp setup repo add --from <org> --all --json`
+```json
+{
+  "registered": [
+    "github.com/acme/api-gateway",
+    "github.com/acme/user-service"
+  ],
+  "skipped": [
+    "github.com/acme/shared-lib"
+  ]
 }
 ```
 

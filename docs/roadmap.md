@@ -4,25 +4,6 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### `wsp import`
-
-**Complexity:** Medium
-
-Auto-discover and register repos from a GitHub/GitLab org. Eliminates the biggest onboarding wall for teams with many repos.
-
-```
-$ wsp import github.com/acme --pattern "api-*,user-*"
-Registered 5 repos.
-
-$ wsp import github.com/acme --all
-```
-
-- [ ] `gh api` integration to list org repos
-- [ ] `--pattern` glob filtering
-- [ ] `--all` flag
-- [ ] Interactive picker (nice-to-have)
-- [ ] GitLab support (later)
-
 ### Git Subprocess Timeouts
 
 **Complexity:** Small

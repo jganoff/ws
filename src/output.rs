@@ -255,6 +255,21 @@ pub struct ErrorOutput {
 }
 
 #[derive(Serialize)]
+pub struct ImportOutput {
+    pub registered: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<ImportFailure>,
+}
+
+#[derive(Serialize)]
+pub struct ImportFailure {
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Serialize)]
 pub struct SyncOutput {
     pub workspace: String,
     pub branch: String,
@@ -503,6 +518,20 @@ impl ErrorOutput {
     }
 }
 
+#[cfg(feature = "codegen")]
+impl ImportOutput {
+    pub fn sample() -> Self {
+        Self {
+            registered: vec![
+                "github.com/acme/api-gateway".into(),
+                "github.com/acme/user-service".into(),
+            ],
+            skipped: vec!["github.com/acme/shared-lib".into()],
+            failed: vec![],
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Output enum — returned by all command handlers
 // ---------------------------------------------------------------------------
@@ -521,6 +550,7 @@ pub enum Output {
     ConfigList(ConfigListOutput),
     ConfigGet(ConfigGetOutput),
     Mutation(MutationOutput),
+    Import(ImportOutput),
     Path(PathOutput),
     None,
 }
@@ -546,6 +576,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::ConfigList(v) => print_json(&v),
             Output::ConfigGet(v) => print_json(&v),
             Output::Mutation(v) => print_json(&v),
+            Output::Import(v) => print_json(&v),
             Output::Path(v) => print_json(&v),
         };
     }
@@ -564,6 +595,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::ConfigList(v) => render_config_list_text(v),
         Output::ConfigGet(v) => render_config_get_text(v),
         Output::Mutation(v) => render_mutation_text(v),
+        Output::Import(v) => render_import_text(v),
         Output::Path(v) => render_path_text(v),
     }
 }
@@ -573,6 +605,7 @@ pub fn exit_code(output: &Output) -> i32 {
     match output {
         Output::Fetch(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Sync(v) if v.repos.iter().any(|r| !r.ok) => 1,
+        Output::Import(v) if !v.failed.is_empty() => 1,
         _ => 0,
     }
 }
@@ -838,6 +871,31 @@ fn render_config_get_text(v: ConfigGetOutput) -> Result<()> {
 
 fn render_mutation_text(v: MutationOutput) -> Result<()> {
     println!("{}", v.message);
+    Ok(())
+}
+
+fn render_import_text(v: ImportOutput) -> Result<()> {
+    if !v.registered.is_empty() {
+        println!("Registered {} repo(s):", v.registered.len());
+        for id in &v.registered {
+            println!("  {}", id);
+        }
+    }
+    if !v.skipped.is_empty() {
+        println!("Skipped {} (already registered):", v.skipped.len());
+        for id in &v.skipped {
+            println!("  {}", id);
+        }
+    }
+    if !v.failed.is_empty() {
+        eprintln!("Failed {}:", v.failed.len());
+        for f in &v.failed {
+            eprintln!("  {}: {}", f.name, f.error);
+        }
+    }
+    if v.registered.is_empty() && v.failed.is_empty() {
+        println!("No new repos to register.");
+    }
     Ok(())
 }
 
