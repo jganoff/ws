@@ -135,20 +135,28 @@ fn ensure_symlink(ws_dir: &Path) -> Result<()> {
                     return Ok(());
                 }
                 fs::remove_file(&link_path).context("removing stale CLAUDE.md symlink")?;
-                std::os::unix::fs::symlink("AGENTS.md", &link_path)
-                    .context("creating CLAUDE.md symlink")?;
+                symlink_file("AGENTS.md", &link_path).context("creating CLAUDE.md symlink")?;
             }
             // Regular file — leave it alone
         }
         Err(_) => {
             // Path doesn't exist. (Broken symlinks are handled above since
             // symlink_metadata succeeds for broken symlinks and reports is_symlink=true.)
-            std::os::unix::fs::symlink("AGENTS.md", &link_path)
-                .context("creating CLAUDE.md symlink")?;
+            symlink_file("AGENTS.md", &link_path).context("creating CLAUDE.md symlink")?;
         }
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn symlink_file<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(original, link)
+}
+
+#[cfg(windows)]
+fn symlink_file<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(original, link)
 }
 
 fn install_skill(ws_dir: &Path) -> Result<()> {
@@ -160,9 +168,9 @@ fn install_skill(ws_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::symlink_file;
     use super::*;
     use std::collections::BTreeMap;
-    use std::os::unix::fs::symlink;
 
     use chrono::Utc;
 
@@ -468,7 +476,7 @@ mod tests {
         let ws_dir = tmp.path();
 
         // Create a broken symlink
-        symlink("nonexistent-target", ws_dir.join("CLAUDE.md")).unwrap();
+        symlink_file("nonexistent-target", ws_dir.join("CLAUDE.md")).unwrap();
 
         let meta = make_metadata("ws", "ws", &[]);
         update(ws_dir, &meta).unwrap();
