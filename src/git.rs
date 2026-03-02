@@ -427,6 +427,15 @@ pub fn changed_file_count(dir: &Path) -> Result<u32> {
     }
 }
 
+pub fn changed_files(dir: &Path) -> Result<Vec<String>> {
+    let out = run(Some(dir), &["status", "--short"])?;
+    if out.is_empty() {
+        Ok(vec![])
+    } else {
+        Ok(out.lines().map(|l| l.to_string()).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

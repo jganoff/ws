@@ -136,6 +136,10 @@ pub struct StatusOutput {
     pub workspace: String,
     pub branch: String,
     pub repos: Vec<RepoStatusEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub root: Vec<String>,
+    #[serde(skip)]
+    pub verbose: bool,
 }
 
 #[derive(Serialize)]
@@ -146,6 +150,8 @@ pub struct RepoStatusEntry {
     pub changed: u32,
     pub has_upstream: bool,
     pub status: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -347,8 +353,11 @@ impl StatusOutput {
                 changed: 1,
                 has_upstream: true,
                 status: "2 ahead, 1 modified".into(),
+                files: vec![],
                 error: None,
             }],
+            root: vec![],
+            verbose: false,
         }
     }
 }
@@ -674,6 +683,7 @@ fn render_workspace_repo_list_table(v: WorkspaceRepoListOutput) -> Result<()> {
 
 fn render_status_table(v: StatusOutput) -> Result<()> {
     println!("Workspace: {}  Branch: {}\n", v.workspace, v.branch);
+
     let mut table = Table::new(
         Box::new(std::io::stdout()),
         vec![
@@ -690,7 +700,35 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
         };
         table.add_row(vec![rs.name.clone(), rs.branch.clone(), status])?;
     }
-    table.render()
+    if !v.root.is_empty() {
+        let root_status = format!("{} untracked", v.root.len());
+        table.add_row(vec!["(workspace root)".into(), "-".into(), root_status])?;
+    }
+    table.render()?;
+
+    let has_detail = v.repos.iter().any(|r| !r.files.is_empty()) || !v.root.is_empty();
+
+    if v.verbose {
+        for rs in &v.repos {
+            if rs.error.is_some() || rs.files.is_empty() {
+                continue;
+            }
+            println!("\n==> [{}]", rs.name);
+            for f in &rs.files {
+                println!("  {}", f);
+            }
+        }
+        if !v.root.is_empty() {
+            println!("\n==> [workspace root]");
+            for item in &v.root {
+                println!("  {}", item);
+            }
+        }
+    } else if has_detail {
+        println!("\nUse -v to see file details.");
+    }
+
+    Ok(())
 }
 
 fn render_diff_text(v: DiffOutput) -> Result<()> {
@@ -1171,6 +1209,7 @@ mod tests {
                     changed: 2,
                     has_upstream: true,
                     status: "1 ahead, 2 modified".into(),
+                    files: vec![" M src/main.rs".into(), "?? new.txt".into()],
                     error: None,
                 },
                 RepoStatusEntry {
@@ -1180,18 +1219,44 @@ mod tests {
                     changed: 0,
                     has_upstream: false,
                     status: String::new(),
+                    files: vec![],
                     error: Some("parse error".into()),
                 },
             ],
+            root: vec![],
+            verbose: false,
         };
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["workspace"], "my-ws");
         assert_eq!(val["repos"][0]["ahead"], 1);
         assert_eq!(val["repos"][0]["changed"], 2);
         assert_eq!(val["repos"][0]["has_upstream"], true);
+        assert_eq!(val["repos"][0]["files"][0], " M src/main.rs");
+        assert_eq!(val["repos"][0]["files"][1], "?? new.txt");
         assert!(val["repos"][0].get("error").is_none());
+        // repo-b has empty files → omitted
+        assert!(val["repos"][1].get("files").is_none());
         assert_eq!(val["repos"][1]["has_upstream"], false);
         assert_eq!(val["repos"][1]["error"], "parse error");
+        // root is empty → omitted
+        assert!(val.get("root").is_none());
+    }
+
+    #[test]
+    fn test_json_status_with_root() {
+        let output = StatusOutput {
+            workspace: "my-ws".into(),
+            branch: "my-ws".into(),
+            repos: vec![],
+            root: vec!["?? notes.md".into(), "?? my-stuff/".into()],
+            verbose: true,
+        };
+        let val = serde_json::to_value(&output).unwrap();
+        assert_eq!(val["root"][0], "?? notes.md");
+        assert_eq!(val["root"][1], "?? my-stuff/");
+        assert_eq!(val["root"].as_array().unwrap().len(), 2);
+        // verbose is #[serde(skip)] → not serialized
+        assert!(val.get("verbose").is_none());
     }
 
     #[test]

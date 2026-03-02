@@ -45,6 +45,13 @@ pub fn cmd() -> Command {
         .visible_alias("status")
         .about("Git status across workspace repos [read-only]")
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Show per-repo file lists")
+                .action(clap::ArgAction::SetTrue),
+        )
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -55,6 +62,13 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             let cwd = std::env::current_dir()?;
             workspace::detect(&cwd)?
         };
+
+    let verbose = matches
+        .try_get_one::<bool>("verbose")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false);
 
     let meta = workspace::load_metadata(&ws_dir)
         .map_err(|e| anyhow::anyhow!("reading workspace: {}", e))?;
@@ -72,6 +86,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     changed: 0,
                     has_upstream: false,
                     status: String::new(),
+                    files: vec![],
                     error: Some(e.to_string()),
                 });
                 continue;
@@ -84,7 +99,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let upstream = git::resolve_upstream_ref(&repo_dir);
         let has_upstream = matches!(upstream, git::UpstreamRef::Tracking);
         let ahead = git::ahead_count_from(&repo_dir, &upstream).unwrap_or(0);
-        let changed = git::changed_file_count(&repo_dir).unwrap_or(0);
+        let files = git::changed_files(&repo_dir).unwrap_or_default();
+        let changed = files.len() as u32;
         let status = output::format_repo_status(ahead, changed, has_upstream);
 
         repos.push(RepoStatusEntry {
@@ -94,13 +110,24 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             changed,
             has_upstream,
             status,
+            files,
             error: None,
         });
     }
+
+    let root = match workspace::check_root_content(&ws_dir, &meta) {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("  warning: root content check failed: {}", e);
+            vec![]
+        }
+    };
 
     Ok(Output::Status(StatusOutput {
         workspace: meta.name,
         branch: meta.branch,
         repos,
+        root,
+        verbose,
     }))
 }

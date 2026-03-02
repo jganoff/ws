@@ -18,7 +18,7 @@ pub fn cmd() -> Command {
                 .short('f')
                 .long("force")
                 .action(clap::ArgAction::SetTrue)
-                .help("Remove even if repos have pending changes or unmerged branches"),
+                .help("Remove even if repos have pending changes, unmerged branches, or workspace root has user content"),
         )
 }
 

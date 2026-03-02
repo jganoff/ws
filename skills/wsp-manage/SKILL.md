@@ -35,7 +35,7 @@ wsp setup group update <name> [--add <add>]... [--remove <remove>]... # Add or r
 ```bash
 wsp new <workspace> [<repos>]... [-g <group>] [--no-fetch] # Create a new workspace
 wsp ls                                          # List active workspaces [read-only] (alias: list)
-wsp st [<workspace>]                            # Git status across workspace repos [read-only] (alias: status)
+wsp st [<workspace>] [-v]                       # Git status across workspace repos [read-only] (alias: status)
 wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
 wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo [read-only]
 wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] # Fetch and rebase/merge all workspace repos

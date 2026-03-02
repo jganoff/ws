@@ -544,6 +544,234 @@ pub fn propagate_mirror_to_clones(ws_dir: &Path, meta: &Metadata) {
     });
 }
 
+/// Noise files that are safe to delete without warning.
+const NOISE_FILES: &[&str] = &[".DS_Store", "Thumbs.db", "desktop.ini"];
+
+/// Check workspace root for user content not managed by wsp.
+/// Returns a list of human-readable problem descriptions.
+// TODO: support .wspignore (global + per-workspace) to let users suppress
+// specific paths from this check. See docs/roadmap.md.
+pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<Vec<String>> {
+    let mut problems = Vec::new();
+
+    // Build set of known repo dir names
+    let mut repo_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for identity in metadata.repos.keys() {
+        if let Ok(dn) = metadata.dir_name(identity) {
+            repo_dirs.insert(dn);
+        }
+    }
+
+    let go_work_is_wsp = ws_dir.join("go.work").exists() && check_go_work(ws_dir).is_none();
+
+    for entry in fs::read_dir(ws_dir).context("reading workspace root directory")? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip .wsp.yaml
+        if name_str == METADATA_FILE {
+            continue;
+        }
+
+        // Skip repo clone dirs (checked by repo safety)
+        if repo_dirs.contains(name_str.as_ref()) {
+            continue;
+        }
+
+        // Skip noise files
+        if NOISE_FILES.contains(&name_str.as_ref()) {
+            continue;
+        }
+
+        // AGENTS.md
+        if name_str == "AGENTS.md" {
+            if let Some(problem) = check_agents_md(ws_dir) {
+                problems.push(problem);
+            }
+            continue;
+        }
+
+        // CLAUDE.md
+        if name_str == "CLAUDE.md" {
+            if let Some(problem) = check_claude_md(ws_dir) {
+                problems.push(problem);
+            }
+            continue;
+        }
+
+        // .claude/ directory
+        if name_str == ".claude" {
+            problems.extend(check_claude_dir(ws_dir));
+            continue;
+        }
+
+        // go.work
+        if name_str == "go.work" {
+            if let Some(problem) = check_go_work(ws_dir) {
+                problems.push(problem);
+            }
+            continue;
+        }
+
+        // go.work.sum — safe when go.work is wsp-generated
+        if name_str == "go.work.sum" && go_work_is_wsp {
+            continue;
+        }
+
+        // Everything else is flagged
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            problems.push(format!("?? {}/", name_str));
+        } else {
+            problems.push(format!("?? {}", name_str));
+        }
+    }
+
+    Ok(problems)
+}
+
+/// Check AGENTS.md for user content outside wsp markers.
+fn check_agents_md(ws_dir: &Path) -> Option<String> {
+    let path = ws_dir.join("AGENTS.md");
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Some(" M AGENTS.md (unreadable)".into()),
+    };
+
+    // Find the begin marker
+    let begin_idx = match content.find(crate::agentmd::MARKER_BEGIN) {
+        Some(idx) => idx,
+        None => return Some(" M AGENTS.md (wsp markers missing)".into()),
+    };
+
+    // Check content before the begin marker for user additions
+    let preamble = &content[..begin_idx];
+    for line in preamble.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Scaffold lines emitted by agentmd::build_initial_file()
+        if trimmed.starts_with("# Workspace: ") {
+            continue;
+        }
+        if trimmed == "<!-- Add your project-specific notes for AI agents here -->" {
+            continue;
+        }
+        // Any other non-blank line is user content
+        return Some(" M AGENTS.md (user-added content)".into());
+    }
+
+    // Check content after the end marker for user additions.
+    // agentmd::replace_marked_section preserves post-marker content,
+    // so users reasonably expect it persists across wsp operations.
+    if let Some(end_idx) = content.find(crate::agentmd::MARKER_END) {
+        let after_end = &content[end_idx + crate::agentmd::MARKER_END.len()..];
+        for line in after_end.lines() {
+            if !line.trim().is_empty() {
+                return Some(" M AGENTS.md (user-added content after markers)".into());
+            }
+        }
+    }
+
+    None
+}
+
+/// Check CLAUDE.md — symlink to AGENTS.md is fine, anything else is flagged.
+fn check_claude_md(ws_dir: &Path) -> Option<String> {
+    let path = ws_dir.join("CLAUDE.md");
+    match fs::symlink_metadata(&path) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                match fs::read_link(&path) {
+                    Ok(target) if target == Path::new("AGENTS.md") => None,
+                    _ => Some(" M CLAUDE.md (symlink to unexpected target)".into()),
+                }
+            } else {
+                Some("?? CLAUDE.md".into())
+            }
+        }
+        Err(_) => None, // doesn't exist, fine
+    }
+}
+
+/// Check .claude/ directory for non-wsp content.
+fn check_claude_dir(ws_dir: &Path) -> Vec<String> {
+    let claude_dir = ws_dir.join(".claude");
+    let mut problems = Vec::new();
+
+    // Known wsp-managed paths (relative to .claude/)
+    let managed: std::collections::HashSet<&str> =
+        ["skills/wsp-manage/SKILL.md"].iter().copied().collect();
+
+    // Intermediate directories that only contain managed content
+    let managed_dirs: std::collections::HashSet<&str> =
+        ["skills", "skills/wsp-manage"].iter().copied().collect();
+
+    fn walk(
+        base: &Path,
+        rel: &str,
+        managed: &std::collections::HashSet<&str>,
+        managed_dirs: &std::collections::HashSet<&str>,
+        problems: &mut Vec<String>,
+    ) {
+        let dir = if rel.is_empty() {
+            base.to_path_buf()
+        } else {
+            base.join(rel)
+        };
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            let child_rel = if rel.is_empty() {
+                name_str.to_string()
+            } else {
+                format!("{}/{}", rel, name_str)
+            };
+
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+
+            if ft.is_dir() {
+                if managed_dirs.contains(child_rel.as_str()) {
+                    walk(base, &child_rel, managed, managed_dirs, problems);
+                } else {
+                    problems.push(format!("?? .claude/{}", child_rel));
+                }
+            } else if !managed.contains(child_rel.as_str()) {
+                problems.push(format!("?? .claude/{}", child_rel));
+            }
+        }
+    }
+
+    walk(&claude_dir, "", &managed, &managed_dirs, &mut problems);
+    problems
+}
+
+/// Check go.work — wsp-generated header means it's managed.
+fn check_go_work(ws_dir: &Path) -> Option<String> {
+    let path = ws_dir.join("go.work");
+    if !path.exists() {
+        return None;
+    }
+    match fs::read_to_string(&path) {
+        Ok(content) if content.starts_with(crate::lang::GO_WORK_HEADER) => None,
+        Ok(_) => Some("?? go.work".into()),
+        Err(_) => Some("?? go.work (unreadable)".into()),
+    }
+}
+
 pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
     let ws_dir = dir(&paths.workspaces_dir, name);
     let meta =
@@ -619,6 +847,22 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
             }
         }
 
+        // Check workspace root for user content
+        match check_root_content(&ws_dir, &meta) {
+            Ok(root_problems) => {
+                if !root_problems.is_empty() {
+                    let mut msg = String::from("workspace root has user content:");
+                    for p in &root_problems {
+                        msg.push_str(&format!("\n      {}", p));
+                    }
+                    problems.push(msg);
+                }
+            }
+            Err(e) => {
+                eprintln!("  warning: root content check failed: {}", e);
+            }
+        }
+
         if !problems.is_empty() {
             let mut sorted = problems;
             sorted.sort();
@@ -627,7 +871,7 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
                 list.push_str(&format!("\n  - {}", p));
             }
             bail!(
-                "workspace {:?} has pending changes or unmerged branches ({}):{}\n\nUse --force to remove anyway",
+                "workspace {:?} has unsaved work ({}):{}\n\nUse --force to remove anyway",
                 name,
                 meta.branch,
                 list
@@ -1099,8 +1343,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("unmerged branches"),
-            "expected 'unmerged branches' in error: {}",
+            err.contains("unsaved work"),
+            "expected 'unsaved work' in error: {}",
             err
         );
 
@@ -2115,5 +2359,356 @@ mod tests {
         let meta = load_metadata(tmp.path()).unwrap();
         assert_eq!(meta.version, 99);
         assert_eq!(meta.name, "future-ws");
+    }
+
+    // --- Root content detection tests ---
+
+    fn make_simple_metadata(repos: &[&str]) -> Metadata {
+        let mut map = BTreeMap::new();
+        for id in repos {
+            map.insert(id.to_string(), None);
+        }
+        Metadata {
+            version: CURRENT_METADATA_VERSION,
+            name: "test".into(),
+            branch: "test".into(),
+            repos: map,
+            created: Utc::now(),
+            dirs: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_check_root_content() {
+        use std::os::unix::fs::symlink;
+
+        struct Case {
+            name: &'static str,
+            setup: Box<dyn Fn(&Path)>,
+            repos: Vec<&'static str>,
+            want_clean: bool,
+            want_contains: Vec<&'static str>,
+        }
+
+        let cases: Vec<Case> = vec![
+            Case {
+                name: "clean workspace — only repo dirs + .wsp.yaml",
+                setup: Box::new(|ws| {
+                    fs::create_dir_all(ws.join("api-gateway")).unwrap();
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                }),
+                repos: vec!["github.com/acme/api-gateway"],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: "user file at root",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join("notes.md"), "my notes").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? notes.md"],
+            },
+            Case {
+                name: "user directory at root",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::create_dir_all(ws.join("my-stuff")).unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? my-stuff/"],
+            },
+            Case {
+                name: "AGENTS.md with only scaffold + markers",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(
+                        ws.join("AGENTS.md"),
+                        "# Workspace: test\n\n<!-- Add your project-specific notes for AI agents here -->\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                    )
+                    .unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: "AGENTS.md with user notes before markers",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(
+                        ws.join("AGENTS.md"),
+                        "# Workspace: test\n\n## My Custom Notes\n\nImportant context here.\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                    )
+                    .unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec![" M AGENTS.md (user-added content)"],
+            },
+            Case {
+                name: "AGENTS.md with missing markers",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join("AGENTS.md"), "# Some random content\n").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec![" M AGENTS.md (wsp markers missing)"],
+            },
+            Case {
+                name: "CLAUDE.md as symlink to AGENTS.md",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(
+                        ws.join("AGENTS.md"),
+                        "# Workspace: test\n\n<!-- wsp:begin -->\n<!-- wsp:end -->\n",
+                    )
+                    .unwrap();
+                    symlink("AGENTS.md", ws.join("CLAUDE.md")).unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: "CLAUDE.md as regular file",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(
+                        ws.join("AGENTS.md"),
+                        "# Workspace: test\n\n<!-- wsp:begin -->\n<!-- wsp:end -->\n",
+                    )
+                    .unwrap();
+                    fs::write(ws.join("CLAUDE.md"), "custom content").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? CLAUDE.md"],
+            },
+            Case {
+                name: ".claude/ with only skills/wsp-manage/SKILL.md",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    let skill_dir = ws.join(".claude/skills/wsp-manage");
+                    fs::create_dir_all(&skill_dir).unwrap();
+                    fs::write(skill_dir.join("SKILL.md"), "skill content").unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: ".claude/ with user files",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    let skill_dir = ws.join(".claude/skills/wsp-manage");
+                    fs::create_dir_all(&skill_dir).unwrap();
+                    fs::write(skill_dir.join("SKILL.md"), "skill content").unwrap();
+                    fs::write(ws.join(".claude/settings.json"), "{}").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? .claude/settings.json"],
+            },
+            Case {
+                name: "go.work with wsp header",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(
+                        ws.join("go.work"),
+                        "// Code generated by ws. DO NOT EDIT.\ngo 1.22\n\nuse (\n\t./api\n)\n",
+                    )
+                    .unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: "go.work without wsp header",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join("go.work"), "go 1.22\n\nuse (\n\t./api\n)\n").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? go.work"],
+            },
+            Case {
+                name: "go.work.sum alongside wsp go.work",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(
+                        ws.join("go.work"),
+                        "// Code generated by ws. DO NOT EDIT.\ngo 1.22\n\nuse (\n\t./api\n)\n",
+                    )
+                    .unwrap();
+                    fs::write(ws.join("go.work.sum"), "sum data").unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: "go.work.sum without go.work is flagged",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join("go.work.sum"), "sum data").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? go.work.sum"],
+            },
+            Case {
+                name: "noise files (.DS_Store) ignored",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join(".DS_Store"), "").unwrap();
+                    fs::write(ws.join("Thumbs.db"), "").unwrap();
+                    fs::write(ws.join("desktop.ini"), "").unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
+            },
+            Case {
+                name: "multiple issues combined",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join("notes.md"), "x").unwrap();
+                    let claude_dir = ws.join(".claude");
+                    fs::create_dir_all(&claude_dir).unwrap();
+                    fs::write(claude_dir.join("settings.json"), "{}").unwrap();
+                }),
+                repos: vec![],
+                want_clean: false,
+                want_contains: vec!["?? notes.md", "?? .claude/settings.json"],
+            },
+        ];
+
+        for tc in &cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let ws_dir = tmp.path();
+            (tc.setup)(ws_dir);
+
+            let meta = make_simple_metadata(&tc.repos);
+            let problems = check_root_content(ws_dir, &meta).unwrap();
+
+            if tc.want_clean {
+                assert!(
+                    problems.is_empty(),
+                    "case {:?}: expected clean, got {:?}",
+                    tc.name,
+                    problems
+                );
+            } else {
+                assert!(
+                    !problems.is_empty(),
+                    "case {:?}: expected problems, got none",
+                    tc.name
+                );
+            }
+
+            for want in &tc.want_contains {
+                assert!(
+                    problems.iter().any(|p| p.contains(want)),
+                    "case {:?}: expected problem containing {:?}, got {:?}",
+                    tc.name,
+                    want,
+                    problems
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_check_agents_md() {
+        struct Case {
+            name: &'static str,
+            content: &'static str,
+            want_clean: bool,
+            want_contains: Option<&'static str>,
+        }
+
+        let cases = vec![
+            Case {
+                name: "scaffold only",
+                content: "# Workspace: test\n\n<!-- Add your project-specific notes for AI agents here -->\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                want_clean: true,
+                want_contains: None,
+            },
+            Case {
+                name: "user heading before marker",
+                content: "# Workspace: test\n\n## My Notes\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                want_clean: false,
+                want_contains: Some("user-added content"),
+            },
+            Case {
+                name: "user paragraph before marker",
+                content: "# Workspace: test\n\nThis is important context for AI agents.\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                want_clean: false,
+                want_contains: Some("user-added content"),
+            },
+            Case {
+                name: "no markers",
+                content: "# Some random file\n\nNo wsp markers here.\n",
+                want_clean: false,
+                want_contains: Some("wsp markers missing"),
+            },
+            Case {
+                name: "empty preamble",
+                content: "<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                want_clean: true,
+                want_contains: None,
+            },
+            Case {
+                name: "only blank lines before marker",
+                content: "\n\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n",
+                want_clean: true,
+                want_contains: None,
+            },
+            Case {
+                name: "user content after end marker",
+                content: "# Workspace: test\n\n<!-- wsp:begin -->\nstuff\n<!-- wsp:end -->\n\n## My post-marker notes\n",
+                want_clean: false,
+                want_contains: Some("user-added content after markers"),
+            },
+        ];
+
+        for tc in &cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let ws_dir = tmp.path();
+            fs::write(ws_dir.join("AGENTS.md"), tc.content).unwrap();
+
+            let result = check_agents_md(ws_dir);
+
+            if tc.want_clean {
+                assert!(
+                    result.is_none(),
+                    "case {:?}: expected clean, got {:?}",
+                    tc.name,
+                    result
+                );
+            } else {
+                assert!(
+                    result.is_some(),
+                    "case {:?}: expected problem, got None",
+                    tc.name
+                );
+                if let Some(want) = tc.want_contains {
+                    assert!(
+                        result.as_ref().unwrap().contains(want),
+                        "case {:?}: expected {:?} in {:?}",
+                        tc.name,
+                        want,
+                        result
+                    );
+                }
+            }
+        }
     }
 }
