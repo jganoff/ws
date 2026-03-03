@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.5] - 2026-03-03
+
+### Features
+
+- *(repo)* Add --from flag for bulk GitHub org import
+
+### Bug Fixes
+
+- *(agentmd)* Use platform-gated symlink for Windows compatibility
+
 ## [0.5.4] - 2026-03-02
 
 ### Features
