@@ -4,18 +4,6 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### Git Subprocess Timeouts
-
-**Complexity:** Small
-
-Add a configurable timeout to `git::run()`. A hung SSH connection currently blocks the process forever. Parallel operations (`wsp sync`, `wsp repo fetch`) are also blocked when one repo hangs.
-
-- [ ] Timeout parameter on `git::run()` (default 120s for network ops, no timeout for local)
-- [ ] Config key `git-timeout` for user override
-- [ ] Clear error message on timeout ("git fetch timed out after 120s")
-
-## P2 — Team Adoption & Reliability
-
 ### `wsp export` / `wsp new --from`
 
 **Complexity:** Small-Medium
