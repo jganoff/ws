@@ -2,6 +2,25 @@
 
 Prioritized feature plan for wsp, organized by shipping priority.
 
+## P0 — No Leakage into Clones
+
+**Complexity:** Medium
+
+Remove the `wsp-mirror` remote from workspace clones. See [`design-tenets.md`](design-tenets.md), Git & Mirror Management tenet 1.
+
+**Clone flow:** `git clone --local` from mirror, replace origin with upstream URL, fetch refs via `git fetch <mirror-path> <refspec>` (path-based, no named remote, no trace).
+
+**Fetch flow:** All fetches route through the mirror first, then propagate to clones via path-based local fetch. Currently `wsp sync` fetches origin directly in each clone (bypassing the mirror) and `wsp repo fetch` routes through the mirror — unify both to mirror-first.
+
+**Legacy compatibility:** `wsp sync` transparently removes the `wsp-mirror` remote from existing clones during normal operation. Mark fallback code with `// LEGACY(v0.5)` and a removal target version.
+
+- [ ] Refactor `clone_from_mirror` to produce clean clones (no `wsp-mirror` remote)
+- [ ] Refactor `propagate_mirror_to_clones` to use path-based fetch
+- [ ] Route `wsp sync` fetch phase through mirrors instead of direct origin fetch
+- [ ] Route `wsp rm` safety checks through mirrors or local data
+- [ ] Transparent legacy `wsp-mirror` removal during `wsp sync`, annotated `// LEGACY(v0.5)`
+- [ ] Update tests
+
 ## P1 — Adoption
 
 ### `wsp export` / `wsp new --from`
