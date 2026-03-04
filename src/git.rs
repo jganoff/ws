@@ -101,43 +101,64 @@ pub fn default_branch(dir: &Path) -> Result<String> {
     Ok(parts[parts.len() - 1].to_string())
 }
 
-/// Configure wsp-mirror remote to fetch refs/remotes/origin/* from the bare mirror
-/// into refs/remotes/wsp-mirror/* in the clone. This is needed because bare mirrors
-/// store fetched refs under refs/remotes/origin/*, not refs/heads/*.
-pub fn configure_wsp_mirror_refspec(dir: &Path) -> Result<()> {
-    run(
-        Some(dir),
-        &[
-            "config",
-            "remote.wsp-mirror.fetch",
-            "+refs/remotes/origin/*:refs/remotes/wsp-mirror/*",
-        ],
+/// Fetch from a local path with an explicit refspec, leaving no remote configured.
+pub fn fetch_from_path(dir: &Path, source_path: &Path, refspec: &str, prune: bool) -> Result<()> {
+    let src = path_str(source_path)?;
+    let mut args = vec!["fetch"];
+    if prune {
+        args.push("--prune");
+    }
+    args.push("--");
+    args.push(src);
+    args.push(refspec);
+    run(Some(dir), &args)?;
+    Ok(())
+}
+
+/// Read the default branch from a bare mirror's refs/remotes/origin/HEAD.
+pub fn default_branch_from_mirror(mirror_dir: &Path) -> Result<String> {
+    let ref_str = run(
+        Some(mirror_dir),
+        &["symbolic-ref", "refs/remotes/origin/HEAD"],
     )?;
+    let parts: Vec<&str> = ref_str.split('/').collect();
+    if parts.len() < 3 {
+        bail!("unexpected ref format: {}", ref_str);
+    }
+    Ok(parts[parts.len() - 1].to_string())
+}
+
+/// Check whether a named remote exists in a repo.
+pub fn has_remote(dir: &Path, name: &str) -> bool {
+    run(Some(dir), &["remote", "get-url", name]).is_ok()
+}
+
+/// Remove a named remote. Errors if the remote does not exist.
+pub fn remove_remote(dir: &Path, name: &str) -> Result<()> {
+    run(Some(dir), &["remote", "remove", name])?;
+    Ok(())
+}
+
+/// Set the URL for an existing remote.
+pub fn remote_set_url(dir: &Path, remote: &str, url: &str) -> Result<()> {
+    run(Some(dir), &["remote", "set-url", remote, url])?;
     Ok(())
 }
 
 pub fn clone_local(mirror_dir: &Path, dest: &Path) -> Result<()> {
     let src = path_str(mirror_dir)?;
     let dst = path_str(dest)?;
-    run(
-        None,
-        &["clone", "--local", "--origin", "wsp-mirror", src, dst],
-    )?;
+    run(None, &["clone", "--local", src, dst])?;
     Ok(())
 }
 
-pub fn remote_set_origin(dir: &Path, url: &str) -> Result<()> {
-    // Remove origin if it exists (ignore error if it doesn't)
-    let _ = run(Some(dir), &["remote", "remove", "origin"]);
-    run(Some(dir), &["remote", "add", "origin", url])?;
-    Ok(())
-}
-
+#[cfg(test)]
 pub fn fetch_remote(dir: &Path, remote: &str) -> Result<()> {
     run(Some(dir), &["fetch", remote])?;
     Ok(())
 }
 
+#[cfg(test)]
 pub fn fetch_remote_prune(dir: &Path, remote: &str) -> Result<()> {
     run(Some(dir), &["fetch", "--prune", remote])?;
     Ok(())

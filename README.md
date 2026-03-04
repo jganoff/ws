@@ -164,9 +164,10 @@ files. Disable with `wsp setup config set language-integrations.go false`.
 
 Each repo is registered once as a bare mirror. Workspaces are directories of
 local clones (via `git clone --local` hardlinks) that share a branch name.
-Each clone has two remotes: `origin` (real upstream) and
-`wsp-mirror` (local mirror for fast fetch). Context repos (with `@ref`) check
-out at the pinned ref without creating the workspace branch.
+Each clone has a single `origin` remote pointing to the real upstream URL.
+Fetches route through the local mirror transparently — no mirror-specific
+remotes are visible in the clone. Context repos (with `@ref`) check out at the
+pinned ref without creating the workspace branch.
 
 ## Development
 

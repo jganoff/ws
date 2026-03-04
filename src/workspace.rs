@@ -332,7 +332,30 @@ pub fn add_repos(
     save_metadata(ws_dir, &meta)
 }
 
-pub fn remove_repos(ws_dir: &Path, identities_to_remove: &[String], force: bool) -> Result<()> {
+/// LEGACY(v0.5): remove the `wsp-mirror` remote from a clone if it exists.
+/// Old versions of wsp added this remote; we no longer use it.
+fn remove_legacy_wsp_mirror(clone_dir: &Path) {
+    if git::has_remote(clone_dir, "wsp-mirror") {
+        let _ = git::remove_remote(clone_dir, "wsp-mirror");
+    }
+}
+
+/// Fetch a mirror from upstream and propagate refs to a clone (best-effort).
+fn fetch_and_propagate(mirrors_dir: &Path, clone_dir: &Path, identity: &str) -> Result<()> {
+    let parsed = parse_identity(identity)?;
+    let mirror_path = mirror::dir(mirrors_dir, &parsed);
+    remove_legacy_wsp_mirror(clone_dir);
+    git::fetch(&mirror_path, true)?;
+    git::fetch_from_path(clone_dir, &mirror_path, MIRROR_PROPAGATE_REFSPEC, true)?;
+    Ok(())
+}
+
+pub fn remove_repos(
+    mirrors_dir: &Path,
+    ws_dir: &Path,
+    identities_to_remove: &[String],
+    force: bool,
+) -> Result<()> {
     let mut meta = load_metadata(ws_dir)?;
 
     // Validate all identities exist in the workspace
@@ -365,8 +388,7 @@ pub fn remove_repos(ws_dir: &Path, identities_to_remove: &[String], force: bool)
                 continue;
             }
 
-            // Fetch origin with prune for up-to-date merge detection
-            let fetch_failed = git::fetch_remote_prune(&clone_dir, "origin").is_err();
+            let fetch_failed = fetch_and_propagate(mirrors_dir, &clone_dir, identity).is_err();
             if fetch_failed {
                 eprintln!("  warning: fetch failed for {}, using local data", identity);
             }
@@ -464,6 +486,7 @@ pub fn remove_repos(ws_dir: &Path, identities_to_remove: &[String], force: bool)
 
 /// Resolved per-repo info for workspace-scoped commands.
 pub struct RepoInfo {
+    pub identity: String,
     pub dir_name: String,
     pub clone_dir: PathBuf,
     pub is_context: bool,
@@ -488,6 +511,7 @@ impl Metadata {
                 Ok(d) => d,
                 Err(e) => {
                     infos.push(RepoInfo {
+                        identity: identity.clone(),
                         dir_name: identity.clone(),
                         clone_dir: PathBuf::new(),
                         is_context,
@@ -499,6 +523,7 @@ impl Metadata {
             };
             let clone_dir = ws_dir.join(&dir_name);
             infos.push(RepoInfo {
+                identity: identity.clone(),
                 dir_name,
                 clone_dir,
                 is_context,
@@ -510,16 +535,21 @@ impl Metadata {
     }
 }
 
-/// Fetch wsp-mirror in each clone (parallel, best-effort).
-/// Propagates refs fetched into mirrors down to workspace clones.
-pub fn propagate_mirror_to_clones(ws_dir: &Path, meta: &Metadata) {
-    let clones: Vec<(String, PathBuf)> = meta
+const MIRROR_PROPAGATE_REFSPEC: &str = "+refs/remotes/origin/*:refs/remotes/origin/*";
+
+/// Propagate mirror refs into workspace clones (parallel, best-effort).
+/// Fetches `refs/remotes/origin/*` from the mirror into each clone's `origin/*`.
+/// Also removes the legacy `wsp-mirror` remote if present.
+/// Callers wanting deleted-branch cleanup should pass `prune: true`.
+pub fn propagate_mirror_to_clones(mirrors_dir: &Path, ws_dir: &Path, meta: &Metadata, prune: bool) {
+    let clones: Vec<(String, PathBuf, PathBuf)> = meta
         .repos
         .keys()
         .filter_map(|id| {
-            meta.dir_name(id)
-                .ok()
-                .map(|dn| (id.clone(), ws_dir.join(dn)))
+            let dn = meta.dir_name(id).ok()?;
+            let parsed = parse_identity(id).ok()?;
+            let mirror_path = mirror::dir(mirrors_dir, &parsed);
+            Some((id.clone(), ws_dir.join(dn), mirror_path))
         })
         .collect();
 
@@ -530,10 +560,16 @@ pub fn propagate_mirror_to_clones(ws_dir: &Path, meta: &Metadata) {
     std::thread::scope(|s| {
         let handles: Vec<_> = clones
             .iter()
-            .map(|(id, clone_dir)| {
+            .map(|(id, clone_dir, mirror_path)| {
                 s.spawn(move || {
-                    if let Err(e) = git::fetch_remote(clone_dir, "wsp-mirror") {
-                        eprintln!("  warning: propagate wsp-mirror for {}: {}", id, e);
+                    remove_legacy_wsp_mirror(clone_dir);
+                    if let Err(e) = git::fetch_from_path(
+                        clone_dir,
+                        mirror_path,
+                        MIRROR_PROPAGATE_REFSPEC,
+                        prune,
+                    ) {
+                        eprintln!("  warning: propagate mirror for {}: {}", id, e);
                     }
                 })
             })
@@ -800,8 +836,8 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
                 continue;
             }
 
-            // Best-effort fetch origin with prune to detect remote merges
-            let fetch_failed = git::fetch_remote_prune(&clone_dir, "origin").is_err();
+            let fetch_failed =
+                fetch_and_propagate(&paths.mirrors_dir, &clone_dir, identity).is_err();
             if fetch_failed {
                 eprintln!("  warning: fetch failed for {}, using local data", identity);
             }
@@ -908,13 +944,13 @@ pub fn list_all(workspaces_dir: &Path) -> Result<Vec<String>> {
 /// Clone a repo into the workspace from its bare mirror.
 ///
 /// Steps:
-///   1. `git clone --origin wsp-mirror` from the bare mirror (hardlinks)
-///   2. Configure wsp-mirror refspec for `refs/remotes/origin/*`
-///   3. Set `origin` remote to the real upstream URL
-///   4. Copy default branch HEAD from wsp-mirror to origin
-///   5. Fetch origin so `origin/main` etc. exist locally
-///   6. Fix default branch tracking: re-point from `wsp-mirror/main`
-///      to `origin/main` (or unset if no origin)
+///   1. `git clone --local <mirror> <dest>` — hardlinks, origin → mirror path
+///   2. `git remote set-url origin <upstream_url>` — repoint to upstream
+///   3. Read default branch from mirror
+///   4. `git fetch <mirror_path> +refs/remotes/origin/*:refs/remotes/origin/*`
+///      — populate origin refs from mirror (local-only, no network, no trace)
+///   5. `git remote set-head origin <default_branch>`
+///   6. Fix tracking: set-upstream-to origin/<default> or unset
 ///   7. Checkout: context repos get pinned ref; active repos get workspace
 ///      branch via `--no-track` (intentional: tracking `origin/main`
 ///      would cause bare `git push` to target the wrong branch)
@@ -931,32 +967,33 @@ fn clone_from_mirror(
     let mirror_dir = mirror::dir(mirrors_dir, &parsed);
     let dest = ws_dir.join(dir_name);
 
-    // 1. Clone from mirror (hardlinks, creates wsp-mirror remote)
+    // 1. Clone from mirror (hardlinks, origin → mirror path)
     git::clone_local(&mirror_dir, &dest)?;
 
-    // 2. Configure wsp-mirror to fetch from mirror's refs/remotes/origin/*
-    git::configure_wsp_mirror_refspec(&dest)?;
-    git::fetch_remote(&dest, "wsp-mirror")?;
-
-    // 3. Set origin to real upstream URL
+    // 2. Repoint origin to the real upstream URL
     if !upstream_url.is_empty() {
-        git::remote_set_origin(&dest, upstream_url)?;
+        git::remote_set_url(&dest, "origin", upstream_url)?;
     }
 
-    // 4. Copy default branch info from wsp-mirror to origin
-    let mirror_default_br = git::default_branch_for_remote(&dest, "wsp-mirror").ok();
+    // 3. Read default branch from mirror
+    let mirror_default_br = git::default_branch_from_mirror(&mirror_dir).ok();
+
+    // 4. Populate origin/* refs from mirror (local fetch, no network).
+    // Note: bare mirrors have refs/remotes/origin/* only after their first
+    // upstream fetch (`git fetch` in the mirror). Before that, only
+    // refs/heads/* exists (from clone_bare). Step 1's `git clone --local`
+    // already creates origin/* from the mirror's refs/heads/*, so this
+    // fetch is a no-op on fresh mirrors but essential for mirrors that
+    // have been fetched (the normal production path).
+    git::fetch_from_path(&dest, &mirror_dir, MIRROR_PROPAGATE_REFSPEC, false)?;
+
+    // 5. Set origin/HEAD
     if let Some(ref default_br) = mirror_default_br {
         let _ = git::remote_set_head(&dest, "origin", default_br);
     }
 
-    // 4b. Fetch origin so remote tracking branches (origin/main etc.) exist
-    if !upstream_url.is_empty() {
-        git::fetch_remote(&dest, "origin")?;
-    }
-
-    // 4c. Fix default branch tracking: git clone --origin wsp-mirror sets
-    // main to track wsp-mirror/main. Re-point it to origin/main so that
-    // git pull on main works against the real upstream.
+    // 6. Fix default branch tracking: clone from mirror creates main tracking
+    // origin/main (which now points to upstream). Re-set it explicitly.
     if let Some(ref default_br) = mirror_default_br {
         let origin_ref = format!("origin/{}", default_br);
         if git::ref_exists(&dest, &format!("refs/remotes/{}", origin_ref)) {
@@ -966,18 +1003,18 @@ fn clone_from_mirror(
         }
     }
 
-    // 5. Checkout the right ref/branch
+    // 7. Checkout the right ref/branch
     // Context repo: check out at the specified ref
     if !git_ref.is_empty() {
-        let ws_mirror_ref = format!("wsp-mirror/{}", git_ref);
+        let origin_ref = format!("origin/{}", git_ref);
         if git::branch_exists(&dest, git_ref) {
             // Local branch already exists
             git::checkout(&dest, git_ref)?;
-        } else if git::ref_exists(&dest, &format!("refs/remotes/wsp-mirror/{}", git_ref)) {
-            // Create branch from wsp-mirror/<ref>, no tracking — devs must
+        } else if git::ref_exists(&dest, &format!("refs/remotes/origin/{}", git_ref)) {
+            // Create branch from origin/<ref>, no tracking — devs must
             // explicitly `git push -u` to avoid accidentally pushing to the
             // wrong branch.
-            git::checkout_new_branch(&dest, git_ref, &ws_mirror_ref)?;
+            git::checkout_new_branch(&dest, git_ref, &origin_ref)?;
         } else {
             // Tag or SHA: detached HEAD
             git::checkout_detached(&dest, git_ref)?;
@@ -994,8 +1031,9 @@ fn clone_from_mirror(
     // No upstream tracking — the workspace branch differs from the default
     // branch, so tracking origin/<default> would cause a bare `git push` to
     // target the wrong branch. Devs set tracking explicitly via `git push -u`.
-    let default_branch = git::default_branch_for_remote(&dest, "wsp-mirror")?;
-    let start_point = format!("wsp-mirror/{}", default_branch);
+    let default_branch = mirror_default_br
+        .ok_or_else(|| anyhow::anyhow!("cannot detect default branch from mirror"))?;
+    let start_point = format!("origin/{}", default_branch);
     git::checkout_new_branch(&dest, branch, &start_point)?;
 
     Ok(())
@@ -1860,7 +1898,7 @@ mod tests {
         assert!(ws_dir.join("test-repo").exists());
         assert!(ws_dir.join("other-repo").exists());
 
-        remove_repos(&ws_dir, &[identity2.clone()], false).unwrap();
+        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity2.clone()], false).unwrap();
 
         let meta = load_metadata(&ws_dir).unwrap();
         assert_eq!(meta.repos.len(), 1);
@@ -1878,7 +1916,12 @@ mod tests {
         create(&paths, "rm-repo-nf", &refs, None, &upstream_urls).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-nf");
-        let result = remove_repos(&ws_dir, &["test.local/nobody/fake".to_string()], false);
+        let result = remove_repos(
+            &paths.mirrors_dir,
+            &ws_dir,
+            &["test.local/nobody/fake".to_string()],
+            false,
+        );
         assert!(result.is_err());
         assert!(
             result
@@ -1899,7 +1942,7 @@ mod tests {
         let repo_dir = ws_dir.join("test-repo");
         fs::write(repo_dir.join("dirty.txt"), "x").unwrap();
 
-        let result = remove_repos(&ws_dir, &[identity.clone()], false);
+        let result = remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("pending changes"));
     }
@@ -1915,7 +1958,7 @@ mod tests {
         let repo_dir = ws_dir.join("test-repo");
         fs::write(repo_dir.join("dirty.txt"), "x").unwrap();
 
-        remove_repos(&ws_dir, &[identity.clone()], true).unwrap();
+        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], true).unwrap();
 
         let meta = load_metadata(&ws_dir).unwrap();
         assert!(meta.repos.is_empty());
@@ -1945,7 +1988,7 @@ mod tests {
         assert!(ws_dir.join("user-test-repo").exists());
         assert!(ws_dir.join("other-test-repo").exists());
 
-        remove_repos(&ws_dir, &[identity2.clone()], false).unwrap();
+        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity2.clone()], false).unwrap();
 
         let meta = load_metadata(&ws_dir).unwrap();
         assert_eq!(meta.repos.len(), 1);
@@ -1964,7 +2007,7 @@ mod tests {
         create(&paths, "rm-repo-ctx", &refs, None, &upstream_urls).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-ctx");
-        remove_repos(&ws_dir, &[identity.clone()], false).unwrap();
+        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false).unwrap();
 
         let meta = load_metadata(&ws_dir).unwrap();
         assert!(meta.repos.is_empty());
@@ -2107,7 +2150,7 @@ mod tests {
         commit_push_and_track(&repo_dir, "rmr-squash", "feat.txt", "feature");
         squash_merge_branch(source_repo.path(), "rmr-squash", "main");
 
-        remove_repos(&ws_dir, &[identity.clone()], false).unwrap();
+        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false).unwrap();
         let meta = load_metadata(&ws_dir).unwrap();
         assert!(meta.repos.is_empty());
     }
@@ -2124,7 +2167,7 @@ mod tests {
 
         commit_push_and_track(&repo_dir, "rmr-pushed", "wip.txt", "wip");
 
-        let result = remove_repos(&ws_dir, &[identity.clone()], false);
+        let result = remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -2135,36 +2178,26 @@ mod tests {
     }
 
     #[test]
-    fn test_clone_has_two_remotes() {
+    fn test_clone_has_only_origin() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "two-remotes", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "only-origin", &refs, None, &upstream_urls).unwrap();
 
-        let ws_dir = dir(&paths.workspaces_dir, "two-remotes");
+        let ws_dir = dir(&paths.workspaces_dir, "only-origin");
         let clone_dir = ws_dir.join("test-repo");
 
-        // Verify both remotes exist
+        // Verify only origin exists, no wsp-mirror
         let remotes = git::run(Some(&clone_dir), &["remote"]).unwrap();
         assert!(remotes.contains("origin"), "should have origin remote");
         assert!(
-            remotes.contains("wsp-mirror"),
-            "should have wsp-mirror remote"
+            !remotes.contains("wsp-mirror"),
+            "should not have wsp-mirror remote"
         );
 
         // origin should point to source repo (upstream URL)
         let origin_url = git::run(Some(&clone_dir), &["remote", "get-url", "origin"]).unwrap();
         assert_eq!(origin_url, upstream_urls[&identity]);
-
-        // wsp-mirror should point to the mirror
-        let parsed = parse_identity(&identity).unwrap();
-        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
-        let ws_mirror_url =
-            git::run(Some(&clone_dir), &["remote", "get-url", "wsp-mirror"]).unwrap();
-        assert_eq!(
-            PathBuf::from(&ws_mirror_url).canonicalize().unwrap(),
-            mirror_dir.canonicalize().unwrap()
-        );
     }
 
     #[test]
@@ -2222,19 +2255,112 @@ mod tests {
         // Get the new commit sha from mirror
         let mirror_sha = git::run(Some(&mirror_dir), &["rev-parse", "origin/main"]).unwrap();
 
-        // Before propagation, clone doesn't have the new commit
-        let clone_sha_before =
-            git::run(Some(&clone_dir), &["rev-parse", "wsp-mirror/main"]).unwrap();
+        // Before propagation, clone doesn't have the new commit at origin/main
+        let clone_sha_before = git::run(Some(&clone_dir), &["rev-parse", "origin/main"]).unwrap();
         assert_ne!(clone_sha_before, mirror_sha);
 
         // Propagate
         let meta = load_metadata(&ws_dir).unwrap();
-        propagate_mirror_to_clones(&ws_dir, &meta);
+        propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, false);
 
-        // After propagation, clone should have the new commit
-        let clone_sha_after =
-            git::run(Some(&clone_dir), &["rev-parse", "wsp-mirror/main"]).unwrap();
+        // After propagation, clone should have the new commit at origin/main
+        let clone_sha_after = git::run(Some(&clone_dir), &["rev-parse", "origin/main"]).unwrap();
         assert_eq!(clone_sha_after, mirror_sha);
+    }
+
+    #[test]
+    fn test_propagate_removes_legacy_wsp_mirror() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "prop-legacy", &refs, None, &upstream_urls).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "prop-legacy");
+        let clone_dir = ws_dir.join("test-repo");
+
+        // Manually add a wsp-mirror remote to simulate a legacy clone
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+        git::run(
+            Some(&clone_dir),
+            &["remote", "add", "wsp-mirror", mirror_dir.to_str().unwrap()],
+        )
+        .unwrap();
+        assert!(
+            git::has_remote(&clone_dir, "wsp-mirror"),
+            "wsp-mirror should exist before propagate"
+        );
+
+        // Propagate
+        let meta = load_metadata(&ws_dir).unwrap();
+        propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, false);
+
+        // wsp-mirror should have been removed
+        assert!(
+            !git::has_remote(&clone_dir, "wsp-mirror"),
+            "wsp-mirror should be removed after propagate"
+        );
+    }
+
+    #[test]
+    fn test_propagate_with_prune_removes_deleted_branches() {
+        let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "prop-prune", &refs, None, &upstream_urls).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "prop-prune");
+        let clone_dir = ws_dir.join("test-repo");
+        let parsed = parse_identity(&identity).unwrap();
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+
+        // Create a branch in source, fetch into mirror, propagate to clone
+        let output = Command::new("git")
+            .args(["checkout", "-b", "feature-x"])
+            .current_dir(source_repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let output = Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "feature commit"])
+            .current_dir(source_repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        git::fetch(&mirror_dir, true).unwrap();
+        let meta = load_metadata(&ws_dir).unwrap();
+        propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, false);
+
+        // Clone should now see origin/feature-x
+        assert!(
+            git::ref_exists(&clone_dir, "refs/remotes/origin/feature-x"),
+            "origin/feature-x should exist after propagation"
+        );
+
+        // Delete the branch in source and re-fetch mirror (mirror auto-prunes)
+        let output = Command::new("git")
+            .args(["checkout", "main"])
+            .current_dir(source_repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let output = Command::new("git")
+            .args(["branch", "-D", "feature-x"])
+            .current_dir(source_repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        git::fetch(&mirror_dir, true).unwrap();
+
+        // Propagate with prune=true — should remove stale origin/feature-x
+        propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, true);
+
+        assert!(
+            !git::ref_exists(&clone_dir, "refs/remotes/origin/feature-x"),
+            "origin/feature-x should be pruned after propagation with prune=true"
+        );
     }
 
     #[test]

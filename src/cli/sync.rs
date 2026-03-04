@@ -9,6 +9,8 @@ use clap_complete::engine::ArgValueCandidates;
 use super::completers;
 use crate::config::{self, Paths};
 use crate::git::{self, SyncAction};
+use crate::giturl;
+use crate::mirror;
 use crate::output::{Output, SyncOutput, SyncRepoResult};
 use crate::workspace::{self, RepoInfo};
 
@@ -61,21 +63,30 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     let repo_infos = meta.repo_infos(&ws_dir);
 
-    // Phase 1: Parallel fetch (skip if dry-run)
+    // Phase 1a: Fetch mirrors from upstream (network, parallel, skip if dry-run)
     let fetch_failures: HashSet<String> = if !dry_run {
-        let progress = Mutex::new(());
-        let fetchable: Vec<&RepoInfo> = repo_infos.iter().filter(|r| r.error.is_none()).collect();
-        if !fetchable.is_empty() {
-            eprintln!("Fetching {} repo(s)...", fetchable.len());
+        let mirrors: Vec<(&RepoInfo, PathBuf)> = repo_infos
+            .iter()
+            .filter(|r| r.error.is_none())
+            .filter_map(|info| {
+                giturl::Parsed::from_identity(&info.identity)
+                    .ok()
+                    .map(|parsed| (info, mirror::dir(&paths.mirrors_dir, &parsed)))
+            })
+            .collect();
+
+        if !mirrors.is_empty() {
+            eprintln!("Fetching {} repo(s)...", mirrors.len());
         }
 
+        let progress = Mutex::new(());
         let results: Vec<(String, bool)> = std::thread::scope(|s| {
-            let handles: Vec<_> = fetchable
+            let handles: Vec<_> = mirrors
                 .iter()
-                .map(|info| {
+                .map(|(info, mirror_path)| {
                     let progress = &progress;
                     s.spawn(move || {
-                        let result = git::fetch_remote_prune(&info.clone_dir, "origin");
+                        let result = git::fetch(mirror_path, true);
                         let _lock = progress.lock().unwrap_or_else(|e| e.into_inner());
                         match &result {
                             Ok(()) => eprintln!("  ok    {}", info.dir_name),
@@ -91,6 +102,11 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 .map(|h| h.join().unwrap_or_else(|_| (String::new(), true)))
                 .collect()
         });
+
+        // Phase 1b: Propagate mirror refs to clones (runs for all repos, including
+        // those whose mirror fetch failed — stale mirror data is still useful and
+        // propagation is a local no-op when nothing changed).
+        workspace::propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, true);
 
         results
             .into_iter()

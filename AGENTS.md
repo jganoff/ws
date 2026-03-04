@@ -49,7 +49,7 @@ When writing docs or examples, use the actual command names above — not the lo
 `wsp rm` and `wsp repo rm` run safety checks before deleting. Both `workspace::remove` and `workspace::remove_repos` follow the same pattern:
 
 1. **Pending changes** — `changed_file_count` (dirty working tree) and `ahead_count` (unpushed commits) are checked first. If either is non-zero, removal is blocked.
-2. **Fetch with prune** — `git fetch --prune origin` updates remote tracking refs and clears stale ones (e.g., branches deleted after a PR merge on GitHub).
+2. **Fetch with prune** — fetches the mirror from upstream, then propagates to the clone via path-based local fetch with prune. Updates remote tracking refs and clears stale ones (e.g., branches deleted after a PR merge on GitHub). Also removes the legacy `wsp-mirror` remote if present.
 3. **Branch safety** — `git::branch_safety()` in `src/git.rs` evaluates the workspace branch against the default branch (`origin/main`). Returns one of four variants, checked in order:
 
 | `BranchSafety` | Meaning | `wsp rm` behavior |
@@ -66,9 +66,9 @@ When writing docs or examples, use the actual command names above — not the lo
 1. `wsp new my-feature` — creates workspace with branch
 2. Make changes, commit, push, open PR (using git directly)
 3. PR gets merged (regular, squash, or rebase merge)
-4. `wsp rm` — fetches origin (with prune), detects merge via the three-layer check (`branch_is_merged` → `branch_is_squash_merged` → `is_content_merged`), removes workspace
+4. `wsp rm` — fetches mirror from upstream, propagates to clone (with prune), detects merge via the three-layer check (`branch_is_merged` → `branch_is_squash_merged` → `is_content_merged`), removes workspace
 
-No manual `git fetch` or `git pull` needed — `wsp rm` fetches implicitly. If the fetch fails (network issues), the safety check falls back to local data and warns on stderr.
+No manual `git fetch` or `git pull` needed — `wsp rm` fetches implicitly via the mirror. If the fetch fails (network issues), the safety check falls back to local data and warns on stderr.
 
 ### Edge case: squash merge with conflict resolution
 
@@ -85,7 +85,7 @@ If a squash merge resolved conflicts by changing file contents, `is_content_merg
 The project was renamed from `ws` to `wsp`. User-facing identifiers all use `wsp`:
 - CLI binary: `wsp`
 - Metadata file: `.wsp.yaml`
-- Git remote: `wsp-mirror` (legacy — being removed per design tenets)
+- Git remote: clones only have `origin` (no wsp-specific remotes)
 - Env var: `WSP_SHELL`
 - Shell vars: `wsp_bin`, `wsp_root`, `wsp_dir`
 - Data dir: `~/.local/share/wsp/`

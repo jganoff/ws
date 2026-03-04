@@ -119,12 +119,17 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             for ws_name in &ws_names {
                 let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
                 if let Ok(meta) = workspace::load_metadata(&ws_dir) {
-                    workspace::propagate_mirror_to_clones(&ws_dir, &meta);
+                    workspace::propagate_mirror_to_clones(
+                        &paths.mirrors_dir,
+                        &ws_dir,
+                        &meta,
+                        prune,
+                    );
                 }
             }
         }
     } else if let Some((ws_dir, meta)) = &current_ws {
-        workspace::propagate_mirror_to_clones(ws_dir, meta);
+        workspace::propagate_mirror_to_clones(&paths.mirrors_dir, ws_dir, meta, prune);
     }
 
     let output = FetchOutput {

@@ -27,7 +27,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     // Propagate mirror refs to clones
     if let Ok(meta) = workspace::load_metadata(&ws_dir) {
-        workspace::propagate_mirror_to_clones(&ws_dir, &meta);
+        workspace::propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, false);
     }
 
     if std::env::var("WSP_SHELL").is_err() {

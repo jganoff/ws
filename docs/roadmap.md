@@ -14,12 +14,12 @@ Remove the `wsp-mirror` remote from workspace clones. See [`design-tenets.md`](d
 
 **Legacy compatibility:** `wsp sync` transparently removes the `wsp-mirror` remote from existing clones during normal operation. Mark fallback code with `// LEGACY(v0.5)` and a removal target version.
 
-- [ ] Refactor `clone_from_mirror` to produce clean clones (no `wsp-mirror` remote)
-- [ ] Refactor `propagate_mirror_to_clones` to use path-based fetch
-- [ ] Route `wsp sync` fetch phase through mirrors instead of direct origin fetch
-- [ ] Route `wsp rm` safety checks through mirrors or local data
-- [ ] Transparent legacy `wsp-mirror` removal during `wsp sync`, annotated `// LEGACY(v0.5)`
-- [ ] Update tests
+- [x] Refactor `clone_from_mirror` to produce clean clones (no `wsp-mirror` remote)
+- [x] Refactor `propagate_mirror_to_clones` to use path-based fetch
+- [x] Route `wsp sync` fetch phase through mirrors instead of direct origin fetch
+- [x] Route `wsp rm` safety checks through mirrors or local data
+- [x] Transparent legacy `wsp-mirror` removal during `wsp sync`, annotated `// LEGACY(v0.5)`
+- [x] Update tests
 
 ## P1 — Adoption
 
@@ -75,7 +75,7 @@ Diagnostic and recovery command. Detects and optionally fixes common state probl
 - [ ] Detect orphaned clone directories (on disk but not in metadata)
 - [ ] Detect metadata referencing missing directories
 - [ ] Detect missing mirrors for workspace repos
-- [ ] Detect stale `wsp-mirror` remotes
+- [ ] Detect stale `wsp-mirror` remotes (legacy clones)
 - [ ] `--fix` flag to auto-repair what it can
 - [ ] Report disk usage for mirrors and workspaces
 
