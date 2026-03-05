@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Paths;
+use crate::filelock;
 use crate::git;
 use crate::giturl;
 use crate::mirror;
@@ -253,10 +254,25 @@ pub fn add_repos(
     repo_refs: &BTreeMap<String, String>,
     upstream_urls: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let mut meta = load_metadata(ws_dir)?;
+    // Phase 1: snapshot metadata to determine branch and dir layout (fast lock)
+    let snapshot = filelock::read_metadata(ws_dir)?;
+    let branch = snapshot.branch.clone();
+
+    // Phase 2: clone repos from mirrors outside the lock (slow I/O).
+    // Always clone to the disambiguated (owner-repo) name when a collision is
+    // detected against the snapshot. Directory renames for existing repos are
+    // deferred to phase 3 (under the lock) to avoid racing with concurrent adds.
+    struct CloneInfo {
+        identity: String,
+        git_ref: String,
+        dir_name: String,
+        // If collision detected: (existing_id, old_dir, new_dir) — rename deferred to phase 3
+        collision_rename: Option<(String, String, String)>,
+    }
+    let mut clones: Vec<CloneInfo> = Vec::new();
 
     for (identity, r) in repo_refs {
-        if meta.repos.contains_key(identity) {
+        if snapshot.repos.contains_key(identity) {
             eprintln!("  {} already in workspace, skipping", identity);
             continue;
         }
@@ -266,8 +282,8 @@ pub fn add_repos(
 
         // Check for collision with existing repos
         let mut collision_identity: Option<String> = None;
-        for existing_id in meta.repos.keys() {
-            let existing_dir = meta.dir_name(existing_id)?;
+        for existing_id in snapshot.repos.keys() {
+            let existing_dir = snapshot.dir_name(existing_id)?;
             if existing_dir == new_default_dir {
                 collision_identity = Some(existing_id.clone());
                 break;
@@ -280,56 +296,81 @@ pub fn add_repos(
             .unwrap_or("");
 
         if let Some(existing_id) = collision_identity {
-            // Rename existing clone directory to owner-repo
             let existing_parsed = parse_identity(&existing_id)?;
-            let old_dir = meta.dir_name(&existing_id)?;
+            let old_dir = snapshot.dir_name(&existing_id)?;
             let new_existing_dir = format!(
                 "{}-{}",
                 existing_parsed.owner.replace('/', "-"),
                 existing_parsed.repo
             );
-            fs::rename(ws_dir.join(&old_dir), ws_dir.join(&new_existing_dir))
-                .map_err(|e| anyhow::anyhow!("renaming directory for {}: {}", existing_id, e))?;
-            meta.dirs.insert(existing_id.clone(), new_existing_dir);
 
-            // Create new clone as owner-repo
+            // Clone new repo to disambiguated name (no rename yet — deferred to phase 3)
             let new_dir = format!("{}-{}", new_parsed.owner.replace('/', "-"), new_parsed.repo);
             clone_from_mirror(
                 mirrors_dir,
                 ws_dir,
                 identity,
                 &new_dir,
-                &meta.branch,
+                &branch,
                 r,
                 upstream,
             )
             .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
-            meta.dirs.insert(identity.clone(), new_dir);
-        } else {
-            let dn = meta.dir_name(identity)?;
-            clone_from_mirror(
-                mirrors_dir,
-                ws_dir,
-                identity,
-                &dn,
-                &meta.branch,
-                r,
-                upstream,
-            )
-            .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
-        }
 
-        if r.is_empty() {
-            meta.repos.insert(identity.clone(), None);
+            clones.push(CloneInfo {
+                identity: identity.clone(),
+                git_ref: r.clone(),
+                dir_name: new_dir,
+                collision_rename: Some((existing_id, old_dir, new_existing_dir)),
+            });
         } else {
-            meta.repos.insert(
-                identity.clone(),
-                Some(WorkspaceRepoRef { r#ref: r.clone() }),
-            );
+            let dn = snapshot.dir_name(identity)?;
+            clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, r, upstream)
+                .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
+
+            clones.push(CloneInfo {
+                identity: identity.clone(),
+                git_ref: r.clone(),
+                dir_name: dn,
+                collision_rename: None,
+            });
         }
     }
 
-    save_metadata(ws_dir, &meta)
+    if clones.is_empty() {
+        return Ok(());
+    }
+
+    // Phase 3: rename colliding directories and update metadata under lock (fast)
+    filelock::with_metadata(ws_dir, |meta| {
+        for ci in &clones {
+            if let Some((ref existing_id, ref old_dir, ref new_existing_dir)) = ci.collision_rename
+            {
+                // Re-validate: only rename if the existing repo is still present
+                if meta.repos.contains_key(existing_id) {
+                    fs::rename(ws_dir.join(old_dir), ws_dir.join(new_existing_dir)).map_err(
+                        |e| anyhow::anyhow!("renaming directory for {}: {}", existing_id, e),
+                    )?;
+                    meta.dirs
+                        .insert(existing_id.clone(), new_existing_dir.clone());
+                }
+                meta.dirs.insert(ci.identity.clone(), ci.dir_name.clone());
+            }
+
+            if ci.git_ref.is_empty() {
+                meta.repos.insert(ci.identity.clone(), None);
+            } else {
+                meta.repos.insert(
+                    ci.identity.clone(),
+                    Some(WorkspaceRepoRef {
+                        r#ref: ci.git_ref.clone(),
+                    }),
+                );
+            }
+        }
+        Ok(())
+    })?;
+    Ok(())
 }
 
 /// LEGACY(v0.5): remove the `wsp-mirror` remote from a clone if it exists.
@@ -356,20 +397,21 @@ pub fn remove_repos(
     identities_to_remove: &[String],
     force: bool,
 ) -> Result<()> {
-    let mut meta = load_metadata(ws_dir)?;
+    // Phase 1: snapshot metadata for safety checks (fast lock)
+    let snapshot = filelock::read_metadata(ws_dir)?;
 
     // Validate all identities exist in the workspace
     for identity in identities_to_remove {
-        if !meta.repos.contains_key(identity) {
+        if !snapshot.repos.contains_key(identity) {
             bail!("repo {} is not in this workspace", identity);
         }
     }
 
-    // Safety check: for active repos, check pending changes + unmerged branches
+    // Phase 2: safety checks including network fetch (slow, no lock held)
     if !force {
         let mut problems: Vec<String> = Vec::new();
         for identity in identities_to_remove {
-            let entry = &meta.repos[identity];
+            let entry = &snapshot.repos[identity];
             let is_active = match entry {
                 None => true,
                 Some(re) => re.r#ref.is_empty(),
@@ -378,7 +420,7 @@ pub fn remove_repos(
                 continue;
             }
 
-            let dn = meta.dir_name(identity)?;
+            let dn = snapshot.dir_name(identity)?;
             let clone_dir = ws_dir.join(&dn);
 
             let changed = git::changed_file_count(&clone_dir).unwrap_or(0);
@@ -393,7 +435,7 @@ pub fn remove_repos(
                 eprintln!("  warning: fetch failed for {}, using local data", identity);
             }
 
-            if git::branch_exists(&clone_dir, &meta.branch) {
+            if git::branch_exists(&clone_dir, &snapshot.branch) {
                 let default_branch = git::default_branch_for_remote(&clone_dir, "origin")
                     .or_else(|_| git::default_branch(&clone_dir))
                     .unwrap_or_default();
@@ -404,7 +446,7 @@ pub fn remove_repos(
                     } else {
                         default_branch
                     };
-                    match git::branch_safety(&clone_dir, &meta.branch, &target) {
+                    match git::branch_safety(&clone_dir, &snapshot.branch, &target) {
                         git::BranchSafety::Merged | git::BranchSafety::SquashMerged => {}
                         git::BranchSafety::PushedToRemote => {
                             let mut msg =
@@ -438,50 +480,52 @@ pub fn remove_repos(
         }
     }
 
-    // Remove clone directories
-    for identity in identities_to_remove {
-        let dn = meta.dir_name(identity)?;
-        let clone_path = ws_dir.join(&dn);
+    // Phase 3: remove directories and update metadata under lock (fast)
+    filelock::with_metadata(ws_dir, |meta| {
+        for identity in identities_to_remove {
+            let dn = meta.dir_name(identity)?;
+            let clone_path = ws_dir.join(&dn);
 
-        if let Err(e) = fs::remove_dir_all(&clone_path) {
-            eprintln!("  warning: removing clone for {}: {}", identity, e);
+            if let Err(e) = fs::remove_dir_all(&clone_path) {
+                eprintln!("  warning: removing clone for {}: {}", identity, e);
+            }
+
+            meta.repos.remove(identity);
+            meta.dirs.remove(identity);
         }
 
-        meta.repos.remove(identity);
-        meta.dirs.remove(identity);
-    }
+        // Recalculate dir names for remaining repos
+        let remaining_ids: Vec<&str> = meta.repos.keys().map(|s| s.as_str()).collect();
+        let new_dirs = compute_dir_names(&remaining_ids)?;
 
-    // Recalculate dir names for remaining repos
-    let remaining_ids: Vec<&str> = meta.repos.keys().map(|s| s.as_str()).collect();
-    let new_dirs = compute_dir_names(&remaining_ids)?;
-
-    // Check if any collision disambiguations can be undone
-    for (identity, new_dir) in &new_dirs {
-        if let Some(old_dir) = meta.dirs.get(identity)
-            && old_dir != new_dir
-            && let Err(e) = fs::rename(ws_dir.join(old_dir), ws_dir.join(new_dir))
-        {
-            eprintln!("  warning: renaming directory for {}: {}", identity, e);
-        }
-    }
-
-    // Check if repos that were disambiguated can now use their short name
-    for identity in meta.repos.keys() {
-        if let Some(old_dir) = meta.dirs.get(identity).cloned()
-            && !new_dirs.contains_key(identity)
-        {
-            let parsed = parse_identity(identity)?;
-            let short_name = parsed.repo.clone();
-            if let Err(e) = fs::rename(ws_dir.join(&old_dir), ws_dir.join(&short_name)) {
+        // Check if any collision disambiguations can be undone
+        for (identity, new_dir) in &new_dirs {
+            if let Some(old_dir) = meta.dirs.get(identity)
+                && old_dir != new_dir
+                && let Err(e) = fs::rename(ws_dir.join(old_dir), ws_dir.join(new_dir))
+            {
                 eprintln!("  warning: renaming directory for {}: {}", identity, e);
             }
         }
-    }
 
-    // Update dirs map
-    meta.dirs = new_dirs;
+        // Check if repos that were disambiguated can now use their short name
+        for identity in meta.repos.keys() {
+            if let Some(old_dir) = meta.dirs.get(identity).cloned()
+                && !new_dirs.contains_key(identity)
+            {
+                let parsed = parse_identity(identity)?;
+                let short_name = parsed.repo.clone();
+                if let Err(e) = fs::rename(ws_dir.join(&old_dir), ws_dir.join(&short_name)) {
+                    eprintln!("  warning: renaming directory for {}: {}", identity, e);
+                }
+            }
+        }
 
-    save_metadata(ws_dir, &meta)
+        // Update dirs map
+        meta.dirs = new_dirs;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 /// Resolved per-repo info for workspace-scoped commands.

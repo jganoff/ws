@@ -4,6 +4,7 @@ use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::{self, Paths, RepoEntry};
+use crate::filelock;
 use crate::giturl;
 use crate::mirror;
 use crate::output::{
@@ -65,34 +66,46 @@ pub fn run_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     let raw_url = matches.get_one::<String>("url").unwrap();
-
     let parsed = giturl::parse(raw_url)?;
-    let mut cfg = config::Config::load_from(&paths.config_path)?;
-
     let identity = parsed.identity();
-    if cfg.repos.contains_key(&identity) {
+
+    // Phase 1: pre-check under lock (fast, read-only)
+    let snapshot = filelock::read_config(&paths.config_path)?;
+    if snapshot.repos.contains_key(&identity) {
         bail!("repo {} already registered", identity);
     }
-
-    let exists = mirror::exists(&paths.mirrors_dir, &parsed);
-    if exists {
+    if mirror::exists(&paths.mirrors_dir, &parsed) {
         bail!("mirror already exists for {}", identity);
     }
 
+    // Phase 2: clone mirror (slow, no lock held)
     eprintln!("Cloning {}...", raw_url);
     mirror::clone(&paths.mirrors_dir, &parsed, raw_url)
         .map_err(|e| anyhow::anyhow!("cloning: {}", e))?;
 
-    cfg.repos.insert(
-        identity.clone(),
-        RepoEntry {
-            url: raw_url.clone(),
-            added: Utc::now(),
-        },
-    );
+    // Phase 3: register under lock (fast, re-check for concurrent add)
+    let result = filelock::with_config(&paths.config_path, |cfg| {
+        if cfg.repos.contains_key(&identity) {
+            bail!(
+                "repo {} was registered by another process during clone",
+                identity
+            );
+        }
+        cfg.repos.insert(
+            identity.clone(),
+            RepoEntry {
+                url: raw_url.clone(),
+                added: Utc::now(),
+            },
+        );
+        Ok(())
+    });
 
-    cfg.save_to(&paths.config_path)
-        .map_err(|e| anyhow::anyhow!("saving config: {}", e))?;
+    if result.is_err() {
+        // Clean up the orphaned mirror we cloned in phase 2
+        let _ = mirror::remove(&paths.mirrors_dir, &parsed);
+    }
+    result?;
 
     Ok(Output::Mutation(MutationOutput {
         ok: true,
@@ -133,8 +146,17 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         bail!("no repos matched");
     }
 
-    let mut cfg = config::Config::load_from(&paths.config_path)?;
-    let mut registered = Vec::new();
+    // Phase 1: snapshot current config to know which repos to skip (fast lock)
+    let snapshot = filelock::read_config(&paths.config_path)?;
+    let existing_identities: std::collections::HashSet<String> =
+        snapshot.repos.keys().cloned().collect();
+
+    // Phase 2: clone mirrors outside the lock (slow network I/O)
+    struct CloneResult {
+        identity: String,
+        url: String,
+    }
+    let mut cloned = Vec::new();
     let mut skipped = Vec::new();
     let mut failed = Vec::new();
 
@@ -151,21 +173,17 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         };
         let identity = parsed.identity();
 
-        if cfg.repos.contains_key(&identity) {
+        if existing_identities.contains(&identity) {
             skipped.push(identity);
             continue;
         }
 
         // Mirror exists on disk but not in config (e.g. crash recovery) — re-register
         if mirror::exists(&paths.mirrors_dir, &parsed) {
-            cfg.repos.insert(
-                identity.clone(),
-                RepoEntry {
-                    url: url.clone(),
-                    added: Utc::now(),
-                },
-            );
-            registered.push(identity);
+            cloned.push(CloneResult {
+                identity,
+                url: url.clone(),
+            });
             continue;
         }
 
@@ -178,18 +196,33 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             continue;
         }
 
-        cfg.repos.insert(
-            identity.clone(),
-            RepoEntry {
-                url: url.clone(),
-                added: Utc::now(),
-            },
-        );
-        registered.push(identity);
+        cloned.push(CloneResult {
+            identity,
+            url: url.clone(),
+        });
     }
 
-    if !registered.is_empty() {
-        cfg.save_to(&paths.config_path)?;
+    // Phase 3: register all cloned repos under a single short lock
+    let mut registered = Vec::new();
+    if !cloned.is_empty() {
+        filelock::with_config(&paths.config_path, |cfg| {
+            for cr in &cloned {
+                if cfg.repos.contains_key(&cr.identity) {
+                    // Concurrently registered by another process — skip
+                    skipped.push(cr.identity.clone());
+                    continue;
+                }
+                cfg.repos.insert(
+                    cr.identity.clone(),
+                    RepoEntry {
+                        url: cr.url.clone(),
+                        added: Utc::now(),
+                    },
+                );
+                registered.push(cr.identity.clone());
+            }
+            Ok(())
+        })?;
     }
 
     Ok(Output::Import(ImportOutput {
@@ -335,22 +368,23 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 pub fn run_remove(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
 
-    let mut cfg = config::Config::load_from(&paths.config_path)
-        .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
-
-    let identities: Vec<String> = cfg.repos.keys().cloned().collect();
+    // Phase 1: resolve identity and URL under lock (fast, read-only)
+    let snapshot = filelock::read_config(&paths.config_path)?;
+    let identities: Vec<String> = snapshot.repos.keys().cloned().collect();
     let identity = giturl::resolve(name, &identities)?;
-
-    let entry = &cfg.repos[&identity];
+    let entry = &snapshot.repos[&identity];
     let parsed = giturl::parse(&entry.url)?;
 
+    // Phase 2: remove mirror (no lock held)
     eprintln!("Removing mirror for {}...", identity);
     mirror::remove(&paths.mirrors_dir, &parsed)
         .map_err(|e| anyhow::anyhow!("removing mirror: {}", e))?;
 
-    cfg.repos.remove(&identity);
-    cfg.save_to(&paths.config_path)
-        .map_err(|e| anyhow::anyhow!("saving config: {}", e))?;
+    // Phase 3: unregister under lock (fast)
+    filelock::with_config(&paths.config_path, |cfg| {
+        cfg.repos.remove(&identity);
+        Ok(())
+    })?;
 
     Ok(Output::Mutation(MutationOutput {
         ok: true,

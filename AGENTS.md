@@ -74,6 +74,15 @@ No manual `git fetch` or `git pull` needed — `wsp rm` fetches implicitly via t
 
 If a squash merge resolved conflicts by changing file contents, `is_content_merged` may return `false` because the branch's files don't match what's on `origin/main`. The workspace will be detected as `Unmerged` and blocked. Use `--force` to remove.
 
+## File Locking
+
+`src/filelock.rs` provides advisory `flock`-based locking via `fs2` to prevent concurrent `wsp` processes from losing writes. Key conventions:
+
+- **Use `with_config()` / `with_metadata()`** for all read-modify-write operations on `config.yaml` and `.wsp.yaml`. Never call `load_from` → modify → `save_to` directly outside of tests.
+- **Keep locks short**: Do not hold a lock during network I/O (git clone, git fetch). Use the 3-phase pattern: snapshot under lock → slow I/O without lock → update under lock with re-check.
+- **Lock files are not deleted**: The `Drop` impl intentionally leaves `.lock` files on disk to avoid a race where concurrent acquirers end up on different inodes. This is standard `flock` practice.
+- Read-only operations (`run_list`, `run_get`, `run_show`) do not need locking.
+
 ## Security Notes
 
 - **Shell completion scripts** (`src/cli/completion.rs`): User-configurable values (paths, config) embedded in generated shell code must be escaped for the target shell. Single quotes in POSIX shells have no escape mechanism — use `'` → `'\''`. In fish, use `'` → `\'`. Always test with shell metacharacters (`'`, `$`, `` ` ``, newlines) in paths.

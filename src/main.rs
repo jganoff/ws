@@ -3,6 +3,7 @@
 mod agentmd;
 mod cli;
 mod config;
+mod filelock;
 mod git;
 mod giturl;
 mod group;

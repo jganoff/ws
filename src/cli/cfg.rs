@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use clap::{Arg, ArgMatches, Command};
 
 use crate::config::{self, Paths};
+use crate::filelock;
 use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, MutationOutput, Output};
 
 pub fn list_cmd() -> Command {
@@ -112,51 +113,50 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let key = matches.get_one::<String>("key").unwrap();
     let value = matches.get_one::<String>("value").unwrap();
-    let mut cfg = config::Config::load_from(&paths.config_path)?;
 
-    match key.as_str() {
+    // Validate inputs before acquiring lock
+    let message = match key.as_str() {
         "branch-prefix" => {
-            cfg.branch_prefix = Some(value.clone());
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: format!("branch-prefix = {}", value),
-            }))
+            let v = value.clone();
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.branch_prefix = Some(v);
+                Ok(())
+            })?;
+            format!("branch-prefix = {}", value)
         }
         "workspaces-dir" => {
             let path = std::path::Path::new(value.as_str());
             if !path.is_absolute() {
                 bail!("workspaces-dir must be an absolute path");
             }
-            cfg.workspaces_dir = Some(value.clone());
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: format!("workspaces-dir = {}", value),
-            }))
+            let v = value.clone();
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.workspaces_dir = Some(v);
+                Ok(())
+            })?;
+            format!("workspaces-dir = {}", value)
         }
         "sync-strategy" => {
             match value.as_str() {
                 "rebase" | "merge" => {}
                 _ => bail!("sync-strategy must be 'rebase' or 'merge'"),
             }
-            cfg.sync_strategy = Some(value.clone());
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: format!("sync-strategy = {}", value),
-            }))
+            let v = value.clone();
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.sync_strategy = Some(v);
+                Ok(())
+            })?;
+            format!("sync-strategy = {}", value)
         }
         "agent-md" => {
             let enabled: bool = value
                 .parse()
                 .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
-            cfg.agent_md = Some(enabled);
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: format!("agent-md = {}", enabled),
-            }))
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.agent_md = Some(enabled);
+                Ok(())
+            })?;
+            format!("agent-md = {}", enabled)
         }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
@@ -167,54 +167,51 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             let enabled: bool = value
                 .parse()
                 .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
-            let integrations = cfg.language_integrations.get_or_insert_with(BTreeMap::new);
-            integrations.insert(lang.to_string(), enabled);
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: format!("language-integrations.{} = {}", lang, enabled),
-            }))
+            let lang = lang.to_string();
+            filelock::with_config(&paths.config_path, |cfg| {
+                let integrations = cfg.language_integrations.get_or_insert_with(BTreeMap::new);
+                integrations.insert(lang.clone(), enabled);
+                Ok(())
+            })?;
+            format!("language-integrations.{} = {}", lang, enabled)
         }
         _ => bail!("unknown config key: {}", key),
-    }
+    };
+
+    Ok(Output::Mutation(MutationOutput { ok: true, message }))
 }
 
 pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let key = matches.get_one::<String>("key").unwrap();
-    let mut cfg = config::Config::load_from(&paths.config_path)?;
 
-    match key.as_str() {
+    let message = match key.as_str() {
         "branch-prefix" => {
-            cfg.branch_prefix = None;
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: "branch-prefix unset".into(),
-            }))
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.branch_prefix = None;
+                Ok(())
+            })?;
+            "branch-prefix unset".into()
         }
         "workspaces-dir" => {
-            cfg.workspaces_dir = None;
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: "workspaces-dir unset (default: ~/dev/workspaces)".into(),
-            }))
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.workspaces_dir = None;
+                Ok(())
+            })?;
+            "workspaces-dir unset (default: ~/dev/workspaces)".into()
         }
         "sync-strategy" => {
-            cfg.sync_strategy = None;
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: "sync-strategy unset (default: rebase)".into(),
-            }))
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.sync_strategy = None;
+                Ok(())
+            })?;
+            "sync-strategy unset (default: rebase)".into()
         }
         "agent-md" => {
-            cfg.agent_md = None;
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: "agent-md unset (default: true)".into(),
-            }))
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.agent_md = None;
+                Ok(())
+            })?;
+            "agent-md unset (default: true)".into()
         }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
@@ -222,18 +219,20 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             if !known.iter().any(|n| n == lang) {
                 bail!("unknown language integration: {}", lang);
             }
-            if let Some(ref mut m) = cfg.language_integrations {
-                m.remove(lang);
-                if m.is_empty() {
-                    cfg.language_integrations = None;
+            let lang = lang.to_string();
+            filelock::with_config(&paths.config_path, |cfg| {
+                if let Some(ref mut m) = cfg.language_integrations {
+                    m.remove(&lang);
+                    if m.is_empty() {
+                        cfg.language_integrations = None;
+                    }
                 }
-            }
-            cfg.save_to(&paths.config_path)?;
-            Ok(Output::Mutation(MutationOutput {
-                ok: true,
-                message: format!("language-integrations.{} unset (default: true)", lang),
-            }))
+                Ok(())
+            })?;
+            format!("language-integrations.{} unset (default: true)", lang)
         }
         _ => bail!("unknown config key: {}", key),
-    }
+    };
+
+    Ok(Output::Mutation(MutationOutput { ok: true, message }))
 }
