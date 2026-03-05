@@ -259,82 +259,85 @@ pub fn add_repos(
     let branch = snapshot.branch.clone();
 
     // Phase 2: clone repos from mirrors outside the lock (slow I/O).
-    // Always clone to the disambiguated (owner-repo) name when a collision is
-    // detected against the snapshot. Directory renames for existing repos are
-    // deferred to phase 3 (under the lock) to avoid racing with concurrent adds.
+    // Pre-compute directory names for the union of existing + new repos using
+    // compute_dir_names, which detects collisions both against existing repos
+    // and among the new repos themselves (e.g. alice/utils + bob/utils).
+    // Directory renames for existing repos are deferred to phase 3 (under lock).
+
+    // Filter out repos already in the workspace
+    let new_identities: Vec<&String> = repo_refs
+        .keys()
+        .filter(|id| {
+            if snapshot.repos.contains_key(id.as_str()) {
+                eprintln!("  {} already in workspace, skipping", id);
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    // Compute dir names for existing + new repos together to detect all collisions
+    let all_identities: Vec<&str> = snapshot
+        .repos
+        .keys()
+        .map(|s| s.as_str())
+        .chain(new_identities.iter().map(|s| s.as_str()))
+        .collect();
+    let all_dirs = compute_dir_names(&all_identities)?;
+
+    // Determine which existing repos need renaming (they now appear in all_dirs
+    // but weren't in snapshot.dirs, or their dir name changed)
+    struct RenameInfo {
+        existing_id: String,
+        old_dir: String,
+        new_dir: String,
+    }
+    let mut renames: Vec<RenameInfo> = Vec::new();
+    for existing_id in snapshot.repos.keys() {
+        if let Some(new_dir) = all_dirs.get(existing_id) {
+            let old_dir = snapshot.dir_name(existing_id)?;
+            if *new_dir != old_dir {
+                renames.push(RenameInfo {
+                    existing_id: existing_id.clone(),
+                    old_dir,
+                    new_dir: new_dir.clone(),
+                });
+            }
+        }
+    }
+
     struct CloneInfo {
         identity: String,
         git_ref: String,
         dir_name: String,
-        // If collision detected: (existing_id, old_dir, new_dir) — rename deferred to phase 3
-        collision_rename: Option<(String, String, String)>,
     }
     let mut clones: Vec<CloneInfo> = Vec::new();
 
-    for (identity, r) in repo_refs {
-        if snapshot.repos.contains_key(identity) {
-            eprintln!("  {} already in workspace, skipping", identity);
-            continue;
-        }
-
-        let new_parsed = parse_identity(identity)?;
-        let new_default_dir = new_parsed.repo.clone();
-
-        // Check for collision with existing repos
-        let mut collision_identity: Option<String> = None;
-        for existing_id in snapshot.repos.keys() {
-            let existing_dir = snapshot.dir_name(existing_id)?;
-            if existing_dir == new_default_dir {
-                collision_identity = Some(existing_id.clone());
-                break;
-            }
-        }
-
+    for identity in &new_identities {
+        let r = &repo_refs[identity.as_str()];
         let upstream = upstream_urls
-            .get(identity)
+            .get(identity.as_str())
             .map(|s| s.as_str())
             .unwrap_or("");
 
-        if let Some(existing_id) = collision_identity {
-            let existing_parsed = parse_identity(&existing_id)?;
-            let old_dir = snapshot.dir_name(&existing_id)?;
-            let new_existing_dir = format!(
-                "{}-{}",
-                existing_parsed.owner.replace('/', "-"),
-                existing_parsed.repo
-            );
+        // Use disambiguated name from all_dirs if present, otherwise default
+        let dn = match all_dirs.get(identity.as_str()) {
+            Some(d) => d.clone(),
+            None => {
+                let parsed = parse_identity(identity)?;
+                parsed.repo
+            }
+        };
 
-            // Clone new repo to disambiguated name (no rename yet — deferred to phase 3)
-            let new_dir = format!("{}-{}", new_parsed.owner.replace('/', "-"), new_parsed.repo);
-            clone_from_mirror(
-                mirrors_dir,
-                ws_dir,
-                identity,
-                &new_dir,
-                &branch,
-                r,
-                upstream,
-            )
+        clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, r, upstream)
             .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
 
-            clones.push(CloneInfo {
-                identity: identity.clone(),
-                git_ref: r.clone(),
-                dir_name: new_dir,
-                collision_rename: Some((existing_id, old_dir, new_existing_dir)),
-            });
-        } else {
-            let dn = snapshot.dir_name(identity)?;
-            clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, r, upstream)
-                .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
-
-            clones.push(CloneInfo {
-                identity: identity.clone(),
-                git_ref: r.clone(),
-                dir_name: dn,
-                collision_rename: None,
-            });
-        }
+        clones.push(CloneInfo {
+            identity: identity.to_string(),
+            git_ref: r.clone(),
+            dir_name: dn,
+        });
     }
 
     if clones.is_empty() {
@@ -343,17 +346,19 @@ pub fn add_repos(
 
     // Phase 3: rename colliding directories and update metadata under lock (fast)
     filelock::with_metadata(ws_dir, |meta| {
+        // Rename existing repos that now collide with new additions
+        for ri in &renames {
+            if meta.repos.contains_key(&ri.existing_id) {
+                fs::rename(ws_dir.join(&ri.old_dir), ws_dir.join(&ri.new_dir)).map_err(|e| {
+                    anyhow::anyhow!("renaming directory for {}: {}", ri.existing_id, e)
+                })?;
+                meta.dirs.insert(ri.existing_id.clone(), ri.new_dir.clone());
+            }
+        }
+
+        // Register new repos
         for ci in &clones {
-            if let Some((ref existing_id, ref old_dir, ref new_existing_dir)) = ci.collision_rename
-            {
-                // Re-validate: only rename if the existing repo is still present
-                if meta.repos.contains_key(existing_id) {
-                    fs::rename(ws_dir.join(old_dir), ws_dir.join(new_existing_dir)).map_err(
-                        |e| anyhow::anyhow!("renaming directory for {}: {}", existing_id, e),
-                    )?;
-                    meta.dirs
-                        .insert(existing_id.clone(), new_existing_dir.clone());
-                }
+            if all_dirs.contains_key(&ci.identity) {
                 meta.dirs.insert(ci.identity.clone(), ci.dir_name.clone());
             }
 
@@ -1917,6 +1922,42 @@ mod tests {
         assert!(!ws_dir.join("test-repo").exists());
         assert!(ws_dir.join("user-test-repo").exists());
         assert!(ws_dir.join("other-test-repo").exists());
+    }
+
+    #[test]
+    fn test_add_repos_intra_batch_collision() {
+        let (paths, _d, source_repo, identity1, mut upstream_urls) = setup_test_env();
+
+        // Create workspace with no repos
+        let refs = BTreeMap::new();
+        create(&paths, "batch-collide", &refs, None, &upstream_urls).unwrap();
+        let ws_dir = dir(&paths.workspaces_dir, "batch-collide");
+
+        // Add two repos with the same short name ("test-repo") in one batch
+        let (identity2, urls2) = add_mirror_with_owner(
+            &paths,
+            source_repo.path(),
+            "test.local",
+            "other",
+            "test-repo",
+        );
+        upstream_urls.extend(urls2.clone());
+
+        let new_refs = BTreeMap::from([
+            (identity1.clone(), String::new()),
+            (identity2.clone(), String::new()),
+        ]);
+        let mut all_urls = upstream_urls.clone();
+        all_urls.extend(urls2);
+        add_repos(&paths.mirrors_dir, &ws_dir, &new_refs, &all_urls).unwrap();
+
+        let meta = load_metadata(&ws_dir).unwrap();
+        assert_eq!(meta.dir_name(&identity1).unwrap(), "user-test-repo");
+        assert_eq!(meta.dir_name(&identity2).unwrap(), "other-test-repo");
+        assert!(ws_dir.join("user-test-repo").exists());
+        assert!(ws_dir.join("other-test-repo").exists());
+        // Short name should not exist — both are disambiguated
+        assert!(!ws_dir.join("test-repo").exists());
     }
 
     #[test]
