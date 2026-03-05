@@ -4,6 +4,39 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
+### Workspace Definitions
+
+**Complexity:** Medium
+
+**Design doc:** [`docs/features/workspace-definitions.md`](features/workspace-definitions.md)
+
+Sharable, self-contained files that describe how to create a workspace — repos, context repos, and settings. Replaces groups with a richer, portable concept. One file gets a new teammate fully set up.
+
+```yaml
+# dash.wsp.yaml
+repos:
+  - url: https://github.com/docker/api-gateway.git
+  - url: https://github.com/docker/user-service.git
+context:
+  - url: https://github.com/docker/proto.git
+    ref: main
+settings:
+  language_integrations:
+    go: true
+  sync_strategy: rebase
+```
+
+```
+wsp new my-feature -d dash              # create from definition
+wsp setup def export dash               # share with teammate
+wsp setup def import dash.wsp.yaml      # teammate imports + auto-registers repos
+```
+
+- [ ] Phase 1: Definition CRUD (`wsp setup def new/ls/show/rm`) and `wsp new -d`
+- [ ] Phase 2: Import/export with auto-registration of unknown repos
+- [ ] Phase 3: Migrate existing groups to definitions, deprecate `-g`
+- [ ] Phase 4: Wire definition settings into workspace creation
+
 ### `wsp exec --json`
 
 **Complexity:** Small
@@ -178,65 +211,11 @@ Surface open PR status in workspace commands. Requires `gh` CLI (already an acce
 - [ ] `--json` output includes PR metadata
 - [ ] Graceful degradation when `gh` is not installed
 
-### `wsp export` / `wsp new --from`
+### Team Bootstrap
 
 **Complexity:** Small-Medium
 
-Shareable workspace templates for reproducible workspace creation. Supports both file-based and URL-based sharing.
-
-```
-$ wsp export add-billing
-wsp new add-billing api-gateway user-service@main proto@v1.0
-
-$ wsp export add-billing --file
-Wrote add-billing.wsp-template.yaml
-
-$ wsp new --from add-billing.wsp-template.yaml
-$ wsp new --from https://gist.github.com/.../template.yaml
-```
-
-- [ ] `wsp export <name>` (prints `wsp new` one-liner)
-- [ ] `wsp export <name> --file` (writes `.wsp-template.yaml`)
-- [ ] `wsp new --from <file>` reads template
-- [ ] `wsp new --from <url>` fetches and reads remote template (HTTPS only)
-- [ ] Keep templates explicit (repo lists, not group references)
-
-### `.wsp-team.yaml` — Team Bootstrap
-
-**Complexity:** Small-Medium
-
-Team-level onboarding config that captures repos, groups, and conventions. Lives in a shared repo or gist. Complements per-workspace templates — templates are "here's my workspace," team bootstrap is "here's our team's setup."
-
-```yaml
-# .wsp-team.yaml
-repos:
-  - git@github.com:acme/api-gateway.git
-  - git@github.com:acme/user-service.git
-  - git@github.com:acme/proto.git
-groups:
-  backend: [api-gateway, user-service]
-  all: [api-gateway, user-service, proto]
-defaults:
-  branch-prefix: "${GITHUB_USER}"
-  sync-strategy: rebase
-```
-
-```
-$ wsp init --from https://github.com/acme/eng-config/blob/main/.wsp-team.yaml
-$ wsp init --from .wsp-team.yaml
-```
-
-Should also be producible from existing config:
-
-```
-$ wsp setup export-team > .wsp-team.yaml
-```
-
-- [ ] Define `.wsp-team.yaml` schema (repos, groups, defaults)
-- [ ] `wsp init --from <file|url>` reads team config, registers repos, creates groups
-- [ ] `wsp setup export-team` generates team config from current state
-- [ ] HTTPS only for URL sources
-- [ ] Confirm before applying (show what will be created)
+Higher-level orchestration on top of workspace definitions. A team bootstrap file bundles multiple definitions + global defaults for onboarding. Depends on workspace definitions (P1) landing first. See deferred decisions in [`docs/features/workspace-definitions.md`](features/workspace-definitions.md).
 
 ### `wsp init`
 
