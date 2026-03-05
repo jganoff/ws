@@ -176,6 +176,21 @@ wsp setup skill install                         # Install wsp Claude Code skill 
 }
 ```
 
+### `wsp exec <workspace> --json -- <command>`
+```json
+{
+  "repos": [
+    {
+      "name": "github.com/acme/api-gateway",
+      "directory": "api-gateway",
+      "exit_code": 0,
+      "ok": true,
+      "stdout": "hello\n"
+    }
+  ]
+}
+```
+
 ### `wsp repo fetch --json`
 ```json
 {

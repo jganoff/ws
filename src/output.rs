@@ -225,6 +225,25 @@ pub struct WorkspaceRepoListEntry {
 }
 
 #[derive(Serialize)]
+pub struct ExecOutput {
+    pub repos: Vec<ExecRepoResult>,
+}
+
+#[derive(Serialize)]
+pub struct ExecRepoResult {
+    pub name: String,
+    pub directory: String,
+    pub exit_code: i32,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct FetchOutput {
     pub repos: Vec<FetchRepoResult>,
 }
@@ -486,6 +505,23 @@ impl WorkspaceRepoListOutput {
 }
 
 #[cfg(feature = "codegen")]
+impl ExecOutput {
+    pub fn sample() -> Self {
+        Self {
+            repos: vec![ExecRepoResult {
+                name: "github.com/acme/api-gateway".into(),
+                directory: "api-gateway".into(),
+                exit_code: 0,
+                ok: true,
+                stdout: Some("hello\n".into()),
+                stderr: None,
+                error: None,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
 impl FetchOutput {
     pub fn sample() -> Self {
         Self {
@@ -545,6 +581,7 @@ pub enum Output {
     Status(StatusOutput),
     Diff(DiffOutput),
     Log(LogOutput),
+    Exec(ExecOutput),
     Fetch(FetchOutput),
     Sync(SyncOutput),
     ConfigList(ConfigListOutput),
@@ -571,6 +608,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::Status(v) => print_json(&v),
             Output::Diff(v) => print_json(&v),
             Output::Log(v) => print_json(&v),
+            Output::Exec(v) => print_json(&v),
             Output::Fetch(v) => print_json(&v),
             Output::Sync(v) => print_json(&v),
             Output::ConfigList(v) => print_json(&v),
@@ -590,6 +628,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::Status(v) => render_status_table(v),
         Output::Diff(v) => render_diff_text(v),
         Output::Log(v) => render_log_text(v),
+        Output::Exec(_) => Ok(()), // text output handled inline during execution
         Output::Fetch(v) => render_fetch_text(v),
         Output::Sync(v) => render_sync_text(v),
         Output::ConfigList(v) => render_config_list_text(v),
@@ -603,6 +642,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
 /// Returns non-zero exit code for batch outputs with failures.
 pub fn exit_code(output: &Output) -> i32 {
     match output {
+        Output::Exec(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Fetch(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Sync(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Import(v) if !v.failed.is_empty() => 1,
@@ -1559,6 +1599,136 @@ mod tests {
         for (name, output, want) in cases {
             let val = serde_json::to_value(&output).unwrap();
             assert_eq!(val, want, "{}", name);
+        }
+    }
+
+    #[test]
+    fn test_json_exec() {
+        let cases: Vec<(&str, ExecOutput, serde_json::Value)> = vec![
+            (
+                "success with captured output",
+                ExecOutput {
+                    repos: vec![ExecRepoResult {
+                        name: "github.com/acme/api-gateway".into(),
+                        directory: "api-gateway".into(),
+                        exit_code: 0,
+                        ok: true,
+                        stdout: Some("hello\n".into()),
+                        stderr: Some(String::new()),
+                        error: None,
+                    }],
+                },
+                serde_json::json!({
+                    "repos": [{
+                        "name": "github.com/acme/api-gateway",
+                        "directory": "api-gateway",
+                        "exit_code": 0,
+                        "ok": true,
+                        "stdout": "hello\n",
+                        "stderr": ""
+                    }]
+                }),
+            ),
+            (
+                "failure without capture",
+                ExecOutput {
+                    repos: vec![ExecRepoResult {
+                        name: "github.com/acme/api-gateway".into(),
+                        directory: "api-gateway".into(),
+                        exit_code: 1,
+                        ok: false,
+                        stdout: None,
+                        stderr: None,
+                        error: None,
+                    }],
+                },
+                serde_json::json!({
+                    "repos": [{
+                        "name": "github.com/acme/api-gateway",
+                        "directory": "api-gateway",
+                        "exit_code": 1,
+                        "ok": false
+                    }]
+                }),
+            ),
+            (
+                "spawn error",
+                ExecOutput {
+                    repos: vec![ExecRepoResult {
+                        name: "github.com/acme/api-gateway".into(),
+                        directory: String::new(),
+                        exit_code: -1,
+                        ok: false,
+                        stdout: None,
+                        stderr: None,
+                        error: Some("No such file or directory".into()),
+                    }],
+                },
+                serde_json::json!({
+                    "repos": [{
+                        "name": "github.com/acme/api-gateway",
+                        "directory": "",
+                        "exit_code": -1,
+                        "ok": false,
+                        "error": "No such file or directory"
+                    }]
+                }),
+            ),
+        ];
+        for (name, output, want) in cases {
+            let val = serde_json::to_value(&output).unwrap();
+            assert_eq!(val, want, "{}", name);
+        }
+    }
+
+    #[test]
+    fn test_exit_code_exec() {
+        let cases: Vec<(&str, ExecOutput, i32)> = vec![
+            (
+                "all ok",
+                ExecOutput {
+                    repos: vec![ExecRepoResult {
+                        name: "r".into(),
+                        directory: "r".into(),
+                        exit_code: 0,
+                        ok: true,
+                        stdout: None,
+                        stderr: None,
+                        error: None,
+                    }],
+                },
+                0,
+            ),
+            (
+                "one failure",
+                ExecOutput {
+                    repos: vec![
+                        ExecRepoResult {
+                            name: "a".into(),
+                            directory: "a".into(),
+                            exit_code: 0,
+                            ok: true,
+                            stdout: None,
+                            stderr: None,
+                            error: None,
+                        },
+                        ExecRepoResult {
+                            name: "b".into(),
+                            directory: "b".into(),
+                            exit_code: 1,
+                            ok: false,
+                            stdout: None,
+                            stderr: None,
+                            error: None,
+                        },
+                    ],
+                },
+                1,
+            ),
+            ("empty repos", ExecOutput { repos: vec![] }, 0),
+        ];
+        for (name, output, want) in cases {
+            assert_eq!(exit_code(&Output::Exec(output)), want, "{}", name);
         }
     }
 

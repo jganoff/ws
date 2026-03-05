@@ -39,9 +39,9 @@ pub fn generate_cmd() -> Command {
 #[cfg(feature = "codegen")]
 pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     use crate::output::{
-        ConfigGetOutput, ConfigListOutput, DiffOutput, ErrorOutput, FetchOutput, GroupListOutput,
-        GroupShowOutput, ImportOutput, LogOutput, MutationOutput, RepoListOutput, StatusOutput,
-        SyncOutput, WorkspaceListOutput, WorkspaceRepoListOutput,
+        ConfigGetOutput, ConfigListOutput, DiffOutput, ErrorOutput, ExecOutput, FetchOutput,
+        GroupListOutput, GroupShowOutput, ImportOutput, LogOutput, MutationOutput, RepoListOutput,
+        StatusOutput, SyncOutput, WorkspaceListOutput, WorkspaceRepoListOutput,
     };
 
     let cli = super::build_cli();
@@ -105,6 +105,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     write_schema::<LogOutput>(&mut out, "wsp log --json");
     write_schema::<SyncOutput>(&mut out, "wsp sync --json");
     write_schema::<WorkspaceRepoListOutput>(&mut out, "wsp repo ls --json");
+    write_schema::<ExecOutput>(&mut out, "wsp exec <workspace> --json -- <command>");
     write_schema::<FetchOutput>(&mut out, "wsp repo fetch --json");
     write_schema::<GroupListOutput>(&mut out, "wsp setup group list --json");
     write_schema::<GroupShowOutput>(&mut out, "wsp setup group show <name> --json");
@@ -151,6 +152,7 @@ impl_sample!(
     crate::output::ConfigListOutput,
     crate::output::ConfigGetOutput,
     crate::output::WorkspaceRepoListOutput,
+    crate::output::ExecOutput,
     crate::output::FetchOutput,
     crate::output::MutationOutput,
     crate::output::ImportOutput,
