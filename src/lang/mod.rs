@@ -32,13 +32,13 @@ pub fn run_integrations(ws_dir: &Path, metadata: &Metadata, config: &Config) {
     for integration in all_integrations() {
         let name = integration.name();
 
-        // Check config: absent key = enabled, explicit false = disabled
+        // Check config: absent key = disabled, explicit true = enabled
         let enabled = config
             .language_integrations
             .as_ref()
             .and_then(|m| m.get(name))
             .copied()
-            .unwrap_or(true);
+            .unwrap_or(false);
 
         if !enabled {
             continue;
@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_integrations_default_enabled() {
+    fn test_run_integrations_default_disabled() {
         let tmp = tempfile::tempdir().unwrap();
         let ws_dir = tmp.path();
 
@@ -97,7 +97,7 @@ mod tests {
 
         run_integrations(ws_dir, &meta, &cfg);
 
-        assert!(ws_dir.join("go.work").exists());
+        assert!(!ws_dir.join("go.work").exists());
     }
 
     #[test]
