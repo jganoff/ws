@@ -4,17 +4,6 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### File Locking
-
-**Complexity:** Small
-
-Prevent concurrent `wsp` commands from silently losing metadata writes. Two wsp processes reading `.wsp.yaml` simultaneously can both compute new state independently — last writer wins, silently discarding the first writer's changes.
-
-- [ ] Advisory `flock`/`fcntl` lock via `.wsp.yaml.lock` before read-modify-write
-- [ ] Write PID into lockfile for stale lock detection
-- [ ] Timeout (5s) with clear error: "Another wsp process holds the workspace lock (PID XXXX)"
-- [ ] Same treatment for global `config.yaml`
-
 ### `wsp exec --json`
 
 **Complexity:** Small
