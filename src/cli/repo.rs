@@ -78,10 +78,12 @@ pub fn run_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         bail!("mirror already exists for {}", identity);
     }
 
-    // Phase 2: clone mirror (slow, no lock held)
+    // Phase 2: clone mirror + initial fetch (slow, no lock held)
     eprintln!("Cloning {}...", raw_url);
     mirror::clone(&paths.mirrors_dir, &parsed, raw_url)
         .map_err(|e| anyhow::anyhow!("cloning: {}", e))?;
+    mirror::fetch(&paths.mirrors_dir, &parsed)
+        .map_err(|e| anyhow::anyhow!("initial fetch: {}", e))?;
 
     // Phase 3: register under lock (fast, re-check for concurrent add)
     let result = filelock::with_config(&paths.config_path, |cfg| {
@@ -188,7 +190,9 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
 
         eprintln!("Cloning {}...", url);
-        if let Err(e) = mirror::clone(&paths.mirrors_dir, &parsed, url) {
+        if let Err(e) = mirror::clone(&paths.mirrors_dir, &parsed, url)
+            .and_then(|_| mirror::fetch(&paths.mirrors_dir, &parsed))
+        {
             failed.push(ImportFailure {
                 name: name.clone(),
                 error: e.to_string(),

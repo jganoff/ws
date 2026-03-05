@@ -909,4 +909,5 @@ mod tests {
             "MERGE_HEAD should not exist after abort"
         );
     }
+
 }

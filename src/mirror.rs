@@ -19,8 +19,7 @@ pub fn clone(mirrors_dir: &Path, parsed: &Parsed, url: &str) -> Result<()> {
     git::configure_fetch_refspec(&dest)
 }
 
-/// Fetch a mirror with pruning enabled. Used by tests and available for admin operations.
-#[cfg(test)]
+/// Fetch a mirror with pruning enabled.
 pub fn fetch(mirrors_dir: &Path, parsed: &Parsed) -> Result<()> {
     let d = dir(mirrors_dir, parsed);
     git::fetch(&d, true)
