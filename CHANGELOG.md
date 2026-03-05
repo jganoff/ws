@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-03-05
+
+### Features
+
+- *(workspace)* Remove wsp-mirror remote, route all fetches through mirrors
+- *(filelock)* Add advisory file locking for concurrent write safety
+- *(exec)* Add --json output for structured per-repo results
+
+### Bug Fixes
+
+- *(workspace)* Detect intra-batch dir name collisions in add_repos
+
+### Documentation
+
+- *(roadmap)* Remove git subprocess timeouts from roadmap
+- Add design tenets for git/mirror, agent, and human use
+- *(roadmap)* Add P0 for removing wsp-mirror remote from clones
+- *(roadmap)* Expand roadmap from multi-perspective analysis
+- *(roadmap)* Remove completed P0, reorder remaining items
+- *(roadmap)* Remove completed file locking item
+
 ## [0.5.5] - 2026-03-03
 
 ### Features
