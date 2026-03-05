@@ -26,7 +26,7 @@ impl LanguageIntegration for GoIntegration {
     fn detect(&self, ws_dir: &Path, metadata: &Metadata) -> bool {
         repo_dirs(ws_dir, metadata)
             .iter()
-            .any(|(_, path)| path.join("go.mod").exists())
+            .any(|(name, path)| !find_go_modules(path, name).is_empty())
     }
 
     fn apply(&self, ws_dir: &Path, metadata: &Metadata) -> Result<()> {
@@ -34,14 +34,13 @@ impl LanguageIntegration for GoIntegration {
         let mut entries: Vec<(String, GoVersion)> = Vec::new();
 
         for (name, path) in &dirs {
-            let go_mod = path.join("go.mod");
-            if !go_mod.exists() {
-                continue;
+            for mod_rel in find_go_modules(path, name) {
+                let go_mod = ws_dir.join(&mod_rel).join("go.mod");
+                let content = fs::read_to_string(&go_mod)
+                    .with_context(|| format!("reading {}", go_mod.display()))?;
+                let version = parse_go_version(&content).unwrap_or(DEFAULT_GO_VERSION);
+                entries.push((mod_rel, version));
             }
-            let content = fs::read_to_string(&go_mod)
-                .with_context(|| format!("reading {}", go_mod.display()))?;
-            let version = parse_go_version(&content).unwrap_or(DEFAULT_GO_VERSION);
-            entries.push((name.clone(), version));
         }
 
         if entries.is_empty() {
@@ -96,6 +95,49 @@ fn repo_dirs(ws_dir: &Path, metadata: &Metadata) -> Vec<(String, PathBuf)> {
         }
     }
     result
+}
+
+/// Directories to skip when walking for go.mod files.
+const SKIP_DIRS: &[&str] = &[".git", "vendor", "testdata", "node_modules"];
+
+/// Recursively finds all `go.mod` files under `root`.
+/// Returns workspace-relative paths (e.g. `repo-name/services/api`).
+fn find_go_modules(root: &Path, repo_name: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    walk_for_go_mod(root, repo_name, &mut results);
+    results
+}
+
+fn walk_for_go_mod(dir: &Path, rel_path: &str, results: &mut Vec<String>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let is_regular_file = dir
+        .join("go.mod")
+        .symlink_metadata()
+        .map(|m| m.file_type().is_file())
+        .unwrap_or(false);
+    if is_regular_file {
+        results.push(rel_path.to_string());
+    }
+
+    let mut subdirs: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_ref())
+        })
+        .collect();
+    subdirs.sort_by_key(|e| e.file_name());
+
+    for entry in subdirs {
+        let child_rel = format!("{}/{}", rel_path, entry.file_name().to_string_lossy());
+        walk_for_go_mod(&entry.path(), &child_rel, results);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -672,6 +714,125 @@ mod tests {
             content.contains("go 1.25.7"),
             "should preserve patch version: got {}",
             content
+        );
+    }
+
+    #[test]
+    fn test_detect_nested_go_mod() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path();
+
+        let nested = ws_dir.join("monorepo/services/api");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            nested.join("go.mod"),
+            "module example.com/monorepo/services/api\n\ngo 1.22\n",
+        )
+        .unwrap();
+
+        let meta = make_metadata(&["github.com/acme/monorepo"]);
+        let integration = GoIntegration;
+
+        assert!(integration.detect(ws_dir, &meta));
+    }
+
+    #[test]
+    fn test_apply_nested_go_mod() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path();
+
+        let nested = ws_dir.join("monorepo/services/api");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            nested.join("go.mod"),
+            "module example.com/monorepo/services/api\n\ngo 1.22\n",
+        )
+        .unwrap();
+
+        let meta = make_metadata(&["github.com/acme/monorepo"]);
+        let integration = GoIntegration;
+        integration.apply(ws_dir, &meta).unwrap();
+
+        let content = fs::read_to_string(ws_dir.join("go.work")).unwrap();
+        assert!(
+            content.contains("./monorepo/services/api"),
+            "should include nested module path: got {}",
+            content
+        );
+    }
+
+    #[test]
+    fn test_apply_mixed_root_and_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path();
+
+        // Repo with root go.mod
+        let root_repo = ws_dir.join("api-gateway");
+        fs::create_dir_all(&root_repo).unwrap();
+        fs::write(
+            root_repo.join("go.mod"),
+            "module example.com/api-gateway\n\ngo 1.21\n",
+        )
+        .unwrap();
+
+        // Repo with nested go.mod
+        let nested = ws_dir.join("monorepo/services/api");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            nested.join("go.mod"),
+            "module example.com/monorepo/services/api\n\ngo 1.23\n",
+        )
+        .unwrap();
+
+        let meta = make_metadata(&["github.com/acme/api-gateway", "github.com/acme/monorepo"]);
+        let integration = GoIntegration;
+        integration.apply(ws_dir, &meta).unwrap();
+
+        let content = fs::read_to_string(ws_dir.join("go.work")).unwrap();
+        assert!(content.contains("./api-gateway"), "root module missing");
+        assert!(
+            content.contains("./monorepo/services/api"),
+            "nested module missing"
+        );
+        assert!(
+            content.contains("go 1.23"),
+            "should use highest version: got {}",
+            content
+        );
+    }
+
+    #[test]
+    fn test_apply_skips_vendor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path();
+
+        let repo = ws_dir.join("myrepo");
+        fs::create_dir_all(&repo).unwrap();
+        fs::write(
+            repo.join("go.mod"),
+            "module example.com/myrepo\n\ngo 1.22\n",
+        )
+        .unwrap();
+
+        // go.mod inside vendor/ should be ignored
+        let vendor_mod = repo.join("vendor/github.com/dep");
+        fs::create_dir_all(&vendor_mod).unwrap();
+        fs::write(
+            vendor_mod.join("go.mod"),
+            "module github.com/dep\n\ngo 1.21\n",
+        )
+        .unwrap();
+
+        let meta = make_metadata(&["github.com/acme/myrepo"]);
+        let integration = GoIntegration;
+        integration.apply(ws_dir, &meta).unwrap();
+
+        let content = fs::read_to_string(ws_dir.join("go.work")).unwrap();
+        let use_lines: Vec<&str> = content.lines().filter(|l| l.starts_with('\t')).collect();
+        assert_eq!(
+            use_lines,
+            vec!["\t./myrepo"],
+            "vendor go.mod should be excluded"
         );
     }
 
