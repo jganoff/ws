@@ -2,47 +2,7 @@
 
 Prioritized feature plan for wsp, organized by shipping priority.
 
-## P0 — No Leakage into Clones (Done)
-
-**Complexity:** Medium
-
-Remove the `wsp-mirror` remote from workspace clones. See [`design-tenets.md`](design-tenets.md), Git & Mirror Management tenet 1.
-
-**Clone flow:** `git clone --local` from mirror, replace origin with upstream URL, fetch refs via `git fetch <mirror-path> <refspec>` (path-based, no named remote, no trace).
-
-**Fetch flow:** All fetches route through the mirror first, then propagate to clones via path-based local fetch. Currently `wsp sync` fetches origin directly in each clone (bypassing the mirror) and `wsp repo fetch` routes through the mirror — unify both to mirror-first.
-
-**Legacy compatibility:** `wsp sync` transparently removes the `wsp-mirror` remote from existing clones during normal operation. Mark fallback code with `// LEGACY(v0.5)` and a removal target version.
-
-- [x] Refactor `clone_from_mirror` to produce clean clones (no `wsp-mirror` remote)
-- [x] Refactor `propagate_mirror_to_clones` to use path-based fetch
-- [x] Route `wsp sync` fetch phase through mirrors instead of direct origin fetch
-- [x] Route `wsp rm` safety checks through mirrors or local data
-- [x] Transparent legacy `wsp-mirror` removal during `wsp sync`, annotated `// LEGACY(v0.5)`
-- [x] Update tests
-
 ## P1 — Adoption
-
-### `.wspignore`
-
-**Complexity:** Small
-
-Suppress workspace root safety check warnings for specific paths. Two layers: global (`~/.local/share/wsp/wspignore`) and per-workspace (`.wspignore` at workspace root). Simple format: one path per line, `#` comments, trailing `/` for directory prefix match. No globs.
-
-- [ ] Per-workspace `.wspignore` file
-- [ ] Global `~/.local/share/wsp/wspignore` file
-- [ ] Integrate with `check_root_content()` in `src/workspace.rs`
-
-### `.code-workspace` Generation
-
-**Complexity:** Small
-
-Auto-generate VS Code multi-root workspace files when creating/modifying workspaces. Same architecture as the `go.work` language integration.
-
-- [ ] New language integration implementing `LanguageIntegration` trait
-- [ ] Detect VS Code presence or always generate (config toggle)
-- [ ] Generate `<workspace>.code-workspace` with all repo directories
-- [ ] Config key `language-integrations.vscode` (default true)
 
 ### File Locking
 
@@ -432,6 +392,27 @@ Model Context Protocol server so AI agents can manage workspaces natively throug
 - [ ] Tools: list workspaces, create/remove workspace, status, sync, repo add/remove
 - [ ] Resources: workspace metadata, repo status
 - [ ] Stdio transport (standard for local MCP servers)
+
+### `.code-workspace` Generation
+
+**Complexity:** Small
+
+Auto-generate VS Code multi-root workspace files when creating/modifying workspaces. Same architecture as the `go.work` language integration.
+
+- [ ] New language integration implementing `LanguageIntegration` trait
+- [ ] Detect VS Code presence or always generate (config toggle)
+- [ ] Generate `<workspace>.code-workspace` with all repo directories
+- [ ] Config key `language-integrations.vscode` (default true)
+
+### `.wspignore`
+
+**Complexity:** Small
+
+Suppress workspace root safety check warnings for specific paths. Two layers: global (`~/.local/share/wsp/wspignore`) and per-workspace (`.wspignore` at workspace root). Simple format: one path per line, `#` comments, trailing `/` for directory prefix match. No globs.
+
+- [ ] Per-workspace `.wspignore` file
+- [ ] Global `~/.local/share/wsp/wspignore` file
+- [ ] Integrate with `check_root_content()` in `src/workspace.rs`
 
 ## P4 — Ideas (Needs Design)
 
