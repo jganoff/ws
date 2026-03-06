@@ -988,4 +988,79 @@ mod tests {
             "MERGE_HEAD should not exist after abort"
         );
     }
+
+    #[test]
+    fn test_behind_count_from() {
+        let (clone, source, _ct, _st) = setup_clone_repo();
+
+        // No upstream commits → 0 behind
+        let upstream = resolve_upstream_ref(&clone);
+        assert_eq!(behind_count_from(&clone, &upstream).unwrap(), 0);
+
+        // Add 3 upstream commits, fetch → 3 behind
+        for i in 0..3 {
+            advance_origin(&source, &clone, "main", &format!("up{i}.txt"), "data");
+        }
+        assert_eq!(behind_count_from(&clone, &upstream).unwrap(), 3);
+
+        // Add local commit → still 3 behind (and 1 ahead)
+        local_commit(&clone, "local.txt", "local");
+        assert_eq!(behind_count_from(&clone, &upstream).unwrap(), 3);
+        assert_eq!(ahead_count_from(&clone, &upstream).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_in_progress_op_none() {
+        let (clone, _source, _ct, _st) = setup_clone_repo();
+        assert!(in_progress_op(&clone).is_none());
+    }
+
+    #[test]
+    fn test_in_progress_op_rebase() {
+        let (clone, source, _ct, _st) = setup_clone_repo();
+
+        // Create conflict to leave rebase in progress
+        local_commit(&clone, "conflict.txt", "local version");
+        advance_origin(&source, &clone, "main", "conflict.txt", "upstream version");
+
+        // Start rebase manually (don't use rebase_onto which auto-aborts)
+        let out = StdCommand::new("git")
+            .args(["rebase", "origin/main"])
+            .current_dir(&clone)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "rebase should fail with conflict");
+
+        // Should detect rebase in progress
+        let op = in_progress_op(&clone);
+        assert!(matches!(op, Some(InProgressOp::Rebase)));
+
+        // Abort and verify clean state
+        abort_in_progress(&clone, &op.unwrap()).unwrap();
+        assert!(in_progress_op(&clone).is_none());
+    }
+
+    #[test]
+    fn test_in_progress_op_merge() {
+        let (clone, source, _ct, _st) = setup_clone_repo();
+
+        local_commit(&clone, "conflict.txt", "local version");
+        advance_origin(&source, &clone, "main", "conflict.txt", "upstream version");
+
+        // Start merge manually (don't use merge_from which auto-aborts)
+        let out = StdCommand::new("git")
+            .args(["merge", "origin/main"])
+            .current_dir(&clone)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "merge should fail with conflict");
+
+        // Should detect merge in progress
+        let op = in_progress_op(&clone);
+        assert!(matches!(op, Some(InProgressOp::Merge)));
+
+        // Abort and verify clean state
+        abort_in_progress(&clone, &op.unwrap()).unwrap();
+        assert!(in_progress_op(&clone).is_none());
+    }
 }

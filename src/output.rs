@@ -1953,6 +1953,57 @@ mod tests {
     }
 
     #[test]
+    fn test_exit_code_sync_abort() {
+        let cases: Vec<(&str, SyncAbortOutput, i32)> = vec![
+            (
+                "all ok",
+                SyncAbortOutput {
+                    workspace: "ws".into(),
+                    repos: vec![SyncAbortRepoResult {
+                        name: "r".into(),
+                        action: "skip".into(),
+                        ok: true,
+                        error: None,
+                    }],
+                },
+                0,
+            ),
+            (
+                "one failure",
+                SyncAbortOutput {
+                    workspace: "ws".into(),
+                    repos: vec![
+                        SyncAbortRepoResult {
+                            name: "a".into(),
+                            action: "rebase aborted".into(),
+                            ok: true,
+                            error: None,
+                        },
+                        SyncAbortRepoResult {
+                            name: "b".into(),
+                            action: "rebase aborted".into(),
+                            ok: false,
+                            error: Some("abort failed".into()),
+                        },
+                    ],
+                },
+                1,
+            ),
+            (
+                "empty repos",
+                SyncAbortOutput {
+                    workspace: "ws".into(),
+                    repos: vec![],
+                },
+                0,
+            ),
+        ];
+        for (name, output, want) in cases {
+            assert_eq!(exit_code(&Output::SyncAbort(output)), want, "{}", name);
+        }
+    }
+
+    #[test]
     fn test_format_relative_time() {
         let now = 1700000000i64;
         let cases = vec![
