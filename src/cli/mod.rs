@@ -28,14 +28,13 @@ use crate::output::Output;
 use crate::workspace;
 
 /// Command categories for `--help` output. Each entry is (heading, [command_names]).
+/// Command categories for `--help`, ordered by workflow stage.
 const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     (
-        "Workspace Commands",
-        &[
-            "new", "rm", "ls", "st", "diff", "log", "sync", "exec", "cd", "recover", "rename",
-        ],
+        "Workspace",
+        &["new", "repo", "cd", "ls", "rename", "rm", "recover"],
     ),
-    ("Repo Commands", &["repo"]),
+    ("Workflow", &["st", "diff", "log", "sync", "exec"]),
     ("Admin", &["registry", "group", "config", "completion"]),
 ];
 
