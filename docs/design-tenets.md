@@ -22,3 +22,4 @@ Principles that guide wsp's design. When tenets conflict, higher-ranked tenets w
 2. **Progressive disclosure.** Simple surface, power underneath. Complexity is opt-in.
 3. **Explicit side effects.** If a command modifies state, the user chose to run it. No silent mutations hiding inside read commands.
 4. **Just workspace management.** wsp is not a build tool, CI system, or git replacement. It orchestrates multi-repo context — nothing more.
+5. **Don't duplicate unix.** If something is easy to do by piping `--json` output through `jq`, `grep`, or other standard tools, don't add a flag for it. Compose, don't accumulate.

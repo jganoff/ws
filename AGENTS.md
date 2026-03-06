@@ -1,6 +1,6 @@
 # wsp - Multi-Repo Workspace Manager
 
-Read [`docs/design-tenets.md`](docs/design-tenets.md) before making architectural decisions. It covers git/mirror management, agent use, and human CLI design principles.
+**Always check [`docs/design-tenets.md`](docs/design-tenets.md) before proposing or implementing changes.** Validate that your approach aligns with the tenets — especially "don't duplicate unix," "just workspace management," and "structured output is the contract." If a proposed feature conflicts with a tenet, flag it.
 
 ## Build & Test
 

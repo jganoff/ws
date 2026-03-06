@@ -281,18 +281,25 @@ Shell-script hooks that run at key points in the workspace lifecycle. Enables te
 - [ ] Trust model: per-workspace hooks from `.wsp.yaml` require explicit `wsp hooks trust` with content hash verification
 - [ ] No shell interpolation of workspace variables — pass as env vars (`WSP_WORKSPACE_NAME`, etc.)
 
-## P2 — Agent & Ecosystem
-
-### Staleness Signals in `wsp ls`
+### Workspace Age & Staleness Signals
 
 **Complexity:** Small
 
-Enrich `wsp ls` with signals to identify stale workspaces at scale.
+Surface creation date, last-used date, and staleness signals in `wsp ls` and `wsp st` so old workspaces are obvious at a glance.
 
+```
+$ wsp ls
+add-billing   3 repos  jganoff/add-billing  created 14d ago  used 2d ago
+old-feature   2 repos  jganoff/old-feature  created 45d ago  used 30d ago  (merged)
+```
+
+- [ ] Show `created` (already in `.wsp.yaml`) in `wsp ls` and `wsp st` (human and `--json`)
+- [ ] `last_used` field in `.wsp.yaml` — updated on `wsp cd`, `wsp sync`, `wsp exec`, `wsp repo add/rm`
 - [ ] `last_activity` — most recent commit timestamp across all repos
 - [ ] `merged` — are all active branches merged into their default branch?
-- [ ] `wsp ls --stale` filter (all branches merged)
-- [ ] Include in `--json` output
+- [ ] Include all fields in `--json` output
+
+## P2 — Agent & Ecosystem
 
 ### Cross-Repo Search (`wsp grep`)
 
