@@ -133,6 +133,11 @@ pub fn has_remote(dir: &Path, name: &str) -> bool {
     run(Some(dir), &["remote", "get-url", name]).is_ok()
 }
 
+/// Return the URL configured for a named remote.
+pub fn remote_get_url(dir: &Path, name: &str) -> Result<String> {
+    run(Some(dir), &["remote", "get-url", name])
+}
+
 /// Remove a named remote. Errors if the remote does not exist.
 pub fn remove_remote(dir: &Path, name: &str) -> Result<()> {
     run(Some(dir), &["remote", "remove", name])?;
@@ -909,5 +914,4 @@ mod tests {
             "MERGE_HEAD should not exist after abort"
         );
     }
-
 }

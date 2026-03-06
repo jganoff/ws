@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -248,6 +248,192 @@ fn create_inner(
     Ok(())
 }
 
+/// Validate that an existing directory can be adopted as a managed repo.
+/// Checks that it is a git repo, has an origin remote, and its URL matches the expected identity.
+fn validate_existing_dir(dir: &Path, expected_identity: &str) -> Result<()> {
+    if !dir.join(".git").exists() {
+        bail!(
+            "directory {:?} exists but is not a git repository",
+            dir.file_name().unwrap_or_default()
+        );
+    }
+    let origin_url = git::remote_get_url(dir, "origin").map_err(|_| {
+        anyhow::anyhow!(
+            "directory {:?} exists but has no origin remote",
+            dir.file_name().unwrap_or_default()
+        )
+    })?;
+    let parsed = giturl::parse(&origin_url).map_err(|e| {
+        anyhow::anyhow!(
+            "directory {:?} has unparseable origin URL {:?}: {}",
+            dir.file_name().unwrap_or_default(),
+            origin_url,
+            e
+        )
+    })?;
+    let actual_identity = parsed.identity();
+    if actual_identity != expected_identity {
+        bail!(
+            "directory {:?} origin remote ({}) doesn't match expected repo ({})",
+            dir.file_name().unwrap_or_default(),
+            actual_identity,
+            expected_identity
+        );
+    }
+    Ok(())
+}
+
+/// Prompt the user about origin URL when adopting an existing directory.
+/// If the clone's origin URL differs from the registered URL, offer to repoint.
+/// In non-interactive contexts, keeps as-is with a warning.
+fn prompt_origin_url_for_adopt(dir: &Path, registered_url: &str) -> Result<()> {
+    let clone_url = match git::remote_get_url(dir, "origin") {
+        Ok(url) => url,
+        Err(_) => return Ok(()), // no origin — already caught by validate_existing_dir
+    };
+
+    if clone_url == registered_url {
+        return Ok(());
+    }
+
+    // Check if they resolve to the same identity (e.g., SSH vs HTTPS for same repo).
+    // If identities match, the URLs are functionally equivalent but syntactically different.
+    let clone_identity = giturl::parse(&clone_url).ok().map(|p| p.identity());
+    let registered_identity = giturl::parse(registered_url).ok().map(|p| p.identity());
+    if clone_identity.is_none()
+        || registered_identity.is_none()
+        || clone_identity != registered_identity
+    {
+        // Identity mismatch or unparseable — validate_existing_dir should have caught this
+        return Ok(());
+    }
+
+    let dir_name = dir.file_name().unwrap_or_default().to_string_lossy();
+
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "  warning: {}/ origin URL differs from registered URL (non-interactive, leaving as-is)",
+            dir_name
+        );
+        eprintln!("    clone:      {}", clone_url);
+        eprintln!("    registered: {}", registered_url);
+        return Ok(());
+    }
+
+    eprintln!(
+        "  warning: {}/ origin URL differs from registered URL",
+        dir_name
+    );
+    eprintln!("    clone:      {}", clone_url);
+    eprintln!("    registered: {}", registered_url);
+    eprintln!("    [1] Keep current origin URL (default)");
+    eprintln!("    [2] Repoint origin to registered URL");
+    eprint!("  choice [1]: ");
+
+    let choice = read_stdin_line();
+    if choice.trim() == "2" {
+        git::remote_set_url(dir, "origin", registered_url)?;
+        eprintln!("  repointed origin to {}", registered_url);
+    }
+
+    Ok(())
+}
+
+/// Prompt the user about branch state when adopting an existing directory.
+/// Returns Ok(()) after handling the branch (or leaving as-is).
+/// In non-interactive contexts (stdin is not a terminal), defaults to leaving as-is.
+fn prompt_branch_for_adopt(dir: &Path, ws_branch: &str) -> Result<()> {
+    let current = git::branch_current(dir).unwrap_or_default();
+
+    if current == ws_branch {
+        // Already on workspace branch — nothing to do
+        return Ok(());
+    }
+
+    let branch_exists = git::branch_exists(dir, ws_branch);
+    let dir_name = dir.file_name().unwrap_or_default().to_string_lossy();
+
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "  warning: {} is on branch '{}', not workspace branch '{}' (non-interactive, leaving as-is)",
+            dir_name, current, ws_branch
+        );
+        return Ok(());
+    }
+
+    if branch_exists {
+        eprintln!(
+            "  warning: {} is on branch '{}', workspace branch is '{}'",
+            dir_name, current, ws_branch
+        );
+        eprintln!("    [1] Leave as-is (default)");
+        eprintln!("    [2] Switch to workspace branch '{}'", ws_branch);
+    } else {
+        eprintln!(
+            "  warning: {} is on branch '{}', workspace branch '{}' does not exist",
+            dir_name, current, ws_branch
+        );
+        eprintln!("    [1] Leave as-is (default)");
+        eprintln!(
+            "    [2] Create and checkout workspace branch '{}' from current HEAD",
+            ws_branch
+        );
+    }
+
+    eprint!("  choice [1]: ");
+    let choice = read_stdin_line();
+
+    if choice.trim() == "2" {
+        if branch_exists {
+            git::checkout(dir, ws_branch)?;
+            eprintln!("  switched to branch '{}'", ws_branch);
+        } else {
+            git::checkout_new_branch(dir, ws_branch, "HEAD")?;
+            eprintln!("  created and switched to branch '{}'", ws_branch);
+        }
+    }
+
+    Ok(())
+}
+
+fn read_stdin_line() -> String {
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    let _ = stdin.lock().read_line(&mut line);
+    line
+}
+
+/// Propagate mirror refs into an existing clone directory.
+/// Runs steps 4-6 of the clone_from_mirror process:
+/// populate origin/* refs, set origin/HEAD, fix default branch tracking.
+fn propagate_mirror_refs(mirrors_dir: &Path, dest: &Path, identity: &str) -> Result<()> {
+    let parsed = parse_identity(identity)?;
+    let mirror_dir = mirror::dir(mirrors_dir, &parsed);
+    if !mirror_dir.exists() {
+        return Ok(());
+    }
+
+    let mirror_default_br = git::default_branch_from_mirror(&mirror_dir).ok();
+
+    // Populate origin/* refs from mirror (local fetch, no network)
+    let _ = git::fetch_from_path(dest, &mirror_dir, MIRROR_PROPAGATE_REFSPEC, false);
+
+    // Set origin/HEAD
+    if let Some(ref default_br) = mirror_default_br {
+        let _ = git::remote_set_head(dest, "origin", default_br);
+    }
+
+    // Fix default branch tracking
+    if let Some(ref default_br) = mirror_default_br {
+        let origin_ref = format!("origin/{}", default_br);
+        if git::ref_exists(dest, &format!("refs/remotes/{}", origin_ref)) {
+            let _ = git::set_upstream(dest, default_br, &origin_ref);
+        }
+    }
+
+    Ok(())
+}
+
 pub fn add_repos(
     mirrors_dir: &Path,
     ws_dir: &Path,
@@ -330,8 +516,22 @@ pub fn add_repos(
             }
         };
 
-        clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, r, upstream)
-            .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
+        let dest = ws_dir.join(&dn);
+        if dest.exists() {
+            // Adopt existing directory instead of cloning
+            validate_existing_dir(&dest, identity)?;
+            propagate_mirror_refs(mirrors_dir, &dest, identity)?;
+            if !upstream.is_empty() {
+                prompt_origin_url_for_adopt(&dest, upstream)?;
+            }
+            if r.is_empty() {
+                prompt_branch_for_adopt(&dest, &branch)?;
+            }
+            eprintln!("  adopted existing directory {}/", dn);
+        } else {
+            clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, r, upstream)
+                .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
+        }
 
         clones.push(CloneInfo {
             identity: identity.to_string(),
@@ -2921,5 +3121,254 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Create a git repo in the given directory with one commit and an origin remote.
+    fn create_local_repo(dir: &Path, origin_url: &str) {
+        fs::create_dir_all(dir).unwrap();
+        let cmds: Vec<Vec<&str>> = vec![
+            vec!["git", "init", "--initial-branch=main"],
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "initial"],
+            vec!["git", "remote", "add", "origin", origin_url],
+        ];
+        for args in &cmds {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "command {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_existing_dir_success() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("test-repo");
+        create_local_repo(&repo_dir, "git@github.com:user/test-repo.git");
+
+        let result = validate_existing_dir(&repo_dir, "github.com/user/test-repo");
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn test_validate_existing_dir_cases() {
+        struct Case {
+            name: &'static str,
+            setup: Box<dyn Fn(&Path)>,
+            identity: &'static str,
+            expect_err: &'static str,
+        }
+
+        let cases = vec![
+            Case {
+                name: "not a git repo",
+                setup: Box::new(|dir: &Path| {
+                    fs::create_dir_all(dir).unwrap();
+                }),
+                identity: "github.com/user/test-repo",
+                expect_err: "not a git repository",
+            },
+            Case {
+                name: "no origin remote",
+                setup: Box::new(|dir: &Path| {
+                    fs::create_dir_all(dir).unwrap();
+                    let cmds: Vec<Vec<&str>> = vec![
+                        vec!["git", "init", "--initial-branch=main"],
+                        vec!["git", "config", "user.email", "test@test.com"],
+                        vec!["git", "config", "user.name", "Test"],
+                        vec!["git", "config", "commit.gpgsign", "false"],
+                        vec!["git", "commit", "--allow-empty", "-m", "initial"],
+                    ];
+                    for args in &cmds {
+                        let output = Command::new(args[0])
+                            .args(&args[1..])
+                            .current_dir(dir)
+                            .output()
+                            .unwrap();
+                        assert!(output.status.success());
+                    }
+                }),
+                identity: "github.com/user/test-repo",
+                expect_err: "no origin remote",
+            },
+            Case {
+                name: "identity mismatch",
+                setup: Box::new(|dir: &Path| {
+                    create_local_repo(dir, "git@github.com:other/wrong-repo.git");
+                }),
+                identity: "github.com/user/test-repo",
+                expect_err: "doesn't match expected",
+            },
+        ];
+
+        for tc in cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo_dir = tmp.path().join("test-repo");
+            (tc.setup)(&repo_dir);
+
+            let result = validate_existing_dir(&repo_dir, tc.identity);
+            assert!(result.is_err(), "{}: expected error, got Ok", tc.name);
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains(tc.expect_err),
+                "{}: expected error containing {:?}, got {:?}",
+                tc.name,
+                tc.expect_err,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn test_adopt_existing_dir_in_workspace() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+
+        // Create workspace with the repo first
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "adopt-ws", &refs, None, &upstream_urls).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "adopt-ws");
+        let meta = load_metadata(&ws_dir).unwrap();
+        let branch = meta.branch.clone();
+
+        // Create a second "upstream" repo and its mirror
+        let repo2_dir = tempfile::tempdir().unwrap();
+        let cmds: Vec<Vec<&str>> = vec![
+            vec!["git", "init", "--initial-branch=main"],
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "initial"],
+        ];
+        for args in &cmds {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(repo2_dir.path())
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        }
+
+        let parsed2 = giturl::Parsed {
+            host: "test.local".into(),
+            owner: "user".into(),
+            repo: "local-repo".into(),
+        };
+        mirror::clone(
+            &paths.mirrors_dir,
+            &parsed2,
+            repo2_dir.path().to_str().unwrap(),
+        )
+        .unwrap();
+
+        // Set up mirror HEAD ref
+        let mirror_dir2 = mirror::dir(&paths.mirrors_dir, &parsed2);
+        let output = Command::new("git")
+            .args([
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/heads/main",
+            ])
+            .current_dir(&mirror_dir2)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        let identity2 = parsed2.identity();
+
+        // Manually create a repo directory inside the workspace (simulating user workflow)
+        // Use an SSH-style URL that matches the identity so validation passes
+        let local_dir = ws_dir.join("local-repo");
+        create_local_repo(&local_dir, "git@test.local:user/local-repo.git");
+
+        // Checkout the workspace branch so adoption is silent
+        git::checkout_new_branch(&local_dir, &branch, "HEAD").unwrap();
+
+        // Now add_repos should adopt it instead of cloning
+        let refs2 = BTreeMap::from([(identity2.clone(), String::new())]);
+        let upstream_urls2 = BTreeMap::from([(
+            identity2.clone(),
+            repo2_dir.path().to_str().unwrap().to_string(),
+        )]);
+        add_repos(&paths.mirrors_dir, &ws_dir, &refs2, &upstream_urls2).unwrap();
+
+        // Verify it was registered in metadata
+        let meta = load_metadata(&ws_dir).unwrap();
+        assert!(
+            meta.repos.contains_key(&identity2),
+            "adopted repo should be in metadata"
+        );
+
+        // Verify the directory still exists with its .git
+        assert!(local_dir.join(".git").exists());
+    }
+
+    #[test]
+    fn test_adopt_rejects_identity_mismatch() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "adopt-mismatch", &refs, None, &upstream_urls).unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "adopt-mismatch");
+
+        // Create a directory with a different origin
+        let local_dir = ws_dir.join("wrong-repo");
+        create_local_repo(&local_dir, "git@github.com:other/wrong-repo.git");
+
+        // Try to adopt it as a different identity — should fail
+        let wrong_identity = "test.local/user/wrong-repo".to_string();
+        let parsed_wrong = giturl::Parsed {
+            host: "test.local".into(),
+            owner: "user".into(),
+            repo: "wrong-repo".into(),
+        };
+        // Create mirror for the wrong identity
+        let wrong_upstream = tempfile::tempdir().unwrap();
+        let cmds: Vec<Vec<&str>> = vec![
+            vec!["git", "init", "--initial-branch=main"],
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "initial"],
+        ];
+        for args in &cmds {
+            let output = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(wrong_upstream.path())
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        }
+        mirror::clone(
+            &paths.mirrors_dir,
+            &parsed_wrong,
+            wrong_upstream.path().to_str().unwrap(),
+        )
+        .unwrap();
+
+        let refs2 = BTreeMap::from([(wrong_identity.clone(), String::new())]);
+        let upstream_urls2 = BTreeMap::from([(
+            wrong_identity,
+            wrong_upstream.path().to_str().unwrap().to_string(),
+        )]);
+
+        let result = add_repos(&paths.mirrors_dir, &ws_dir, &refs2, &upstream_urls2);
+        assert!(result.is_err(), "should reject identity mismatch");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("doesn't match"),
+            "error should mention mismatch, got: {}",
+            err
+        );
     }
 }

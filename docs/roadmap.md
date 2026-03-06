@@ -140,16 +140,30 @@ $ wsp sync --abort
 
 **Complexity:** Medium
 
-Diagnostic and recovery command. Detects and optionally fixes common state problems.
+**Design doc:** [`docs/features/doctor.md`](features/doctor.md)
 
-- [ ] Detect orphaned clone directories (on disk but not in metadata)
-- [ ] Detect metadata referencing missing directories
-- [ ] Detect missing mirrors for workspace repos
-- [ ] Detect stale `wsp-mirror` remotes (legacy clones)
-- [ ] Detect interrupted operations via transaction journal (see below)
-- [ ] `--fix` flag to auto-repair what it can
-- [ ] Report disk usage for mirrors and workspaces
-- [ ] Detect orphaned mirrors (not used by any workspace, not fetched in N days)
+Diagnostic command that checks workspace and global state for invariant violations and optionally auto-fixes them. Follows the `brew doctor`/`flutter doctor` pattern.
+
+```
+$ wsp doctor
+Checking global state...
+  ✓ config is valid
+  ✓ 5 registered repos, 5 mirrors
+
+Checking workspace my-feature...
+  ✓ api-gateway: ok
+  ⚠ bar: origin URL differs from registered URL
+  ✓ utils: ok
+
+1 warning. Run `wsp doctor --fix` to auto-fix.
+```
+
+- [ ] Phase 1: Command skeleton with P0 checks (config parseable, origin URL match, repo dirs exist)
+- [ ] Phase 2: `--fix` for origin URL repoint
+- [ ] Phase 3: `--json` output
+- [ ] Phase 4: P1 checks (mirror exists, origin remote exists, identity matches, orphaned dirs)
+- [ ] Phase 5: P2 checks (orphaned mirrors, default branch tracking, disk usage)
+- [ ] Phase 6: Detect interrupted operations via transaction journal (see below)
 
 ### Transaction Journal
 
