@@ -1088,12 +1088,40 @@ pub fn remove(paths: &Paths, name: &str, force: bool) -> Result<()> {
             let dn = meta.dir_name(identity)?;
             let clone_dir = ws_dir.join(&dn);
 
-            // Check for pending local changes first
+            // Check for pending local changes on HEAD
             let changed = git::changed_file_count(&clone_dir).unwrap_or(0);
             let ahead = git::ahead_count(&clone_dir).unwrap_or(0);
             if changed > 0 || ahead > 0 {
                 problems.push(format!("{} (pending changes)", identity));
                 continue;
+            }
+
+            // Check if HEAD is on the wrong branch — the workspace branch may
+            // have unpushed commits that the HEAD-relative checks above missed.
+            let current = git::branch_current(&clone_dir).unwrap_or_default();
+            if current != meta.branch && git::branch_exists(&clone_dir, &meta.branch) {
+                let ws_ahead =
+                    git::commit_count(&clone_dir, &format!("origin/{}", meta.branch), &meta.branch)
+                        .or_else(|_| {
+                            // No remote tracking branch — count all commits vs default branch
+                            let default = git::default_branch(&clone_dir).unwrap_or("main".into());
+                            git::commit_count(
+                                &clone_dir,
+                                &format!("origin/{}", default),
+                                &meta.branch,
+                            )
+                        })
+                        .unwrap_or(0);
+                if ws_ahead > 0 {
+                    problems.push(format!(
+                        "{} (not on workspace branch; {} has {} unpushed commit{})",
+                        identity,
+                        meta.branch,
+                        ws_ahead,
+                        if ws_ahead == 1 { "" } else { "s" }
+                    ));
+                    continue;
+                }
             }
 
             let fetch_failed =

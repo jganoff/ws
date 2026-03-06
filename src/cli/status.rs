@@ -75,7 +75,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     let mut repos = Vec::new();
 
-    for identity in meta.repos.keys() {
+    for (identity, entry) in &meta.repos {
         let dir_name = match meta.dir_name(identity) {
             Ok(d) => d,
             Err(e) => {
@@ -88,6 +88,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     status: String::new(),
                     files: vec![],
                     error: Some(e.to_string()),
+                    wrong_branch: None,
                 });
                 continue;
             }
@@ -95,13 +96,26 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
         let repo_dir = ws_dir.join(&dir_name);
 
+        let is_active = match entry {
+            None => true,
+            Some(re) => re.r#ref.is_empty(),
+        };
+
         let branch = git::branch_current(&repo_dir).unwrap_or_else(|_| "?".to_string());
+
+        // Detect wrong-branch: active repo HEAD differs from workspace branch
+        let wrong_branch = if is_active && branch != meta.branch && branch != "?" {
+            Some(meta.branch.clone())
+        } else {
+            None
+        };
+
         let upstream = git::resolve_upstream_ref(&repo_dir);
         let has_upstream = matches!(upstream, git::UpstreamRef::Tracking);
         let ahead = git::ahead_count_from(&repo_dir, &upstream).unwrap_or(0);
         let files = git::changed_files(&repo_dir).unwrap_or_default();
         let changed = files.len() as u32;
-        let status = output::format_repo_status(ahead, changed, has_upstream);
+        let status = output::format_repo_status(ahead, changed, has_upstream, &wrong_branch);
 
         repos.push(RepoStatusEntry {
             name: dir_name,
@@ -112,6 +126,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             status,
             files,
             error: None,
+            wrong_branch,
         });
     }
 
