@@ -4,7 +4,7 @@ Flatten the `wsp setup` umbrella into separate top-level nouns, normalize verb n
 
 ## Motivation
 
-The current `wsp setup` namespace bundles five unrelated concerns (repo registry, groups/templates, key-value settings, shell completions, AI skills) under one umbrella because they are "not daily use." This creates problems:
+The current `wsp setup` namespace bundles unrelated concerns (repo registry, groups/templates, key-value settings, shell completions) under one umbrella because they are "not daily use." This creates problems:
 
 1. **No major CLI uses this pattern.** A survey of 18 popular CLIs (git, Docker, gh, kubectl, gcloud, cargo, npm, brew, mise, terraform, fly, heroku, asdf, etc.) found zero that use `setup` or a similar umbrella for heterogeneous admin commands.
 2. **`setup` implies a one-time wizard** (like `aws configure`), not an ongoing management surface.
@@ -42,7 +42,7 @@ wsp setup repo add/list/remove           # global repo registry
 wsp setup group new/list/show/delete      # groups (becoming templates)
 wsp setup config list/get/set/unset       # key-value settings
 wsp setup completion zsh|bash|fish        # shell completions
-wsp setup skill install/generate          # AI skills
+wsp setup skill install/generate          # AI skills (to be removed)
 ```
 
 ### After
@@ -53,7 +53,6 @@ wsp template new/ls/show/edit/rm              # workspace templates
 wsp template import/export                    # sharing templates
 wsp config ls/get/set/unset              # key-value settings
 wsp completion zsh|bash|fish             # shell completions
-wsp skill install/generate               # AI skills
 ```
 
 Daily workflow commands are unchanged:
@@ -101,7 +100,6 @@ Admin:
   template   Manage workspace templates
   config     Manage wsp settings
   completion Generate shell completions
-  skill      Manage AI skills
 ```
 
 This gives the visual grouping benefit of an umbrella without the command depth cost.
@@ -111,7 +109,8 @@ This gives the visual grouping benefit of an umbrella without the command depth 
 - **`registry`** (not `mirror`): Users register repos; mirroring is an implementation detail (design tenet: "mirrors are invisible infrastructure"). `registry add` reads naturally. Alternative: `repo-registry` is more explicit but verbose.
 - **`template`**: The universally understood word for "stamp-and-go creation artifact." The subcommand is 8 characters, but template management is infrequent — the high-frequency path is `wsp new -t <name>` which is short.
 - **`config`** (not `settings`): Universal convention across CLIs. Strictly key-value — no resource management under this noun.
-- **`completion`** and **`skill`**: standalone utilities, no nesting needed.
+- **`completion`**: standalone utility, no nesting needed.
+- **`skill`**: removed. `wsp new` and `wsp repo add/rm` auto-install skills into the workspace via `agentmd::update()`. The `generate` subcommand (dev-only, codegen feature) moves to `just skill`.
 
 ### The `repo` vs `registry` distinction
 
@@ -162,7 +161,8 @@ Remove `wsp setup` alias in the next major version.
 
 - Create `src/cli/registry.rs` for `wsp registry add/ls/rm`
 - Create `src/cli/config.rs` (rename from `cfg.rs`) for `wsp config ls/get/set/unset`
-- Promote `completion` and `skill` to top-level
+- Promote `completion` to top-level
+- Remove `skill` subcommand (workspace creation auto-installs skills; `generate` is dev-only via `just skill`)
 - Add Clap `help_heading` grouping
 - Wire `wsp setup` as hidden alias with deprecation warnings
 
