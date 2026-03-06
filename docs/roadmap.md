@@ -170,7 +170,7 @@ Checking workspace my-feature...
 - [ ] Phase 2: `--fix` for origin URL repoint
 - [ ] Phase 3: `--json` output
 - [ ] Phase 4: P1 checks (mirror exists, origin remote exists, identity matches, orphaned dirs)
-- [ ] Phase 5: P2 checks (orphaned mirrors, default branch tracking, disk usage)
+- [ ] Phase 5: P2 checks (orphaned mirrors, default branch tracking, gc disk usage)
 - [ ] Phase 6: Detect interrupted operations via transaction journal (see below)
 
 ### Transaction Journal
@@ -195,29 +195,6 @@ repos:
 - [ ] Update per-repo status as operations complete
 - [ ] Delete journal on clean completion
 - [ ] `wsp doctor` reads stale journals and reports/retries
-
-### Deferred Deletion (`wsp rm` + GC)
-
-**Complexity:** Small-Medium — **Done**
-
-`wsp rm` silently moves workspaces to a gc area instead of permanent deletion. Follows git's reflog+gc pattern: users don't think about it until they need recovery.
-
-```
-$ wsp rm add-billing                   # feels like a delete, silently moves to gc
-$ wsp recover                          # list recoverable workspaces
-$ wsp recover add-billing              # restore a recently removed workspace
-$ wsp rm add-billing --permanent       # bypass gc, true delete
-```
-
-GC runs opportunistically during normal commands (at most once per hour), purging entries older than `gc.retention-days`.
-
-- [x] GC directory: `~/dev/workspaces/.gc/` (co-located with workspaces for same-filesystem rename)
-- [x] `wsp rm` moves to gc by default
-- [x] `wsp rm --permanent` for immediate deletion
-- [x] `wsp recover` to list/restore recently removed workspaces
-- [x] Opportunistic gc via `gc::maybe_run()` after every command
-- [x] Config key `gc.retention-days` (default 7, minimum 1)
-- [ ] `wsp doctor` reports gc disk usage
 
 ### PR Awareness
 
