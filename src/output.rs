@@ -272,6 +272,23 @@ pub struct FetchRepoResult {
 pub struct MutationOutput {
     pub ok: bool,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+}
+
+impl MutationOutput {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            ok: true,
+            message: message.into(),
+            duration_ms: None,
+        }
+    }
+
+    pub fn with_duration(mut self, duration_ms: u64) -> Self {
+        self.duration_ms = Some(duration_ms);
+        self
+    }
 }
 
 #[derive(Serialize)]
@@ -558,6 +575,7 @@ impl MutationOutput {
         Self {
             ok: true,
             message: "Registered github.com/acme/api-gateway".into(),
+            duration_ms: None,
         }
     }
 }
@@ -945,7 +963,10 @@ fn render_config_get_text(v: ConfigGetOutput) -> Result<()> {
 }
 
 fn render_mutation_text(v: MutationOutput) -> Result<()> {
-    println!("{}", v.message);
+    match v.duration_ms {
+        Some(ms) => println!("{} ({:.1}s)", v.message, ms as f64 / 1000.0),
+        None => println!("{}", v.message),
+    }
     Ok(())
 }
 
@@ -1501,10 +1522,7 @@ mod tests {
 
     #[test]
     fn test_json_mutation() {
-        let output = MutationOutput {
-            ok: true,
-            message: "Registered repo".into(),
-        };
+        let output = MutationOutput::new("Registered repo");
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["ok"], true);
         assert_eq!(val["message"], "Registered repo");

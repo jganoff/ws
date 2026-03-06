@@ -221,7 +221,7 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         _ => bail!("unknown config key: {}", key),
     };
 
-    Ok(Output::Mutation(MutationOutput { ok: true, message }))
+    Ok(Output::Mutation(MutationOutput::new(message)))
 }
 
 pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -284,5 +284,5 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         _ => bail!("unknown config key: {}", key),
     };
 
-    Ok(Output::Mutation(MutationOutput { ok: true, message }))
+    Ok(Output::Mutation(MutationOutput::new(message)))
 }

@@ -65,22 +65,6 @@ Applied via `git config --local` in each clone during `wsp new` and `wsp repo ad
 - [ ] `wsp config set/get/unset` support for `git_config.*` keys
 - [ ] Include in `--json` output of `wsp config ls`
 
-### `wsp new` Timing Output
-
-**Complexity:** Small
-
-Show elapsed time after workspace creation. Seeing "1.2s for 5 repos" is the word-of-mouth trigger that communicates the mirror-based speed advantage.
-
-```
-$ wsp new add-billing -g backend
-Creating workspace "add-billing" (branch: jganoff/add-billing) with 5 repos...
-Workspace created: ~/dev/workspaces/add-billing (1.2s)
-```
-
-- [ ] Wrap workspace creation in `Instant::now()` / `elapsed()`
-- [ ] Print timing in human-readable output
-- [ ] Include `duration_ms` in `--json` output
-
 ### Workspace Descriptions
 
 **Complexity:** Small

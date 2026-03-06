@@ -74,8 +74,5 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         eprintln!("warning: AGENTS.md generation failed: {}", e);
     }
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: "Done.".into(),
-    }))
+    Ok(Output::Mutation(MutationOutput::new("Done.")))
 }

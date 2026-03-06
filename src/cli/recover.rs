@@ -14,10 +14,10 @@ pub fn cmd() -> Command {
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     if let Some(name) = matches.get_one::<String>("workspace") {
         gc::restore(paths, name)?;
-        Ok(Output::Mutation(MutationOutput {
-            ok: true,
-            message: format!("Workspace {:?} restored.", name),
-        }))
+        Ok(Output::Mutation(MutationOutput::new(format!(
+            "Workspace {:?} restored.",
+            name
+        ))))
     } else {
         let entries = gc::list(&paths.gc_dir)?;
         Ok(Output::RecoverList(RecoverListOutput { entries }))

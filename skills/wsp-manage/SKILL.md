@@ -280,7 +280,7 @@ wsp config unset <key>                          # Unset a config value
     {
       "name": "my-feature",
       "branch": "jganoff/my-feature",
-      "trashed_at": "2026-03-06T20:52:05.953268Z",
+      "trashed_at": "2026-03-06T23:11:25.949301Z",
       "original_path": "~/dev/workspaces/my-feature"
     }
   ]

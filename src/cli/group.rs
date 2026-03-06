@@ -118,10 +118,10 @@ pub fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Ok(())
     })?;
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Created group {:?} with {} repos", name, resolved_count),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Created group {:?} with {} repos",
+        name, resolved_count
+    ))))
 }
 
 pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -166,10 +166,10 @@ pub fn run_rm(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Ok(())
     })?;
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Removed group {:?}", name),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Removed group {:?}",
+        name
+    ))))
 }
 
 pub fn run_update(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -227,8 +227,9 @@ pub fn run_update(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         parts.push(format!("removed {}", to_remove.len()));
     }
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Updated group {:?}: {}", name, parts.join(", ")),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Updated group {:?}: {}",
+        name,
+        parts.join(", ")
+    ))))
 }

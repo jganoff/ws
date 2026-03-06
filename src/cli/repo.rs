@@ -112,10 +112,10 @@ pub fn run_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
     result?;
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Registered {}", identity),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Registered {}",
+        identity
+    ))))
 }
 
 fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -393,10 +393,10 @@ pub fn run_remove(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Ok(())
     })?;
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Removed {}", identity),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Removed {}",
+        identity
+    ))))
 }
 
 #[cfg(test)]

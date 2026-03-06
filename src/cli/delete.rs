@@ -45,8 +45,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     eprintln!("Removing workspace {:?}...", name);
     workspace::remove(paths, &name, force, permanent)?;
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Workspace {:?} removed.", name),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Workspace {:?} removed.",
+        name
+    ))))
 }

@@ -40,8 +40,5 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: lines.join("\n"),
-    }))
+    Ok(Output::Mutation(MutationOutput::new(lines.join("\n"))))
 }

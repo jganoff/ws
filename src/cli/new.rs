@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use anyhow::{Result, bail};
 use clap::{Arg, ArgMatches, Command};
@@ -82,6 +83,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
+    let start = Instant::now();
+
     // Pre-fetch mirrors (parallel) unless --no-fetch
     if !no_fetch {
         let mirrors: Vec<(String, std::path::PathBuf)> = repo_refs
@@ -145,8 +148,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         eprintln!("warning: AGENTS.md generation failed: {}", e);
     }
 
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!("Workspace created: {}", ws_dir.display()),
-    }))
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    Ok(Output::Mutation(
+        MutationOutput::new(format!("Workspace created: {}", ws_dir.display()))
+            .with_duration(duration_ms),
+    ))
 }
