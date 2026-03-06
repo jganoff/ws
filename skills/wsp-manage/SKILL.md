@@ -60,7 +60,7 @@ wsp setup config unset <key>                    # Unset a config value
 ### Skill management
 
 ```bash
-wsp setup skill install                         # Install wsp Claude Code skill to ~/.claude/skills/
+wsp setup skill install                         # Install wsp Claude Code skills to ~/.claude/skills/
 ```
 
 ## JSON Output Schemas
