@@ -27,6 +27,18 @@ use crate::config::Paths;
 use crate::output::Output;
 use crate::workspace;
 
+/// Command categories for `--help` output. Each entry is (heading, [command_names]).
+const HELP_CATEGORIES: &[(&str, &[&str])] = &[
+    (
+        "Workspace Commands",
+        &[
+            "new", "rm", "ls", "st", "diff", "log", "sync", "exec", "cd", "recover", "rename",
+        ],
+    ),
+    ("Repo Commands", &["repo"]),
+    ("Admin", &["registry", "group", "config", "completion"]),
+];
+
 pub fn build_cli() -> Command {
     let repo_ws = Command::new("repo")
         .about("Manage repos in the current workspace")
@@ -92,7 +104,42 @@ pub fn build_cli() -> Command {
         cli = cli.subcommand(skill::generate_cmd().hide(true));
     }
 
-    cli
+    // Build categorized help from the command definitions, then set
+    // a custom help_template that replaces clap's flat subcommand list.
+    let categorized = build_categorized_help(&cli);
+    cli.help_template("{about-with-newline}\n{usage-heading} {usage}\n\n{options}\n{after-help}")
+        .after_help(categorized)
+}
+
+/// Build categorized help text by introspecting subcommand about strings.
+fn build_categorized_help(cli: &Command) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+
+    for (heading, names) in HELP_CATEGORIES {
+        writeln!(out, "{}:", heading).unwrap();
+        for name in *names {
+            if let Some(sub) = cli.find_subcommand(name) {
+                let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                let aliases: Vec<&str> = sub.get_visible_aliases().collect();
+                let alias_suffix = if aliases.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [aliases: {}]", aliases.join(", "))
+                };
+                writeln!(out, "  {:12}{}{}", name, about, alias_suffix).unwrap();
+            }
+        }
+        out.push('\n');
+    }
+
+    // Trim trailing newline
+    while out.ends_with('\n') {
+        out.pop();
+    }
+
+    out
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
