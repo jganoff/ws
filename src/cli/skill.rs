@@ -24,8 +24,8 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     use crate::output::{
         ConfigGetOutput, ConfigListOutput, DiffOutput, ErrorOutput, ExecOutput, FetchOutput,
         GroupListOutput, GroupShowOutput, ImportOutput, LogOutput, MutationOutput,
-        RecoverListOutput, RepoListOutput, StatusOutput, SyncOutput, WorkspaceListOutput,
-        WorkspaceRepoListOutput,
+        RecoverListOutput, RepoListOutput, StatusOutput, SyncAbortOutput, SyncOutput,
+        WorkspaceListOutput, WorkspaceRepoListOutput,
     };
 
     let cli = super::build_cli();
@@ -79,6 +79,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     write_schema::<DiffOutput>(&mut out, "wsp diff --json");
     write_schema::<LogOutput>(&mut out, "wsp log --json");
     write_schema::<SyncOutput>(&mut out, "wsp sync --json");
+    write_schema::<SyncAbortOutput>(&mut out, "wsp sync --abort --json");
     write_schema::<WorkspaceRepoListOutput>(&mut out, "wsp repo ls --json");
     write_schema::<ExecOutput>(&mut out, "wsp exec <workspace> --json -- <command>");
     write_schema::<FetchOutput>(&mut out, "wsp repo fetch --json");
@@ -125,6 +126,7 @@ impl_sample!(
     crate::output::DiffOutput,
     crate::output::LogOutput,
     crate::output::SyncOutput,
+    crate::output::SyncAbortOutput,
     crate::output::ConfigListOutput,
     crate::output::ConfigGetOutput,
     crate::output::WorkspaceRepoListOutput,

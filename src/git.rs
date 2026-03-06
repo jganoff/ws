@@ -475,6 +475,31 @@ pub fn merge_from(dir: &Path, target: &str) -> Result<SyncAction> {
     }
 }
 
+/// Detect an in-progress rebase or merge and return what kind, if any.
+pub enum InProgressOp {
+    Rebase,
+    Merge,
+}
+
+pub fn in_progress_op(dir: &Path) -> Option<InProgressOp> {
+    let git_dir = dir.join(".git");
+    if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        Some(InProgressOp::Rebase)
+    } else if git_dir.join("MERGE_HEAD").exists() {
+        Some(InProgressOp::Merge)
+    } else {
+        None
+    }
+}
+
+/// Abort an in-progress rebase or merge.
+pub fn abort_in_progress(dir: &Path, op: &InProgressOp) -> Result<()> {
+    match op {
+        InProgressOp::Rebase => run(Some(dir), &["rebase", "--abort"]).map(|_| ()),
+        InProgressOp::Merge => run(Some(dir), &["merge", "--abort"]).map(|_| ()),
+    }
+}
+
 pub fn set_upstream(dir: &Path, branch: &str, upstream: &str) -> Result<()> {
     run(
         Some(dir),

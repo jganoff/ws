@@ -356,6 +356,21 @@ pub struct SyncRepoResult {
     pub strategy: String,
 }
 
+#[derive(Serialize)]
+pub struct SyncAbortOutput {
+    pub workspace: String,
+    pub repos: Vec<SyncAbortRepoResult>,
+}
+
+#[derive(Serialize)]
+pub struct SyncAbortRepoResult {
+    pub name: String,
+    pub action: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Sample constructors for SKILL.md generation (codegen only)
 // ---------------------------------------------------------------------------
@@ -490,6 +505,29 @@ impl SyncOutput {
                 target: String::new(),
                 strategy: String::new(),
             }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl SyncAbortOutput {
+    pub fn sample() -> Self {
+        Self {
+            workspace: "my-feature".into(),
+            repos: vec![
+                SyncAbortRepoResult {
+                    name: "api-gateway".into(),
+                    action: "skip".into(),
+                    ok: true,
+                    error: None,
+                },
+                SyncAbortRepoResult {
+                    name: "user-service".into(),
+                    action: "rebase aborted".into(),
+                    ok: true,
+                    error: None,
+                },
+            ],
         }
     }
 }
@@ -644,6 +682,7 @@ pub enum Output {
     Exec(ExecOutput),
     Fetch(FetchOutput),
     Sync(SyncOutput),
+    SyncAbort(SyncAbortOutput),
     ConfigList(ConfigListOutput),
     ConfigGet(ConfigGetOutput),
     Mutation(MutationOutput),
@@ -672,6 +711,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::Exec(v) => print_json(&v),
             Output::Fetch(v) => print_json(&v),
             Output::Sync(v) => print_json(&v),
+            Output::SyncAbort(v) => print_json(&v),
             Output::ConfigList(v) => print_json(&v),
             Output::ConfigGet(v) => print_json(&v),
             Output::Mutation(v) => print_json(&v),
@@ -693,6 +733,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::Exec(_) => Ok(()), // text output handled inline during execution
         Output::Fetch(v) => render_fetch_text(v),
         Output::Sync(v) => render_sync_text(v),
+        Output::SyncAbort(v) => render_sync_abort_text(v),
         Output::ConfigList(v) => render_config_list_text(v),
         Output::ConfigGet(v) => render_config_get_text(v),
         Output::Mutation(v) => render_mutation_text(v),
@@ -708,6 +749,7 @@ pub fn exit_code(output: &Output) -> i32 {
         Output::Exec(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Fetch(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Sync(v) if v.repos.iter().any(|r| !r.ok) => 1,
+        Output::SyncAbort(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Import(v) if !v.failed.is_empty() => 1,
         _ => 0,
     }
@@ -946,6 +988,27 @@ fn render_sync_text(v: SyncOutput) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn render_sync_abort_text(v: SyncAbortOutput) -> Result<()> {
+    let mut table = Table::new(
+        Box::new(std::io::stdout()),
+        vec![
+            "Repository".to_string(),
+            "Action".to_string(),
+            "Result".to_string(),
+        ],
+    );
+    for r in &v.repos {
+        let result = if let Some(ref e) = r.error {
+            format!("ERROR — {}", e)
+        } else {
+            "ok".into()
+        };
+        table.add_row(vec![r.name.clone(), r.action.clone(), result])?;
+    }
+    table.render()?;
     Ok(())
 }
 

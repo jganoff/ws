@@ -11,7 +11,7 @@ use crate::config::{self, Paths};
 use crate::git::{self, SyncAction};
 use crate::giturl;
 use crate::mirror;
-use crate::output::{Output, SyncOutput, SyncRepoResult};
+use crate::output::{Output, SyncAbortOutput, SyncAbortRepoResult, SyncOutput, SyncRepoResult};
 use crate::workspace::{self, RepoInfo};
 
 pub fn cmd() -> Command {
@@ -22,13 +22,21 @@ pub fn cmd() -> Command {
             Arg::new("strategy")
                 .long("strategy")
                 .value_parser(["rebase", "merge"])
-                .help("Sync strategy: rebase (default) or merge"),
+                .help("Sync strategy: rebase (default) or merge")
+                .conflicts_with("abort"),
         )
         .arg(
             Arg::new("dry-run")
                 .long("dry-run")
                 .action(ArgAction::SetTrue)
-                .help("Preview actions without executing"),
+                .help("Preview actions without executing")
+                .conflicts_with("abort"),
+        )
+        .arg(
+            Arg::new("abort")
+                .long("abort")
+                .action(ArgAction::SetTrue)
+                .help("Abort in-progress rebase/merge across all repos"),
         )
 }
 
@@ -42,6 +50,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     let meta = workspace::load_metadata(&ws_dir)
         .map_err(|e| anyhow::anyhow!("reading workspace: {}", e))?;
+
+    if matches.get_flag("abort") {
+        return run_abort(&ws_dir, &meta);
+    }
 
     let cfg = config::Config::load_from(&paths.config_path)?;
     let strategy = matches
@@ -272,6 +284,57 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         workspace: meta.name,
         branch: meta.branch,
         dry_run,
+        repos: results,
+    }))
+}
+
+fn run_abort(ws_dir: &Path, meta: &workspace::Metadata) -> Result<Output> {
+    let repo_infos = meta.repo_infos(ws_dir);
+    let mut results = Vec::new();
+
+    for info in &repo_infos {
+        if let Some(ref e) = info.error {
+            results.push(SyncAbortRepoResult {
+                name: info.dir_name.clone(),
+                action: "error".into(),
+                ok: false,
+                error: Some(e.clone()),
+            });
+            continue;
+        }
+
+        match git::in_progress_op(&info.clone_dir) {
+            Some(op) => {
+                let action = match op {
+                    git::InProgressOp::Rebase => "rebase aborted",
+                    git::InProgressOp::Merge => "merge aborted",
+                };
+                match git::abort_in_progress(&info.clone_dir, &op) {
+                    Ok(()) => results.push(SyncAbortRepoResult {
+                        name: info.dir_name.clone(),
+                        action: action.into(),
+                        ok: true,
+                        error: None,
+                    }),
+                    Err(e) => results.push(SyncAbortRepoResult {
+                        name: info.dir_name.clone(),
+                        action: action.into(),
+                        ok: false,
+                        error: Some(e.to_string()),
+                    }),
+                }
+            }
+            None => results.push(SyncAbortRepoResult {
+                name: info.dir_name.clone(),
+                action: "skip".into(),
+                ok: true,
+                error: None,
+            }),
+        }
+    }
+
+    Ok(Output::SyncAbort(SyncAbortOutput {
+        workspace: meta.name.clone(),
         repos: results,
     }))
 }

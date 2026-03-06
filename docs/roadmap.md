@@ -82,22 +82,6 @@ add-billing   3 repos  jganoff/add-billing  "migrating billing to stripe v3"
 - [ ] Show in `wsp ls` (human and `--json`)
 - [ ] `wsp describe <workspace> <text>` to set/update after creation
 
-### `wsp sync --abort`
-
-**Complexity:** Small
-
-Abort an in-progress rebase/merge across all repos. The recovery command for when `wsp sync` hits conflicts.
-
-```
-$ wsp sync --abort
-  skip  api-gateway    (no rebase in progress)
-  ok    user-service   rebase aborted
-```
-
-- [ ] Detect rebase/merge in progress per repo (`.git/rebase-merge`, `.git/MERGE_HEAD`)
-- [ ] Run `git rebase --abort` or `git merge --abort` as appropriate
-- [ ] Structured `--json` output
-
 ### `wsp doctor`
 
 **Complexity:** Medium
