@@ -109,7 +109,7 @@ impl Paths {
         Ok(Paths {
             config_path,
             mirrors_dir: data.join("mirrors"),
-            gc_dir: workspaces_dir.join(".gc"),
+            gc_dir: data.join("gc"),
             workspaces_dir,
         })
     }
@@ -120,7 +120,7 @@ impl Paths {
         Paths {
             config_path: data_dir.join("config.yaml"),
             mirrors_dir: data_dir.join("mirrors"),
-            gc_dir: workspaces_dir.join(".gc"),
+            gc_dir: data_dir.join("gc"),
             workspaces_dir: workspaces_dir.to_path_buf(),
         }
     }

@@ -8,6 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Paths;
 
+// EXDEV: cross-device link (errno 18 on macOS and Linux)
+fn is_cross_device(e: &std::io::Error) -> bool {
+    e.raw_os_error() == Some(18)
+}
+
 const GC_META_FILE: &str = ".wsp-gc.yaml";
 const DEFAULT_RETENTION_DAYS: u32 = 7;
 const GC_COOLDOWN_SECS: u64 = 3600; // 1 hour between auto-gc runs
@@ -21,10 +26,44 @@ pub struct GcEntry {
     pub original_path: String,
 }
 
+/// Move a directory, falling back to recursive copy + delete if rename
+/// fails with EXDEV (cross-filesystem). An incomplete copy is cleaned up
+/// on failure so the gc area doesn't accumulate garbage.
+fn move_dir(src: &Path, dest: &Path) -> Result<()> {
+    match fs::rename(src, dest) {
+        Ok(()) => Ok(()),
+        Err(e) if is_cross_device(&e) => {
+            copy_dir_recursive(src, dest).inspect_err(|_| {
+                // Clean up partial copy before propagating the error
+                let _ = fs::remove_dir_all(dest);
+            })?;
+            fs::remove_dir_all(src)?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
+    fs::create_dir_all(dest)?;
+    for item in fs::read_dir(src)? {
+        let item = item?;
+        let src_path = item.path();
+        let dest_path = dest.join(item.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            fs::copy(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
 /// Move a workspace directory to the gc area for deferred deletion.
 ///
-/// Writes metadata inside the workspace dir before renaming, so the
-/// operation is atomic: either the whole directory moves or nothing happens.
+/// Writes metadata inside the workspace dir first, then moves the whole
+/// directory. Uses rename when possible, falls back to copy+delete for
+/// cross-filesystem moves.
 pub fn move_to_gc(paths: &Paths, name: &str, branch: &str) -> Result<()> {
     let ws_dir = crate::workspace::dir(&paths.workspaces_dir, name);
     let timestamp = Utc::now().format("%Y%m%dT%H%M%S%.3f").to_string();
@@ -33,9 +72,6 @@ pub fn move_to_gc(paths: &Paths, name: &str, branch: &str) -> Result<()> {
 
     fs::create_dir_all(&paths.gc_dir)?;
 
-    // Write metadata inside the workspace dir before moving — a single
-    // fs::rename is atomic on the same filesystem, so either the metadata
-    // and directory arrive together in gc/ or neither does.
     let entry = GcEntry {
         name: name.to_string(),
         branch: branch.to_string(),
@@ -45,7 +81,7 @@ pub fn move_to_gc(paths: &Paths, name: &str, branch: &str) -> Result<()> {
     let yaml = serde_yaml_ng::to_string(&entry)?;
     fs::write(ws_dir.join(GC_META_FILE), yaml)?;
 
-    fs::rename(&ws_dir, &dest)?;
+    move_dir(&ws_dir, &dest)?;
     Ok(())
 }
 
@@ -98,7 +134,7 @@ pub fn restore(paths: &Paths, name: &str) -> Result<()> {
     }
 
     let src = paths.gc_dir.join(gc_name);
-    fs::rename(&src, &dest)?;
+    move_dir(&src, &dest)?;
 
     // Clean up gc metadata from the restored workspace
     let _ = fs::remove_file(dest.join(GC_META_FILE));
@@ -209,12 +245,11 @@ mod tests {
     use crate::config::Paths;
 
     fn test_paths(tmp: &Path) -> Paths {
-        let ws = tmp.join("workspaces");
         Paths {
             config_path: tmp.join("config.yaml"),
             mirrors_dir: tmp.join("mirrors"),
-            gc_dir: ws.join(".gc"),
-            workspaces_dir: ws,
+            gc_dir: tmp.join("gc"),
+            workspaces_dir: tmp.join("workspaces"),
         }
     }
 

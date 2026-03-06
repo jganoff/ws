@@ -34,7 +34,7 @@ The `codegen` Cargo feature gates `wsp setup skill generate`, which introspects 
 - Config: `~/.local/share/wsp/config.yaml`
 - Mirrors: `~/.local/share/wsp/mirrors/<host>/<user>/<repo>.git/`
 - Workspaces: `~/dev/workspaces/<name>/` with `.wsp.yaml` metadata
-- GC (deferred deletions): `~/dev/workspaces/.gc/<name>__<timestamp>/` with `.wsp-gc.yaml` inside
+- GC (deferred deletions): `~/.local/share/wsp/gc/<name>__<timestamp>/` with `.wsp-gc.yaml` inside
 
 ## CLI Command Structure
 
@@ -79,14 +79,14 @@ If a squash merge resolved conflicts by changing file contents, `is_content_merg
 
 ### Deferred deletion (gc)
 
-`wsp rm` moves workspaces to `<workspaces_dir>/.gc/` by default instead of permanently deleting them. This follows git's reflog+gc pattern — users don't know about it until they need recovery:
+`wsp rm` moves workspaces to `~/.local/share/wsp/gc/` by default instead of permanently deleting them. This follows git's reflog+gc pattern — users don't know about it until they need recovery:
 
 - `wsp rm` — silently moves to gc. Same UX as before.
 - `wsp rm --permanent` — true `fs::remove_dir_all`, bypasses gc.
 - `wsp recover` — lists recoverable workspaces, `wsp recover <name>` restores one.
 - `gc::maybe_run()` runs after every command (at most once per hour), purging entries older than `gc.retention-days` (default 7, config key `gc.retention-days`).
 
-The gc dir is co-located with workspaces (`<workspaces_dir>/.gc/`) to guarantee `fs::rename` works (same filesystem). GC metadata (`.wsp-gc.yaml`) is written inside the workspace dir before the rename, making the operation atomic.
+The gc dir lives alongside mirrors in the XDG data directory (`~/.local/share/wsp/gc/`). `gc::move_dir` uses `fs::rename` when possible, falling back to recursive copy + delete for cross-filesystem moves (EXDEV). GC metadata (`.wsp-gc.yaml`) is written inside the workspace dir before the move.
 
 `workspace::remove(paths, name, force, permanent)` — the `permanent` parameter controls gc vs. immediate deletion. All existing tests pass `permanent: true` to avoid depending on gc internals.
 
@@ -128,6 +128,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - `build.rs` embeds `git describe` into `WSP_VERSION_STRING` for dev/release differentiation
 - Clap `visible_alias`/`alias` dispatches under the primary command name — only match the primary name in dispatch arms (e.g., `Some(("ls", m))` not `Some(("ls", m)) | Some(("list", m))`)
 - Commands that don't modify workspace/config/repo state get `[read-only]` in their `.about()` text. This propagates to `--help` and SKILL.md automatically via clap introspection. Add it when creating new read-only commands.
+- **Roadmap hygiene**: When a feature ships, remove its section from `docs/roadmap.md` entirely — don't mark checkboxes as done. Commit roadmap removals in the same commit as the feature code, not separately.
 
 ## Gotchas
 

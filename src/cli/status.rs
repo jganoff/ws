@@ -22,7 +22,7 @@ mod tests {
         Paths {
             config_path: PathBuf::from("/nonexistent/config.yaml"),
             mirrors_dir: PathBuf::from("/nonexistent/mirrors"),
-            gc_dir: PathBuf::from("/nonexistent/workspaces/.gc"),
+            gc_dir: PathBuf::from("/nonexistent/gc"),
             workspaces_dir: PathBuf::from("/nonexistent/workspaces"),
         }
     }
