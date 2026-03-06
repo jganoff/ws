@@ -41,7 +41,6 @@ pub fn show_cmd() -> Command {
 pub fn rm_cmd() -> Command {
     Command::new("rm")
         .visible_alias("remove")
-        .alias("delete")
         .about("Remove a group")
         .arg(
             Arg::new("name")
