@@ -4,11 +4,30 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### Workspace Definitions
+### CLI Restructure
+
+**Complexity:** Small-Medium
+
+**Design doc:** [`docs/features/cli-restructure.md`](features/cli-restructure.md)
+
+Flatten `wsp setup` into separate top-level nouns (`registry`, `template`, `config`, `completion`, `skill`), normalize verb naming (`rm`/`remove`, `ls`/`list`), and use Clap help headings for visual grouping. Follows the dominant pattern across major CLIs (gh, gcloud, mise, Docker) where each admin concern is a dedicated top-level noun, not nested under an umbrella.
+
+```
+wsp registry add/ls/rm             # global repo registry (was: setup repo)
+wsp template new/ls/show/edit/rm   # workspace templates (was: setup group)
+wsp config ls/get/set/unset        # key-value settings (was: setup config)
+wsp completion zsh|bash|fish       # shell completions (was: setup completion)
+```
+
+- [ ] Phase 1: Verb normalization (add missing `ls`/`rm` aliases, rename `delete` to `rm`)
+- [ ] Phase 2: Flatten structure, `wsp setup` becomes hidden alias with deprecation warning
+- [ ] Phase 3: Coordinate with workspace templates migration, update docs/SKILL.md
+
+### Workspace Templates
 
 **Complexity:** Medium
 
-**Design doc:** [`docs/features/workspace-definitions.md`](features/workspace-definitions.md)
+**Design doc:** [`docs/features/workspace-templates.md`](features/workspace-templates.md)
 
 Sharable, self-contained files that describe how to create a workspace — repos, context repos, and settings. Replaces groups with a richer, portable concept. One file gets a new teammate fully set up.
 
@@ -27,15 +46,15 @@ settings:
 ```
 
 ```
-wsp new my-feature -d dash              # create from definition
-wsp setup def export dash               # share with teammate
-wsp setup def import dash.wsp.yaml      # teammate imports + auto-registers repos
+wsp new my-feature -t dash                # create from template
+wsp template export dash                  # share with teammate
+wsp template import dash.wsp.yaml         # teammate imports + auto-registers repos
 ```
 
-- [ ] Phase 1: Definition CRUD (`wsp setup def new/ls/show/rm`) and `wsp new -d`
+- [ ] Phase 1: Template CRUD (`wsp template new/ls/show/rm` including `--from-workspace`) and `wsp new -t`
 - [ ] Phase 2: Import/export with auto-registration of unknown repos
-- [ ] Phase 3: Migrate existing groups to definitions, deprecate `-g`
-- [ ] Phase 4: Wire definition settings into workspace creation
+- [ ] Phase 3: Migrate existing groups to templates, deprecate `-g`
+- [ ] Phase 4: Wire template settings into workspace creation
 
 ### `wsp exec --json`
 
@@ -229,7 +248,7 @@ Surface open PR status in workspace commands. Requires `gh` CLI (already an acce
 
 **Complexity:** Small-Medium
 
-Higher-level orchestration on top of workspace definitions. A team bootstrap file bundles multiple definitions + global defaults for onboarding. Depends on workspace definitions (P1) landing first. See deferred decisions in [`docs/features/workspace-definitions.md`](features/workspace-definitions.md).
+Higher-level orchestration on top of workspace templates. A team bootstrap file bundles multiple templates + global defaults for onboarding. Depends on workspace templates (P1) landing first. See deferred decisions in [`docs/features/workspace-templates.md`](features/workspace-templates.md).
 
 ### `wsp init`
 
@@ -344,7 +363,7 @@ All hints registered in one place (`src/hints.rs`) via a `pub fn all() -> HintRe
 **Rules:**
 - Print to stderr (never pollute `--json` output)
 - Suppress when `--json` flag is set
-- Suppress via `wsp setup config set hints false`
+- Suppress via `wsp config set hints false`
 - One hint per invocation max (contextual takes priority over random)
 
 - [ ] New `src/hints.rs` with `HintRegistry` builder and `contextual()`/`random()` API
@@ -362,7 +381,7 @@ Post-upgrade changelog highlights during normal usage.
 
 - [ ] `wsp whatsnew` subcommand showing recent changes
 - [ ] Contextual hints (e.g., suggest installing Claude Code hooks if detected)
-- [ ] `wsp setup config set whatsnew false` to silence
+- [ ] `wsp config set whatsnew false` to silence
 
 ### MCP Server
 
@@ -418,5 +437,5 @@ Allow users to declare per-repo commands (`wsp repo configure api-server --test 
 - Daily ops are **top-level short commands** (`sync`, `log`)
 - **Always support `--json`** for scripting and AI agents
 - **Parallel by default** for reads, serial for writes
-- **Workspace as context** -- the workspace definition (`.wsp.yaml`, AGENTS.md, generated workspace files) is a coordination primitive consumed by AI agents, IDEs, and build tools
+- **Workspace as context** -- the workspace metadata (`.wsp.yaml`, AGENTS.md, generated workspace files) is a coordination primitive consumed by AI agents, IDEs, and build tools
 - No new external dependencies unless justified (`gh` for import/PR awareness is the exception)
