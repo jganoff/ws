@@ -82,17 +82,6 @@ add-billing   3 repos  jganoff/add-billing  "migrating billing to stripe v3"
 - [ ] Show in `wsp ls` (human and `--json`)
 - [ ] `wsp describe <workspace> <text>` to set/update after creation
 
-### Enrich `wsp st` with Agent Context
-
-**Complexity:** Small-Medium
-
-Make `wsp st --json` the single-call entry point for AI agents. Include enough context that an agent doesn't need to call `wsp repo ls`, `wsp log`, etc. separately.
-
-- [ ] Add `workspace_branch`, `workspace_dir` fields to status JSON root
-- [ ] Add `behind` count per repo (commits behind default branch)
-- [ ] Add `role` per repo (`active` vs `context`)
-- [ ] Include `description` if set
-
 ### `wsp sync --abort`
 
 **Complexity:** Small

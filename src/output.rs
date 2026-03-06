@@ -63,6 +63,7 @@ fn render_buf(headers: &[String], rows: &[Vec<String>]) -> Result<Vec<u8>> {
 
 pub fn format_repo_status(
     ahead: u32,
+    behind: u32,
     modified: u32,
     has_upstream: bool,
     wrong_branch: &Option<String>,
@@ -77,6 +78,9 @@ pub fn format_repo_status(
         } else {
             parts.push(format!("{} ahead (no upstream)", ahead));
         }
+    }
+    if behind > 0 {
+        parts.push(format!("{} behind", behind));
     }
     if modified > 0 {
         parts.push(format!("{} modified", modified));
@@ -143,6 +147,7 @@ pub struct WorkspaceListEntry {
 pub struct StatusOutput {
     pub workspace: String,
     pub branch: String,
+    pub workspace_dir: PathBuf,
     pub repos: Vec<RepoStatusEntry>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub root: Vec<String>,
@@ -155,8 +160,10 @@ pub struct RepoStatusEntry {
     pub name: String,
     pub branch: String,
     pub ahead: u32,
+    pub behind: u32,
     pub changed: u32,
     pub has_upstream: bool,
+    pub role: String,
     pub status: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
@@ -413,12 +420,15 @@ impl StatusOutput {
         Self {
             workspace: "my-feature".into(),
             branch: "my-feature".into(),
+            workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
             repos: vec![RepoStatusEntry {
                 name: "api-gateway".into(),
                 branch: "my-feature".into(),
                 ahead: 2,
+                behind: 0,
                 changed: 1,
                 has_upstream: true,
+                role: "active".into(),
                 status: "2 ahead, 1 modified".into(),
                 files: vec![],
                 error: None,
@@ -1237,22 +1247,44 @@ mod tests {
     #[test]
     fn test_format_repo_status() {
         let none: Option<String> = None;
-        let cases: Vec<(&str, u32, u32, bool, &Option<String>, &str)> = vec![
-            ("clean", 0, 0, true, &none, "clean"),
-            ("clean no upstream", 0, 0, false, &none, "clean"),
-            ("modified only", 0, 5, true, &none, "5 modified"),
-            ("ahead with upstream", 3, 0, true, &none, "3 ahead"),
+        //                  (name, ahead, behind, modified, has_upstream, wrong_branch, want)
+        let cases: Vec<(&str, u32, u32, u32, bool, &Option<String>, &str)> = vec![
+            ("clean", 0, 0, 0, true, &none, "clean"),
+            ("clean no upstream", 0, 0, 0, false, &none, "clean"),
+            ("modified only", 0, 0, 5, true, &none, "5 modified"),
+            ("ahead with upstream", 3, 0, 0, true, &none, "3 ahead"),
             (
                 "ahead no upstream",
                 3,
+                0,
                 0,
                 false,
                 &none,
                 "3 ahead (no upstream)",
             ),
+            ("behind only", 0, 5, 0, true, &none, "5 behind"),
+            (
+                "ahead and behind",
+                2,
+                3,
+                0,
+                true,
+                &none,
+                "2 ahead, 3 behind",
+            ),
+            (
+                "all three",
+                2,
+                3,
+                4,
+                true,
+                &none,
+                "2 ahead, 3 behind, 4 modified",
+            ),
             (
                 "both with upstream",
                 2,
+                0,
                 4,
                 true,
                 &none,
@@ -1261,16 +1293,17 @@ mod tests {
             (
                 "both no upstream",
                 2,
+                0,
                 4,
                 false,
                 &none,
                 "2 ahead (no upstream), 4 modified",
             ),
-            ("one each", 1, 1, true, &none, "1 ahead, 1 modified"),
+            ("one each", 1, 0, 1, true, &none, "1 ahead, 1 modified"),
         ];
-        for (name, ahead, modified, has_upstream, wrong_branch, want) in cases {
+        for (name, ahead, behind, modified, has_upstream, wrong_branch, want) in cases {
             assert_eq!(
-                format_repo_status(ahead, modified, has_upstream, wrong_branch),
+                format_repo_status(ahead, behind, modified, has_upstream, wrong_branch),
                 want,
                 "{}",
                 name
@@ -1282,11 +1315,11 @@ mod tests {
     fn test_format_repo_status_wrong_branch() {
         let wb = Some("jganoff/my-feature".to_string());
         assert_eq!(
-            format_repo_status(0, 0, true, &wb),
+            format_repo_status(0, 0, 0, true, &wb),
             "not on workspace branch (jganoff/my-feature)"
         );
         assert_eq!(
-            format_repo_status(2, 1, true, &wb),
+            format_repo_status(2, 0, 1, true, &wb),
             "not on workspace branch (jganoff/my-feature), 2 ahead, 1 modified"
         );
     }
@@ -1413,14 +1446,17 @@ mod tests {
         let output = StatusOutput {
             workspace: "my-ws".into(),
             branch: "my-ws".into(),
+            workspace_dir: PathBuf::from("/tmp/workspaces/my-ws"),
             repos: vec![
                 RepoStatusEntry {
                     name: "repo-a".into(),
                     branch: "my-ws".into(),
                     ahead: 1,
+                    behind: 3,
                     changed: 2,
                     has_upstream: true,
-                    status: "1 ahead, 2 modified".into(),
+                    role: "active".into(),
+                    status: "1 ahead, 3 behind, 2 modified".into(),
                     files: vec![" M src/main.rs".into(), "?? new.txt".into()],
                     error: None,
                     wrong_branch: None,
@@ -1429,8 +1465,10 @@ mod tests {
                     name: "repo-b".into(),
                     branch: String::new(),
                     ahead: 0,
+                    behind: 0,
                     changed: 0,
                     has_upstream: false,
+                    role: "context".into(),
                     status: String::new(),
                     files: vec![],
                     error: Some("parse error".into()),
@@ -1442,9 +1480,12 @@ mod tests {
         };
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["workspace"], "my-ws");
+        assert_eq!(val["workspace_dir"], "/tmp/workspaces/my-ws");
         assert_eq!(val["repos"][0]["ahead"], 1);
+        assert_eq!(val["repos"][0]["behind"], 3);
         assert_eq!(val["repos"][0]["changed"], 2);
         assert_eq!(val["repos"][0]["has_upstream"], true);
+        assert_eq!(val["repos"][0]["role"], "active");
         assert_eq!(val["repos"][0]["files"][0], " M src/main.rs");
         assert_eq!(val["repos"][0]["files"][1], "?? new.txt");
         assert!(val["repos"][0].get("error").is_none());
@@ -1452,6 +1493,7 @@ mod tests {
         // repo-b has empty files → omitted
         assert!(val["repos"][1].get("files").is_none());
         assert_eq!(val["repos"][1]["has_upstream"], false);
+        assert_eq!(val["repos"][1]["role"], "context");
         assert_eq!(val["repos"][1]["error"], "parse error");
         // root is empty → omitted
         assert!(val.get("root").is_none());
@@ -1462,6 +1504,7 @@ mod tests {
         let output = StatusOutput {
             workspace: "my-ws".into(),
             branch: "my-ws".into(),
+            workspace_dir: PathBuf::from("/tmp/workspaces/my-ws"),
             repos: vec![],
             root: vec!["?? notes.md".into(), "?? my-stuff/".into()],
             verbose: true,

@@ -84,8 +84,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     name: identity.clone(),
                     branch: String::new(),
                     ahead: 0,
+                    behind: 0,
                     changed: 0,
                     has_upstream: false,
+                    role: "active".into(),
                     status: String::new(),
                     files: vec![],
                     error: Some(e.to_string()),
@@ -101,6 +103,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             None => true,
             Some(re) => re.r#ref.is_empty(),
         };
+        let role = if is_active { "active" } else { "context" };
 
         let branch = git::branch_current(&repo_dir).unwrap_or_else(|_| "?".to_string());
 
@@ -114,16 +117,20 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let upstream = git::resolve_upstream_ref(&repo_dir);
         let has_upstream = matches!(upstream, git::UpstreamRef::Tracking);
         let ahead = git::ahead_count_from(&repo_dir, &upstream).unwrap_or(0);
+        let behind = git::behind_count_from(&repo_dir, &upstream).unwrap_or(0);
         let files = git::changed_files(&repo_dir).unwrap_or_default();
         let changed = files.len() as u32;
-        let status = output::format_repo_status(ahead, changed, has_upstream, &wrong_branch);
+        let status =
+            output::format_repo_status(ahead, behind, changed, has_upstream, &wrong_branch);
 
         repos.push(RepoStatusEntry {
             name: dir_name,
             branch,
             ahead,
+            behind,
             changed,
             has_upstream,
+            role: role.into(),
             status,
             files,
             error: None,
@@ -142,6 +149,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     Ok(Output::Status(StatusOutput {
         workspace: meta.name,
         branch: meta.branch,
+        workspace_dir: ws_dir,
         repos,
         root,
         verbose,

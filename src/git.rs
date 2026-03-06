@@ -389,6 +389,16 @@ pub fn ahead_count_from(dir: &Path, upstream: &UpstreamRef) -> Result<u32> {
     Ok(out.parse::<u32>().unwrap_or(0))
 }
 
+pub fn behind_count_from(dir: &Path, upstream: &UpstreamRef) -> Result<u32> {
+    let range = match upstream {
+        UpstreamRef::Tracking => "HEAD..@{upstream}".to_string(),
+        UpstreamRef::DefaultBranch(b) => format!("HEAD..origin/{}", b),
+        UpstreamRef::Head => return Ok(0),
+    };
+    let out = run(Some(dir), &["rev-list", "--count", &range])?;
+    Ok(out.parse::<u32>().unwrap_or(0))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncAction {
     UpToDate,
