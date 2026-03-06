@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-03-06
+
+### Features
+
+- *(go)* Discover nested go.mod files in repo trees
+
+### Bug Fixes
+
+- *(mirror)* Fetch after bare clone to populate remote-tracking refs
+- *(lang)* Make go workspace integration opt-in
+
+### Documentation
+
+- Add workspace definitions design doc and roadmap entry
+
 ## [0.6.0] - 2026-03-05
 
 ### Features
