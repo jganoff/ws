@@ -150,12 +150,12 @@ Remove `wsp setup` alias in the next major version.
 
 ## Implementation phases
 
-### Phase 1: Verb normalization (standalone, no breaking changes)
+### Phase 1: Verb normalization (standalone, no breaking changes) ✅
 
-- Rename `wsp setup group delete` to `rm` with `remove` and `delete` as aliases
-- Add `ls` alias to `wsp setup repo list`, `wsp setup group list`, `wsp setup config list`
-- Add `rm` alias to `wsp setup repo remove`
-- Consistent primary/alias direction everywhere
+- ~~Rename `wsp setup group delete` to `rm` with `remove` and `delete` as aliases~~
+- ~~Add `ls` alias to `wsp setup repo list`, `wsp setup group list`, `wsp setup config list`~~
+- ~~Add `rm` alias to `wsp setup repo remove`~~
+- ~~Consistent primary/alias direction everywhere~~
 
 ### Phase 2: Flatten structure
 

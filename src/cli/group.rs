@@ -23,7 +23,9 @@ pub fn new_cmd() -> Command {
 }
 
 pub fn list_cmd() -> Command {
-    Command::new("list").about("List all groups [read-only]")
+    Command::new("ls")
+        .visible_alias("list")
+        .about("List all groups [read-only]")
 }
 
 pub fn show_cmd() -> Command {
@@ -36,12 +38,16 @@ pub fn show_cmd() -> Command {
         )
 }
 
-pub fn delete_cmd() -> Command {
-    Command::new("delete").about("Delete a group").arg(
-        Arg::new("name")
-            .required(true)
-            .add(ArgValueCandidates::new(completers::complete_groups)),
-    )
+pub fn rm_cmd() -> Command {
+    Command::new("rm")
+        .visible_alias("remove")
+        .alias("delete")
+        .about("Remove a group")
+        .arg(
+            Arg::new("name")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_groups)),
+        )
 }
 
 pub fn update_cmd() -> Command {
@@ -131,7 +137,7 @@ pub fn run_show(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }))
 }
 
-pub fn run_delete(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+pub fn run_rm(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap().clone();
 
     filelock::with_config(&paths.config_path, |cfg| {
@@ -141,7 +147,7 @@ pub fn run_delete(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     Ok(Output::Mutation(MutationOutput {
         ok: true,
-        message: format!("Deleted group {:?}", name),
+        message: format!("Removed group {:?}", name),
     }))
 }
 

@@ -113,7 +113,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     // --- JSON Output Schemas ---
     out.push_str("## JSON Output Schemas\n\n");
 
-    write_schema::<RepoListOutput>(&mut out, "wsp setup repo list --json");
+    write_schema::<RepoListOutput>(&mut out, "wsp setup repo ls --json");
     write_schema::<WorkspaceListOutput>(&mut out, "wsp ls --json");
     write_schema::<StatusOutput>(&mut out, "wsp st --json");
     write_schema::<DiffOutput>(&mut out, "wsp diff --json");
@@ -122,9 +122,9 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     write_schema::<WorkspaceRepoListOutput>(&mut out, "wsp repo ls --json");
     write_schema::<ExecOutput>(&mut out, "wsp exec <workspace> --json -- <command>");
     write_schema::<FetchOutput>(&mut out, "wsp repo fetch --json");
-    write_schema::<GroupListOutput>(&mut out, "wsp setup group list --json");
+    write_schema::<GroupListOutput>(&mut out, "wsp setup group ls --json");
     write_schema::<GroupShowOutput>(&mut out, "wsp setup group show <name> --json");
-    write_schema::<ConfigListOutput>(&mut out, "wsp setup config list --json");
+    write_schema::<ConfigListOutput>(&mut out, "wsp setup config ls --json");
     write_schema::<ConfigGetOutput>(&mut out, "wsp setup config get <key> --json");
     write_schema::<MutationOutput>(
         &mut out,
@@ -324,7 +324,7 @@ wsp new my-feature api-gateway user-service@main proto@v1.0
 
 ### Create a workspace and start working
 ```bash
-wsp setup repo list --json                     # See available repos
+wsp setup repo ls --json                       # See available repos
 wsp new my-feature api-gateway user-service    # Create workspace
 cd ~/dev/workspaces/my-feature                # Enter workspace
 ```

@@ -117,9 +117,9 @@ unmerged branches (including squash-merged PRs). Use `--force` to override.
 | `wsp repo add [repos...] [-g group]` | Add repos to current workspace |
 | `wsp repo rm <repos...> [-f]` | Remove repos from current workspace |
 | `wsp repo fetch [--all] [--prune]` | Fetch updates (parallel) |
-| `wsp setup repo add/list/remove` | Manage registered repositories |
-| `wsp setup group new/list/show/update/delete` | Manage repo groups |
-| `wsp setup config list/get/set/unset` | Manage configuration |
+| `wsp setup repo add/ls/rm` | Manage registered repositories |
+| `wsp setup group new/ls/show/update/rm` | Manage repo groups |
+| `wsp setup config ls/get/set/unset` | Manage configuration |
 | `wsp setup completion zsh\|bash\|fish` | Shell integration |
 
 All commands support `--json` for structured output.

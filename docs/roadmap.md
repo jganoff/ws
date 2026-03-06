@@ -19,7 +19,7 @@ wsp config ls/get/set/unset        # key-value settings (was: setup config)
 wsp completion zsh|bash|fish       # shell completions (was: setup completion)
 ```
 
-- [ ] Phase 1: Verb normalization (add missing `ls`/`rm` aliases, rename `delete` to `rm`)
+- [x] Phase 1: Verb normalization (add missing `ls`/`rm` aliases, rename `delete` to `rm`)
 - [ ] Phase 2: Flatten structure, `wsp setup` becomes hidden alias with deprecation warning
 - [ ] Phase 3: Coordinate with workspace templates migration, update docs/SKILL.md
 

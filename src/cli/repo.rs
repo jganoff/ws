@@ -47,11 +47,14 @@ pub fn add_cmd() -> Command {
 }
 
 pub fn list_cmd() -> Command {
-    Command::new("list").about("List registered repositories [read-only]")
+    Command::new("ls")
+        .visible_alias("list")
+        .about("List registered repositories [read-only]")
 }
 
-pub fn remove_cmd() -> Command {
-    Command::new("remove")
+pub fn rm_cmd() -> Command {
+    Command::new("rm")
+        .visible_alias("remove")
         .about("Remove a repository and its mirror")
         .arg(
             Arg::new("name")

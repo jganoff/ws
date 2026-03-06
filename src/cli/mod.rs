@@ -30,7 +30,7 @@ pub fn build_cli() -> Command {
         .subcommand_required(true)
         .subcommand(repo::add_cmd())
         .subcommand(repo::list_cmd())
-        .subcommand(repo::remove_cmd());
+        .subcommand(repo::rm_cmd());
 
     let group = Command::new("group")
         .about("Manage repo groups")
@@ -38,7 +38,7 @@ pub fn build_cli() -> Command {
         .subcommand(group::new_cmd())
         .subcommand(group::list_cmd())
         .subcommand(group::show_cmd())
-        .subcommand(group::delete_cmd())
+        .subcommand(group::rm_cmd())
         .subcommand(group::update_cmd());
 
     let config = Command::new("config")
@@ -110,20 +110,20 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("setup", sub)) => match sub.subcommand() {
             Some(("repo", sub2)) => match sub2.subcommand() {
                 Some(("add", m)) => repo::run_add(m, paths),
-                Some(("list", m)) => repo::run_list(m, paths),
-                Some(("remove", m)) => repo::run_remove(m, paths),
+                Some(("ls", m)) => repo::run_list(m, paths),
+                Some(("rm", m)) => repo::run_remove(m, paths),
                 _ => unreachable!(),
             },
             Some(("group", sub2)) => match sub2.subcommand() {
                 Some(("new", m)) => group::run_new(m, paths),
-                Some(("list", m)) => group::run_list(m, paths),
+                Some(("ls", m)) => group::run_list(m, paths),
                 Some(("show", m)) => group::run_show(m, paths),
-                Some(("delete", m)) => group::run_delete(m, paths),
+                Some(("rm", m)) => group::run_rm(m, paths),
                 Some(("update", m)) => group::run_update(m, paths),
                 _ => unreachable!(),
             },
             Some(("config", sub2)) => match sub2.subcommand() {
-                Some(("list", m)) => cfg::run_list(m, paths),
+                Some(("ls", m)) => cfg::run_list(m, paths),
                 Some(("get", m)) => cfg::run_get(m, paths),
                 Some(("set", m)) => cfg::run_set(m, paths),
                 Some(("unset", m)) => cfg::run_unset(m, paths),

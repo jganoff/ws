@@ -16,17 +16,17 @@ Use `wsp` to manage workspaces that span multiple git repositories. Each workspa
 
 ```bash
 wsp setup repo add [<url>] [--from <from>] [--pattern <pattern>] [--all] [--https] # Register and bare-clone a repository
-wsp setup repo list                             # List registered repositories [read-only]
-wsp setup repo remove <name>                    # Remove a repository and its mirror
+wsp setup repo ls                               # List registered repositories [read-only] (alias: list)
+wsp setup repo rm <name>                        # Remove a repository and its mirror (alias: remove)
 ```
 
 ### Groups (named sets of repos)
 
 ```bash
 wsp setup group new <name> <repos>...           # Create a new repo group
-wsp setup group list                            # List all groups [read-only]
+wsp setup group ls                              # List all groups [read-only] (alias: list)
 wsp setup group show <name>                     # Show repos in a group [read-only]
-wsp setup group delete <name>                   # Delete a group
+wsp setup group rm <name>                       # Remove a group (alias: remove)
 wsp setup group update <name> [--add <add>]... [--remove <remove>]... # Add or remove repos from a group
 ```
 
@@ -51,7 +51,7 @@ wsp repo ls                                     # List repos in the current work
 ### Config
 
 ```bash
-wsp setup config list                           # List all config values [read-only]
+wsp setup config ls                             # List all config values [read-only] (alias: list)
 wsp setup config get <key>                      # Get a config value [read-only]
 wsp setup config set <key> <value>              # Set a config value
 wsp setup config unset <key>                    # Unset a config value
@@ -65,7 +65,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 
 ## JSON Output Schemas
 
-### `wsp setup repo list --json`
+### `wsp setup repo ls --json`
 ```json
 {
   "repos": [
@@ -204,7 +204,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup group list --json`
+### `wsp setup group ls --json`
 ```json
 {
   "groups": [
@@ -228,7 +228,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup config list --json`
+### `wsp setup config ls --json`
 ```json
 {
   "entries": [
@@ -312,7 +312,7 @@ wsp new my-feature api-gateway user-service@main proto@v1.0
 
 ### Create a workspace and start working
 ```bash
-wsp setup repo list --json                     # See available repos
+wsp setup repo ls --json                       # See available repos
 wsp new my-feature api-gateway user-service    # Create workspace
 cd ~/dev/workspaces/my-feature                # Enter workspace
 ```

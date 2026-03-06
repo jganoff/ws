@@ -40,7 +40,7 @@ Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `
 
 Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo ls`, `wsp repo fetch`.
 
-All admin/setup commands live under `wsp setup`: `wsp setup repo add/list/remove`, `wsp setup group new/list/show/update/delete`, `wsp setup config list/get/set/unset`, `wsp setup completion zsh|bash|fish`.
+All admin/setup commands live under `wsp setup`: `wsp setup repo add/ls/rm`, `wsp setup group new/ls/show/update/rm`, `wsp setup config ls/get/set/unset`, `wsp setup completion zsh|bash|fish`.
 
 When writing docs or examples, use the actual command names above — not the long forms (`remove`, `list`, `status`).
 

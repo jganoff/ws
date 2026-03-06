@@ -8,7 +8,9 @@ use crate::filelock;
 use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, MutationOutput, Output};
 
 pub fn list_cmd() -> Command {
-    Command::new("list").about("List all config values [read-only]")
+    Command::new("ls")
+        .visible_alias("list")
+        .about("List all config values [read-only]")
 }
 
 pub fn get_cmd() -> Command {

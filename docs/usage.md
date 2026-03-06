@@ -14,24 +14,24 @@ Cloning git@github.com:acme/api-gateway.git...
 Registered github.com/acme/api-gateway
 ```
 
-### `wsp setup repo list`
+### `wsp setup repo ls`
 
 List all registered repositories.
 
 ```
-$ wsp setup repo list
+$ wsp setup repo ls
   github.com/acme/api-gateway [api-gateway]  (git@github.com:acme/api-gateway.git)
   github.com/acme/user-service [user-service]  (git@github.com:acme/user-service.git)
 ```
 
 Shows identity, shortname (in brackets), and URL.
 
-### `wsp setup repo remove <name>`
+### `wsp setup repo rm <name>`
 
 Remove a repository and delete its bare mirror. Accepts a shortname.
 
 ```
-$ wsp setup repo remove api-gateway
+$ wsp setup repo rm api-gateway
 Removing mirror for github.com/acme/api-gateway...
 Removed github.com/acme/api-gateway
 ```
@@ -66,12 +66,12 @@ $ wsp setup group update backend --add new-svc --remove old-svc
 Updated group "backend": added 1, removed 1
 ```
 
-### `wsp setup group list`
+### `wsp setup group ls`
 
 List all groups.
 
 ```
-$ wsp setup group list
+$ wsp setup group ls
   backend (2 repos)
   frontend (1 repos)
 ```
@@ -87,12 +87,12 @@ Group "backend":
   github.com/acme/user-service
 ```
 
-### `wsp setup group delete <name>`
+### `wsp setup group rm <name>`
 
-Delete a group. Does not affect the repos themselves.
+Remove a group. Does not affect the repos themselves.
 
 ```
-$ wsp setup group delete backend
+$ wsp setup group rm backend
 Deleted group "backend"
 ```
 
@@ -110,7 +110,7 @@ Set a config value.
 
 Unset a config value.
 
-### `wsp setup config list`
+### `wsp setup config ls`
 
 List all config values.
 
