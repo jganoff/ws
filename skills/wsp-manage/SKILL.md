@@ -12,22 +12,22 @@ Use `wsp` to manage workspaces that span multiple git repositories. Each workspa
 
 ## Quick Reference
 
-### Repos (global registry)
+### Registry (global repo registry)
 
 ```bash
-wsp setup repo add [<url>] [--from <from>] [--pattern <pattern>] [--all] [--https] # Register and bare-clone a repository
-wsp setup repo ls                               # List registered repositories [read-only] (alias: list)
-wsp setup repo rm <name>                        # Remove a repository and its mirror (alias: remove)
+wsp registry add [<url>] [--from <from>] [--pattern <pattern>] [--all] [--https] # Register and bare-clone a repository
+wsp registry ls                                 # List registered repositories [read-only] (alias: list)
+wsp registry rm <name>                          # Remove a repository and its mirror (alias: remove)
 ```
 
 ### Groups (named sets of repos)
 
 ```bash
-wsp setup group new <name> <repos>...           # Create a new repo group
-wsp setup group ls                              # List all groups [read-only] (alias: list)
-wsp setup group show <name>                     # Show repos in a group [read-only]
-wsp setup group rm <name>                       # Remove a group (alias: remove)
-wsp setup group update <name> [--add <add>]... [--remove <remove>]... # Add or remove repos from a group
+wsp group new <name> <repos>...                 # Create a new repo group
+wsp group ls                                    # List all groups [read-only] (alias: list)
+wsp group show <name>                           # Show repos in a group [read-only]
+wsp group rm <name>                             # Remove a group (alias: remove)
+wsp group update <name> [--add <add>]... [--remove <remove>]... # Add or remove repos from a group
 ```
 
 ### Workspaces
@@ -41,7 +41,9 @@ wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream
 wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] # Fetch and rebase/merge all workspace repos
 wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
 wsp cd <workspace>                              # Change directory into a workspace [read-only]
-wsp rm [<workspace>] [-f]                       # Remove a workspace (alias: remove)
+wsp rm [<workspace>] [-f] [--permanent]         # Remove a workspace (alias: remove)
+wsp recover [<workspace>]                       # List or restore recently removed workspaces [read-only without args]
+wsp rename <old> <new>                          # Rename a workspace, its directory, and git branches
 wsp repo add [<repos>]... [-g <group>]          # Add repos to current workspace
 wsp repo rm <repos>... [-f]                     # Remove repo(s) from the current workspace (alias: remove)
 wsp repo fetch [--all] [--prune]                # Fetch updates for workspace repos
@@ -51,21 +53,15 @@ wsp repo ls                                     # List repos in the current work
 ### Config
 
 ```bash
-wsp setup config ls                             # List all config values [read-only] (alias: list)
-wsp setup config get <key>                      # Get a config value [read-only]
-wsp setup config set <key> <value>              # Set a config value
-wsp setup config unset <key>                    # Unset a config value
-```
-
-### Skill management
-
-```bash
-wsp setup skill install                         # Install wsp Claude Code skills to ~/.claude/skills/
+wsp config ls                                   # List all config values [read-only] (alias: list)
+wsp config get <key>                            # Get a config value [read-only]
+wsp config set <key> <value>                    # Set a config value
+wsp config unset <key>                          # Unset a config value
 ```
 
 ## JSON Output Schemas
 
-### `wsp setup repo ls --json`
+### `wsp registry ls --json`
 ```json
 {
   "repos": [
@@ -204,7 +200,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup group ls --json`
+### `wsp group ls --json`
 ```json
 {
   "groups": [
@@ -216,7 +212,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup group show <name> --json`
+### `wsp group show <name> --json`
 ```json
 {
   "name": "backend",
@@ -228,7 +224,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup config ls --json`
+### `wsp config ls --json`
 ```json
 {
   "entries": [
@@ -248,7 +244,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup config get <key> --json`
+### `wsp config get <key> --json`
 ```json
 {
   "key": "branch-prefix",
@@ -264,7 +260,7 @@ wsp setup skill install                         # Install wsp Claude Code skills
 }
 ```
 
-### `wsp setup repo add --from <org> --all --json`
+### `wsp registry add --from <org> --all --json`
 ```json
 {
   "registered": [
@@ -273,6 +269,20 @@ wsp setup skill install                         # Install wsp Claude Code skills
   ],
   "skipped": [
     "github.com/acme/shared-lib"
+  ]
+}
+```
+
+### `wsp recover --json`
+```json
+{
+  "entries": [
+    {
+      "name": "my-feature",
+      "branch": "jganoff/my-feature",
+      "trashed_at": "2026-03-06T20:52:05.953268Z",
+      "original_path": "~/dev/workspaces/my-feature"
+    }
   ]
 }
 ```
@@ -312,7 +322,7 @@ wsp new my-feature api-gateway user-service@main proto@v1.0
 
 ### Create a workspace and start working
 ```bash
-wsp setup repo ls --json                       # See available repos
+wsp registry ls --json                         # See available repos
 wsp new my-feature api-gateway user-service    # Create workspace
 cd ~/dev/workspaces/my-feature                # Enter workspace
 ```

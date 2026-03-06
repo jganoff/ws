@@ -10,6 +10,28 @@ use crate::output::{GroupListEntry, GroupListOutput, GroupShowOutput, MutationOu
 
 use super::completers;
 
+pub fn cmd() -> Command {
+    Command::new("group")
+        .about("Manage repo groups")
+        .subcommand_required(true)
+        .subcommand(new_cmd())
+        .subcommand(list_cmd())
+        .subcommand(show_cmd())
+        .subcommand(rm_cmd())
+        .subcommand(update_cmd())
+}
+
+pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    match matches.subcommand() {
+        Some(("new", m)) => run_new(m, paths),
+        Some(("ls", m)) => run_list(m, paths),
+        Some(("show", m)) => run_show(m, paths),
+        Some(("rm", m)) => run_rm(m, paths),
+        Some(("update", m)) => run_update(m, paths),
+        _ => unreachable!(),
+    }
+}
+
 pub fn new_cmd() -> Command {
     Command::new("new")
         .about("Create a new repo group")

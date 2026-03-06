@@ -7,6 +7,26 @@ use crate::config::{self, Paths};
 use crate::filelock;
 use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, MutationOutput, Output};
 
+pub fn cmd() -> Command {
+    Command::new("config")
+        .about("Manage wsp settings")
+        .subcommand_required(true)
+        .subcommand(list_cmd())
+        .subcommand(get_cmd())
+        .subcommand(set_cmd())
+        .subcommand(unset_cmd())
+}
+
+pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    match matches.subcommand() {
+        Some(("ls", m)) => run_list(m, paths),
+        Some(("get", m)) => run_get(m, paths),
+        Some(("set", m)) => run_set(m, paths),
+        Some(("unset", m)) => run_unset(m, paths),
+        _ => unreachable!(),
+    }
+}
+
 pub fn list_cmd() -> Command {
     Command::new("ls")
         .visible_alias("list")

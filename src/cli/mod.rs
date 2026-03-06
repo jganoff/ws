@@ -12,6 +12,7 @@ pub mod list;
 pub mod log;
 pub mod new;
 pub mod recover;
+pub mod registry;
 pub mod remove;
 pub mod rename;
 pub mod repo;
@@ -27,55 +28,6 @@ use crate::output::Output;
 use crate::workspace;
 
 pub fn build_cli() -> Command {
-    let repo_admin = Command::new("repo")
-        .about("Manage registered repositories")
-        .subcommand_required(true)
-        .subcommand(repo::add_cmd())
-        .subcommand(repo::list_cmd())
-        .subcommand(repo::rm_cmd());
-
-    let group = Command::new("group")
-        .about("Manage repo groups")
-        .subcommand_required(true)
-        .subcommand(group::new_cmd())
-        .subcommand(group::list_cmd())
-        .subcommand(group::show_cmd())
-        .subcommand(group::rm_cmd())
-        .subcommand(group::update_cmd());
-
-    let config = Command::new("config")
-        .about("Manage global configuration")
-        .subcommand_required(true)
-        .subcommand(cfg::list_cmd())
-        .subcommand(cfg::get_cmd())
-        .subcommand(cfg::set_cmd())
-        .subcommand(cfg::unset_cmd());
-
-    let skill_cmd = Command::new("skill")
-        .about("Manage Claude Code skills")
-        .subcommand_required(true)
-        .subcommand(skill::install_cmd());
-
-    #[cfg(feature = "codegen")]
-    let skill_cmd = skill_cmd.subcommand(skill::generate_cmd());
-
-    let setup = Command::new("setup")
-        .about("Configure repos, groups, and settings")
-        .subcommand_required(true)
-        .subcommand(repo_admin)
-        .subcommand(group)
-        .subcommand(config)
-        .subcommand(skill_cmd)
-        .subcommand(
-            Command::new("completion")
-                .about("Output shell integration (completions + wrapper function) [read-only]")
-                .arg(
-                    Arg::new("shell")
-                        .required(true)
-                        .value_parser(["zsh", "bash", "fish"]),
-                ),
-        );
-
     let repo_ws = Command::new("repo")
         .about("Manage repos in the current workspace")
         .subcommand_required(true)
@@ -84,7 +36,26 @@ pub fn build_cli() -> Command {
         .subcommand(fetch::cmd())
         .subcommand(repo_list::cmd());
 
-    Command::new("wsp")
+    // Hidden backward-compat alias: `wsp setup <noun>` dispatches to
+    // the new top-level nouns with a deprecation warning.
+    let setup = Command::new("setup")
+        .about("Deprecated: use top-level registry/group/config/completion commands")
+        .hide(true)
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("repo")
+                .about("Manage registered repositories")
+                .subcommand_required(true)
+                .subcommand(repo::add_cmd())
+                .subcommand(repo::list_cmd())
+                .subcommand(repo::rm_cmd()),
+        )
+        .subcommand(group::cmd())
+        .subcommand(cfg::cmd())
+        .subcommand(completion::cmd());
+
+    #[allow(unused_mut)]
+    let mut cli = Command::new("wsp")
         .about("Multi-repo workspace manager")
         .version(env!("WSP_VERSION_STRING"))
         .arg(
@@ -94,9 +65,9 @@ pub fn build_cli() -> Command {
                 .action(clap::ArgAction::SetTrue)
                 .help("Output as JSON"),
         )
+        // Workspace commands
         .subcommand(new::cmd())
         .subcommand(delete::cmd())
-        .subcommand(repo_ws)
         .subcommand(list::cmd())
         .subcommand(status::cmd())
         .subcommand(diff::cmd())
@@ -106,42 +77,30 @@ pub fn build_cli() -> Command {
         .subcommand(cd::cmd())
         .subcommand(recover::cmd())
         .subcommand(rename::cmd())
-        .subcommand(setup)
+        // Workspace-scoped repo commands
+        .subcommand(repo_ws)
+        // Admin commands (promoted from `wsp setup`)
+        .subcommand(registry::cmd())
+        .subcommand(group::cmd())
+        .subcommand(cfg::cmd())
+        .subcommand(completion::cmd())
+        // Hidden backward-compat
+        .subcommand(setup);
+
+    #[cfg(feature = "codegen")]
+    {
+        cli = cli.subcommand(skill::generate_cmd().hide(true));
+    }
+
+    cli
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
     match matches.subcommand() {
-        Some(("setup", sub)) => match sub.subcommand() {
-            Some(("repo", sub2)) => match sub2.subcommand() {
-                Some(("add", m)) => repo::run_add(m, paths),
-                Some(("ls", m)) => repo::run_list(m, paths),
-                Some(("rm", m)) => repo::run_remove(m, paths),
-                _ => unreachable!(),
-            },
-            Some(("group", sub2)) => match sub2.subcommand() {
-                Some(("new", m)) => group::run_new(m, paths),
-                Some(("ls", m)) => group::run_list(m, paths),
-                Some(("show", m)) => group::run_show(m, paths),
-                Some(("rm", m)) => group::run_rm(m, paths),
-                Some(("update", m)) => group::run_update(m, paths),
-                _ => unreachable!(),
-            },
-            Some(("config", sub2)) => match sub2.subcommand() {
-                Some(("ls", m)) => cfg::run_list(m, paths),
-                Some(("get", m)) => cfg::run_get(m, paths),
-                Some(("set", m)) => cfg::run_set(m, paths),
-                Some(("unset", m)) => cfg::run_unset(m, paths),
-                _ => unreachable!(),
-            },
-            Some(("skill", sub2)) => match sub2.subcommand() {
-                Some(("install", m)) => skill::run_install(m, paths),
-                #[cfg(feature = "codegen")]
-                Some(("generate", m)) => skill::run_generate(m, paths),
-                _ => unreachable!(),
-            },
-            Some(("completion", m)) => completion::run(m, paths),
-            _ => unreachable!(),
-        },
+        // --- Backward-compat: `wsp setup` dispatches with deprecation warnings ---
+        Some(("setup", sub)) => dispatch_setup(sub, paths),
+
+        // --- Workspace-scoped repo commands ---
         Some(("repo", sub)) => match sub.subcommand() {
             Some(("add", m)) => add::run(m, paths),
             Some(("rm", m)) => remove::run(m, paths),
@@ -149,6 +108,8 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
             Some(("ls", m)) => repo_list::run(m, paths),
             _ => unreachable!(),
         },
+
+        // --- Workspace commands ---
         Some(("new", m)) => new::run(m, paths),
         Some(("rm", m)) => delete::run(m, paths),
         Some(("cd", m)) => cd::run(m, paths),
@@ -160,6 +121,18 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("exec", m)) => exec::run(m, paths),
         Some(("recover", m)) => recover::run(m, paths),
         Some(("rename", m)) => rename::run(m, paths),
+
+        // --- Admin commands (promoted from setup) ---
+        Some(("registry", sub)) => registry::dispatch(sub, paths),
+        Some(("group", sub)) => group::dispatch(sub, paths),
+        Some(("config", sub)) => cfg::dispatch(sub, paths),
+        Some(("completion", m)) => completion::run(m, paths),
+
+        // --- Dev-only codegen ---
+        #[cfg(feature = "codegen")]
+        Some(("generate", m)) => skill::run_generate(m, paths),
+
+        // --- No subcommand: default behavior ---
         None => {
             let cwd = std::env::current_dir()?;
             if workspace::detect(&cwd).is_ok() {
@@ -172,6 +145,36 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
                 }
                 Ok(output)
             }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Dispatch `wsp setup <noun>` with deprecation warnings on stderr.
+fn dispatch_setup(sub: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
+    match sub.subcommand() {
+        Some(("repo", sub2)) => {
+            eprintln!("warning: `wsp setup repo` is deprecated, use `wsp registry` instead");
+            match sub2.subcommand() {
+                Some(("add", m)) => repo::run_add(m, paths),
+                Some(("ls", m)) => repo::run_list(m, paths),
+                Some(("rm", m)) => repo::run_remove(m, paths),
+                _ => unreachable!(),
+            }
+        }
+        Some(("group", sub2)) => {
+            eprintln!("warning: `wsp setup group` is deprecated, use `wsp group` instead");
+            group::dispatch(sub2, paths)
+        }
+        Some(("config", sub2)) => {
+            eprintln!("warning: `wsp setup config` is deprecated, use `wsp config` instead");
+            cfg::dispatch(sub2, paths)
+        }
+        Some(("completion", m)) => {
+            eprintln!(
+                "warning: `wsp setup completion` is deprecated, use `wsp completion` instead"
+            );
+            completion::run(m, paths)
         }
         _ => unreachable!(),
     }

@@ -12,7 +12,7 @@ check:
 
 # generate SKILL.md from CLI introspection
 skill: (build-bin "codegen")
-    cargo run --release --features codegen -- setup skill generate > skills/wsp-manage/SKILL.md
+    cargo run --release --features codegen -- generate > skills/wsp-manage/SKILL.md
 
 # build a release binary, optionally with extra features
 [private]
@@ -33,7 +33,7 @@ audit:
 # full CI pipeline (mirrors .github/workflows/ci.yml)
 ci: check audit build test
     @echo "Checking SKILL.md freshness..."
-    @cargo run --release --features codegen -- setup skill generate | diff -q - skills/wsp-manage/SKILL.md || (echo "SKILL.md is stale. Run 'just skill' to regenerate." && exit 1)
+    @cargo run --release --features codegen -- generate | diff -q - skills/wsp-manage/SKILL.md || (echo "SKILL.md is stale. Run 'just skill' to regenerate." && exit 1)
 
 # auto-fix formatting and lint where possible
 fix:

@@ -157,14 +157,13 @@ Remove `wsp setup` alias in the next major version.
 - ~~Add `rm` alias to `wsp setup repo remove`~~
 - ~~Consistent primary/alias direction everywhere~~
 
-### Phase 2: Flatten structure
+### Phase 2: Flatten structure ✅
 
-- Create `src/cli/registry.rs` for `wsp registry add/ls/rm`
-- Create `src/cli/config.rs` (rename from `cfg.rs`) for `wsp config ls/get/set/unset`
-- Promote `completion` to top-level
-- Remove `skill` subcommand (workspace creation auto-installs skills; `generate` is dev-only via `just skill`)
-- Add Clap `help_heading` grouping
-- Wire `wsp setup` as hidden alias with deprecation warnings
+- ~~Create `src/cli/registry.rs` for `wsp registry add/ls/rm`~~
+- ~~Promote `config`, `completion`, `group` to top-level~~
+- ~~Remove `skill` subcommand (workspace creation auto-installs skills; `generate` is dev-only via `just skill`)~~
+- ~~Wire `wsp setup` as hidden alias with deprecation warnings~~
+- Clap `help_heading` grouping deferred (clap 4.x lacks multi-heading subcommand support)
 
 ### Phase 3: Coordinate with workspace templates
 

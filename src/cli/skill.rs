@@ -1,50 +1,18 @@
-use std::fs;
-
-use anyhow::Result;
-use clap::{ArgMatches, Command};
-
-use crate::config::Paths;
-use crate::output::{MutationOutput, Output};
-
-const SKILLS: &[(&str, &str)] = &[
-    (
-        "wsp-manage",
-        include_str!("../../skills/wsp-manage/SKILL.md"),
-    ),
-    (
-        "wsp-report",
-        include_str!("../../skills/wsp-report/SKILL.md"),
-    ),
-];
-
-pub fn install_cmd() -> Command {
-    Command::new("install").about("Install wsp Claude Code skills to ~/.claude/skills/")
-}
-
-pub fn run_install(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
-    let skills_root = home.join(".claude").join("skills");
-
-    for (name, content) in SKILLS {
-        let skill_dir = skills_root.join(name);
-        fs::create_dir_all(&skill_dir)?;
-        fs::write(skill_dir.join("SKILL.md"), content)?;
-    }
-
-    Ok(Output::Mutation(MutationOutput {
-        ok: true,
-        message: format!(
-            "Installed {} skills to {}",
-            SKILLS.len(),
-            skills_root.display()
-        ),
-    }))
-}
-
 // ---------------------------------------------------------------------------
 // SKILL.md generation (codegen only)
 // ---------------------------------------------------------------------------
+
+#[cfg(feature = "codegen")]
+use anyhow::Result;
+
+#[cfg(feature = "codegen")]
+use clap::{ArgMatches, Command};
+
+#[cfg(feature = "codegen")]
+use crate::config::Paths;
+
+#[cfg(feature = "codegen")]
+use crate::output::Output;
 
 #[cfg(feature = "codegen")]
 pub fn generate_cmd() -> Command {
@@ -69,14 +37,14 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     // --- Quick Reference: introspected from clap ---
     out.push_str("## Quick Reference\n\n");
 
-    // Repos (global registry) — under `setup repo`
-    out.push_str("### Repos (global registry)\n\n```bash\n");
-    write_setup_section(&cli, &mut out, "repo", &["wsp", "setup", "repo"], None);
+    // Registry (global repo registry) — top-level
+    out.push_str("### Registry (global repo registry)\n\n```bash\n");
+    write_subcommand_section(&cli, &mut out, "registry", &["wsp", "registry"]);
     out.push_str("```\n\n");
 
-    // Groups — under `setup group`
+    // Groups — top-level
     out.push_str("### Groups (named sets of repos)\n\n```bash\n");
-    write_setup_section(&cli, &mut out, "group", &["wsp", "setup", "group"], None);
+    write_subcommand_section(&cli, &mut out, "group", &["wsp", "group"]);
     out.push_str("```\n\n");
 
     // Workspaces — top-level workspace commands + `repo` subcommands
@@ -97,26 +65,15 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     }
     out.push_str("```\n\n");
 
-    // Config — under `setup config`
+    // Config — top-level
     out.push_str("### Config\n\n```bash\n");
-    write_setup_section(&cli, &mut out, "config", &["wsp", "setup", "config"], None);
-    out.push_str("```\n\n");
-
-    // Skill management
-    out.push_str("### Skill management\n\n```bash\n");
-    write_setup_section(
-        &cli,
-        &mut out,
-        "skill",
-        &["wsp", "setup", "skill"],
-        Some(&["generate"]),
-    );
+    write_subcommand_section(&cli, &mut out, "config", &["wsp", "config"]);
     out.push_str("```\n\n");
 
     // --- JSON Output Schemas ---
     out.push_str("## JSON Output Schemas\n\n");
 
-    write_schema::<RepoListOutput>(&mut out, "wsp setup repo ls --json");
+    write_schema::<RepoListOutput>(&mut out, "wsp registry ls --json");
     write_schema::<WorkspaceListOutput>(&mut out, "wsp ls --json");
     write_schema::<StatusOutput>(&mut out, "wsp st --json");
     write_schema::<DiffOutput>(&mut out, "wsp diff --json");
@@ -125,15 +82,15 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     write_schema::<WorkspaceRepoListOutput>(&mut out, "wsp repo ls --json");
     write_schema::<ExecOutput>(&mut out, "wsp exec <workspace> --json -- <command>");
     write_schema::<FetchOutput>(&mut out, "wsp repo fetch --json");
-    write_schema::<GroupListOutput>(&mut out, "wsp setup group ls --json");
-    write_schema::<GroupShowOutput>(&mut out, "wsp setup group show <name> --json");
-    write_schema::<ConfigListOutput>(&mut out, "wsp setup config ls --json");
-    write_schema::<ConfigGetOutput>(&mut out, "wsp setup config get <key> --json");
+    write_schema::<GroupListOutput>(&mut out, "wsp group ls --json");
+    write_schema::<GroupShowOutput>(&mut out, "wsp group show <name> --json");
+    write_schema::<ConfigListOutput>(&mut out, "wsp config ls --json");
+    write_schema::<ConfigGetOutput>(&mut out, "wsp config get <key> --json");
     write_schema::<MutationOutput>(
         &mut out,
         "Mutation commands (new, rm, add, remove, set, etc.)",
     );
-    write_schema::<ImportOutput>(&mut out, "wsp setup repo add --from <org> --all --json");
+    write_schema::<ImportOutput>(&mut out, "wsp registry add --from <org> --all --json");
     write_schema::<RecoverListOutput>(&mut out, "wsp recover --json");
     write_schema::<ErrorOutput>(&mut out, "Errors");
 
@@ -258,24 +215,11 @@ fn write_cmd_line(out: &mut String, prefix: &[&str], cmd: &Command) {
     .unwrap();
 }
 
-/// Write all subcommands of a `setup <section>` group, optionally skipping some.
+/// Write all subcommands of a top-level noun.
 #[cfg(feature = "codegen")]
-fn write_setup_section(
-    cli: &Command,
-    out: &mut String,
-    section: &str,
-    prefix: &[&str],
-    skip: Option<&[&str]>,
-) {
-    if let Some(setup) = cli.find_subcommand("setup")
-        && let Some(group) = setup.find_subcommand(section)
-    {
-        for sub in group.get_subcommands() {
-            if let Some(skip) = skip
-                && skip.contains(&sub.get_name())
-            {
-                continue;
-            }
+fn write_subcommand_section(cli: &Command, out: &mut String, noun: &str, prefix: &[&str]) {
+    if let Some(parent) = cli.find_subcommand(noun) {
+        for sub in parent.get_subcommands() {
             write_cmd_line(out, prefix, sub);
         }
     }
@@ -329,7 +273,7 @@ wsp new my-feature api-gateway user-service@main proto@v1.0
 
 ### Create a workspace and start working
 ```bash
-wsp setup repo ls --json                       # See available repos
+wsp registry ls --json                         # See available repos
 wsp new my-feature api-gateway user-service    # Create workspace
 cd ~/dev/workspaces/my-feature                # Enter workspace
 ```

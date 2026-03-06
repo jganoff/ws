@@ -1,10 +1,20 @@
 use std::io::Write;
 
 use anyhow::{Result, bail};
-use clap::ArgMatches;
+use clap::{Arg, ArgMatches, Command};
 
 use crate::config::Paths;
 use crate::output::Output;
+
+pub fn cmd() -> Command {
+    Command::new("completion")
+        .about("Output shell integration (completions + wrapper function) [read-only]")
+        .arg(
+            Arg::new("shell")
+                .required(true)
+                .value_parser(["zsh", "bash", "fish"]),
+        )
+}
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let shell = matches.get_one::<String>("shell").unwrap();
@@ -61,7 +71,7 @@ fn write_posix(w: &mut dyn Write, bin_str: &str, wsp_root: &str, shell: &str) ->
 
     write!(
         w,
-        "# wsp shell integration \u{2014} source with: eval \"$(wsp setup completion {shell})\"\n\
+        "# wsp shell integration \u{2014} source with: eval \"$(wsp completion {shell})\"\n\
          \n\
          wsp() {{\n\
          \x20 local wsp_bin='{bin_esc}'\n\
@@ -170,7 +180,7 @@ fn write_fish(w: &mut dyn Write, bin_str: &str, wsp_root: &str) -> Result<()> {
     write!(
         w,
         "\
-# wsp shell integration \u{2014} source with: wsp setup completion fish | source\n\
+# wsp shell integration \u{2014} source with: wsp completion fish | source\n\
 \n\
 function wsp\n\
     set -l wsp_bin '{bin_esc}'\n\
@@ -292,10 +302,10 @@ mod tests {
     #[test]
     fn test_posix_shell_name_in_header() {
         let bash = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "bash"));
-        assert!(bash.contains("eval \"$(wsp setup completion bash)\""));
+        assert!(bash.contains("eval \"$(wsp completion bash)\""));
 
         let zsh = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "zsh"));
-        assert!(zsh.contains("eval \"$(wsp setup completion zsh)\""));
+        assert!(zsh.contains("eval \"$(wsp completion zsh)\""));
     }
 
     #[test]
@@ -334,7 +344,7 @@ mod tests {
     #[test]
     fn test_fish_header() {
         let out = output(|w| write_fish(w, "/usr/bin/ws", "/home/user/dev"));
-        assert!(out.contains("wsp setup completion fish | source"));
+        assert!(out.contains("wsp completion fish | source"));
     }
 
     #[test]

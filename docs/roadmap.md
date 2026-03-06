@@ -4,25 +4,6 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### CLI Restructure
-
-**Complexity:** Small-Medium
-
-**Design doc:** [`docs/features/cli-restructure.md`](features/cli-restructure.md)
-
-Flatten `wsp setup` into separate top-level nouns (`registry`, `template`, `config`, `completion`, `skill`), normalize verb naming (`rm`/`remove`, `ls`/`list`), and use Clap help headings for visual grouping. Follows the dominant pattern across major CLIs (gh, gcloud, mise, Docker) where each admin concern is a dedicated top-level noun, not nested under an umbrella.
-
-```
-wsp registry add/ls/rm             # global repo registry (was: setup repo)
-wsp template new/ls/show/edit/rm   # workspace templates (was: setup group)
-wsp config ls/get/set/unset        # key-value settings (was: setup config)
-wsp completion zsh|bash|fish       # shell completions (was: setup completion)
-```
-
-- [x] Phase 1: Verb normalization (add missing `ls`/`rm` aliases, rename `delete` to `rm`)
-- [ ] Phase 2: Flatten structure, `wsp setup` becomes hidden alias with deprecation warning
-- [ ] Phase 3: Coordinate with workspace templates migration, update docs/SKILL.md
-
 ### Workspace Templates
 
 **Complexity:** Medium

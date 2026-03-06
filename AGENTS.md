@@ -14,7 +14,7 @@ Use `just` (see `Justfile`). Key recipes:
 - `just fix` - Auto-fix formatting and lint
 - `just install-hooks` - Install git pre-commit hook
 
-The `codegen` Cargo feature gates `wsp setup skill generate`, which introspects clap and serializes sample outputs to produce SKILL.md. `just check` runs clippy with and without this feature. Adding a new command, flag, or output struct automatically updates SKILL.md on next `just build`.
+The `codegen` Cargo feature gates `wsp generate` (hidden command), which introspects clap and serializes sample outputs to produce SKILL.md. `just check` runs clippy with and without this feature. Adding a new command, flag, or output struct automatically updates SKILL.md on next `just build`.
 
 ## Architecture
 
@@ -38,11 +38,13 @@ The `codegen` Cargo feature gates `wsp setup skill generate`, which introspects 
 
 ## CLI Command Structure
 
-Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `wsp diff`, `wsp exec`, `wsp cd`, `wsp sync`, `wsp log`.
+Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `wsp diff`, `wsp exec`, `wsp cd`, `wsp sync`, `wsp log`, `wsp recover`, `wsp rename`.
 
 Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo ls`, `wsp repo fetch`.
 
-All admin/setup commands live under `wsp setup`: `wsp setup repo add/ls/rm`, `wsp setup group new/ls/show/update/rm`, `wsp setup config ls/get/set/unset`, `wsp setup completion zsh|bash|fish`.
+Admin commands are top-level nouns: `wsp registry add/ls/rm`, `wsp group new/ls/show/update/rm`, `wsp config ls/get/set/unset`, `wsp completion zsh|bash|fish`.
+
+`wsp setup` is a hidden backward-compat alias that dispatches to the new top-level nouns with a deprecation warning on stderr. It will be removed in the next major version.
 
 When writing docs or examples, use the actual command names above — not the long forms (`remove`, `list`, `status`).
 
@@ -136,7 +138,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - **Adding fields to `Metadata`**: Test helpers in `src/lang/go.rs`, `src/lang/mod.rs`, and `src/workspace.rs` tests have manual `Metadata { ... }` initializers. Search for `Metadata {` across the codebase when adding new fields.
 - **Adding fields to `Paths`**: `Paths` has manual initializers in `config.rs` (`resolve`, `from_dirs`), `src/cli/status.rs` (`dummy_paths`), and `src/gc.rs` (`test_paths`). Search for `Paths {` across the codebase when adding new fields.
 - **Adding commands or output structs**: The `codegen` feature gates SKILL.md generation. When adding a new command, it appears in SKILL.md automatically via clap introspection. When adding a new output struct, add a `#[cfg(feature = "codegen")] sample()` method in `src/output.rs` and wire it in `src/cli/skill.rs`. Run `just skill` to regenerate. `just ci` will fail if SKILL.md is stale.
-- **Adding skills**: New skills in `skills/` need a corresponding `include_str!` constant in `src/agentmd.rs` and must be wired into `install_skill()` to be installed into workspaces. Also add them to the `SKILLS` array in `src/cli/skill.rs` (until `wsp setup skill` is removed in the CLI restructure).
+- **Adding skills**: New skills in `skills/` need a corresponding `include_str!` constant in `src/agentmd.rs` and must be wired into `install_skill()` to be installed into workspaces.
 - **Test remote URLs**: `giturl::parse()` only handles SSH (`git@host:path`) and HTTPS URLs — not local filesystem paths. Tests that need identity validation from a remote URL must use `git@test.local:user/repo.git` style URLs, not the temp-dir paths used by `setup_test_env()` for upstream URLs.
 
 ## Releasing
