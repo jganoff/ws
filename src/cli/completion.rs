@@ -137,17 +137,20 @@ fn build_posix_cd_into(cmd_name: &str) -> String {
 fn build_posix_cd_out(cmd_name: &str) -> String {
     format!(
         "shift\n\
-         \x20     if [[ -n \"$1\" ]]; then\n\
-         \x20       local wsp_dir=\"$wsp_root/$1\"\n\
+         \x20     local _wsp_name\n\
+         \x20     for _wsp_name in \"$@\"; do\n\
+         \x20       [[ \"$_wsp_name\" != -* ]] && break\n\
+         \x20       _wsp_name=\n\
+         \x20     done\n\
+         \x20     if [[ -n \"$_wsp_name\" ]]; then\n\
+         \x20       local wsp_dir=\"$wsp_root/$_wsp_name\"\n\
          \x20       if [[ \"$PWD\" = \"$wsp_dir\"* ]]; then\n\
          \x20         cd \"$wsp_root\" || cd \"$HOME\"\n\
          \x20       fi\n\
-         \x20       command \"$wsp_bin\" {cmd_name} \"$@\"\n\
-         \x20     else\n\
-         \x20       command \"$wsp_bin\" {cmd_name} \"$@\" || return\n\
-         \x20       if [[ ! -d \"$PWD\" ]]; then\n\
-         \x20         cd \"$wsp_root\" || cd \"$HOME\"\n\
-         \x20       fi\n\
+         \x20     fi\n\
+         \x20     command \"$wsp_bin\" {cmd_name} \"$@\"\n\
+         \x20     if [[ ! -d \"$PWD\" ]]; then\n\
+         \x20       cd \"$wsp_root\" || cd \"$HOME\"\n\
          \x20     fi",
     )
 }
@@ -187,17 +190,22 @@ function wsp\n\
 \n\
         case rm remove\n\
             set -l args $argv[2..]\n\
-            if test -n \"$args[1]\"\n\
-                set -l wsp_dir \"$wsp_root/$args[1]\"\n\
+            set -l _wsp_name\n\
+            for _a in $args\n\
+                if not string match -q -- '-*' $_a\n\
+                    set _wsp_name $_a\n\
+                    break\n\
+                end\n\
+            end\n\
+            if test -n \"$_wsp_name\"\n\
+                set -l wsp_dir \"$wsp_root/$_wsp_name\"\n\
                 if string match -q \"$wsp_dir*\" $PWD\n\
                     cd \"$wsp_root\"; or cd $HOME\n\
                 end\n\
-                command $wsp_bin rm $args\n\
-            else\n\
-                command $wsp_bin rm $args; or return\n\
-                if not test -d $PWD\n\
-                    cd \"$wsp_root\"; or cd $HOME\n\
-                end\n\
+            end\n\
+            command $wsp_bin rm $args\n\
+            if not test -d $PWD\n\
+                cd \"$wsp_root\"; or cd $HOME\n\
             end\n\
 \n\
         case '*'\n\
