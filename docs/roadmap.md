@@ -84,25 +84,6 @@ Applied via `git config --local` in each clone during `wsp new` and `wsp repo ad
 - [ ] `wsp config set/get/unset` support for `git_config.*` keys
 - [ ] Include in `--json` output of `wsp config ls`
 
-### `wsp exec --json`
-
-**Complexity:** Small
-
-`wsp exec` is the only command without `--json` output. Add structured output to satisfy Agent Use tenet 3 ("Structured output is the contract").
-
-```json
-{
-  "results": [
-    { "repo": "api-gateway", "directory": "api-gateway", "exit_code": 0, "ok": true },
-    { "repo": "user-service", "directory": "user-service", "exit_code": 1, "ok": false }
-  ]
-}
-```
-
-- [ ] New `ExecResult` / `ExecOutput` struct in `src/output.rs`
-- [ ] `Output::Exec` variant with JSON rendering
-- [ ] Capture stdout/stderr per repo when `--json` is set (don't interleave with JSON)
-
 ### `wsp new` Timing Output
 
 **Complexity:** Small
@@ -146,26 +127,6 @@ Make `wsp st --json` the single-call entry point for AI agents. Include enough c
 - [ ] Add `behind` count per repo (commits behind default branch)
 - [ ] Add `role` per repo (`active` vs `context`)
 - [ ] Include `description` if set
-
-### `wsp rename`
-
-**Complexity:** Small-Medium
-
-Rename a workspace without destroying it. Renames the directory, updates `.wsp.yaml`, renames the git branch in each active repo, and regenerates AGENTS.md.
-
-```
-$ wsp rename fix-typo refactor-auth
-Renamed workspace "fix-typo" -> "refactor-auth"
-  api-gateway    branch: fix-typo -> refactor-auth
-  user-service   branch: fix-typo -> refactor-auth
-```
-
-- [ ] Rename workspace directory
-- [ ] Update `.wsp.yaml` name field
-- [ ] `git branch -m` in each active repo
-- [ ] Skip context repos (pinned to ref, no workspace branch)
-- [ ] Regenerate AGENTS.md/CLAUDE.md
-- [ ] Update `.code-workspace` and `go.work` if they exist
 
 ### `wsp sync --abort`
 

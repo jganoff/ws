@@ -1211,6 +1211,139 @@ pub fn remove(paths: &Paths, name: &str, force: bool, permanent: bool) -> Result
     Ok(())
 }
 
+/// Rename result for a single repo.
+#[derive(Debug)]
+pub struct RenameRepoResult {
+    pub name: String,
+    pub old_branch: String,
+    pub new_branch: String,
+    pub ok: bool,
+    pub skipped: bool,
+    pub error: Option<String>,
+}
+
+/// Rename a workspace: directory, metadata, and git branches in active repos.
+pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<RenameRepoResult>> {
+    validate_name(old_name)?;
+    validate_name(new_name)?;
+
+    let old_dir = dir(&paths.workspaces_dir, old_name);
+    if !old_dir.exists() {
+        bail!("workspace {:?} does not exist", old_name);
+    }
+    let new_dir = dir(&paths.workspaces_dir, new_name);
+    if new_dir.exists() {
+        bail!("workspace {:?} already exists", new_name);
+    }
+
+    let meta = load_metadata(&old_dir)
+        .map_err(|e| anyhow::anyhow!("reading workspace metadata: {}", e))?;
+
+    // Derive the new branch name by replacing old_name with new_name in the branch.
+    // Branch format is either "<prefix>/<name>" or just "<name>".
+    let new_branch = if let Some(prefix) = meta.branch.strip_suffix(old_name) {
+        // prefix includes the trailing "/" if present
+        format!("{}{}", prefix, new_name)
+    } else {
+        // Branch was manually set or doesn't match the name pattern — just use new_name
+        new_name.to_string()
+    };
+
+    let old_branch = meta.branch.clone();
+    let mut results = Vec::new();
+
+    // Rename branches in active repos
+    for (identity, entry) in &meta.repos {
+        let is_active = match entry {
+            None => true,
+            Some(re) => re.r#ref.is_empty(),
+        };
+        if !is_active {
+            results.push(RenameRepoResult {
+                name: meta.dir_name(identity).unwrap_or_else(|_| identity.clone()),
+                old_branch: old_branch.clone(),
+                new_branch: new_branch.clone(),
+                ok: true,
+                skipped: true,
+                error: None,
+            });
+            continue;
+        }
+
+        let dn = meta.dir_name(identity)?;
+        let clone_dir = old_dir.join(&dn);
+
+        match git::branch_rename(&clone_dir, &old_branch, &new_branch) {
+            Ok(()) => {
+                results.push(RenameRepoResult {
+                    name: dn,
+                    old_branch: old_branch.clone(),
+                    new_branch: new_branch.clone(),
+                    ok: true,
+                    skipped: false,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(RenameRepoResult {
+                    name: dn,
+                    old_branch: old_branch.clone(),
+                    new_branch: new_branch.clone(),
+                    ok: false,
+                    skipped: false,
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    // Bail if any branch rename failed — roll back successful renames first
+    let failures: Vec<&RenameRepoResult> = results.iter().filter(|r| !r.ok).collect();
+    if !failures.is_empty() {
+        for r in results.iter().filter(|r| r.ok && !r.skipped) {
+            let clone_dir = old_dir.join(&r.name);
+            if let Err(e) = git::branch_rename(&clone_dir, &new_branch, &old_branch) {
+                eprintln!("  warning: rollback failed for {}: {}", r.name, e);
+            }
+        }
+        let msgs: Vec<String> = failures
+            .iter()
+            .map(|r| {
+                format!(
+                    "{}: {}",
+                    r.name,
+                    r.error.as_deref().unwrap_or("unknown error")
+                )
+            })
+            .collect();
+        bail!(
+            "branch rename failed in {} repo(s), aborting:\n  {}",
+            failures.len(),
+            msgs.join("\n  ")
+        );
+    }
+
+    // Update metadata
+    let mut meta = meta;
+    meta.name = new_name.to_string();
+    meta.branch = new_branch.clone();
+    save_metadata(&old_dir, &meta)?;
+
+    // Rename directory
+    fs::rename(&old_dir, &new_dir)?;
+
+    // Regenerate AGENTS.md with updated metadata
+    if let Err(e) = crate::agentmd::update(&new_dir, &meta) {
+        eprintln!("  warning: failed to update AGENTS.md: {}", e);
+    }
+
+    // Re-run language integrations (go.work, etc.)
+    let cfg = crate::config::Config::load_from(&paths.config_path).unwrap_or_default();
+    crate::lang::run_integrations(&new_dir, &meta, &cfg);
+
+    Ok(results)
+}
+
 pub fn list_all(workspaces_dir: &Path) -> Result<Vec<String>> {
     if !workspaces_dir.exists() {
         return Ok(Vec::new());
@@ -3505,5 +3638,84 @@ mod tests {
             "expected clean index, got staged changes:\n{}",
             diff
         );
+    }
+
+    #[test]
+    fn test_rename_basic() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "old-name", &refs, None, &upstream_urls).unwrap();
+
+        let results = rename(&paths, "old-name", "new-name").unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok);
+        assert!(!results[0].skipped);
+        assert_eq!(results[0].old_branch, "old-name");
+        assert_eq!(results[0].new_branch, "new-name");
+
+        // Old dir gone, new dir exists
+        assert!(!dir(&paths.workspaces_dir, "old-name").exists());
+        assert!(dir(&paths.workspaces_dir, "new-name").exists());
+
+        // Metadata updated
+        let meta = load_metadata(&dir(&paths.workspaces_dir, "new-name")).unwrap();
+        assert_eq!(meta.name, "new-name");
+        assert_eq!(meta.branch, "new-name");
+
+        // Branch renamed in repo
+        let clone_dir = dir(&paths.workspaces_dir, "new-name").join("test-repo");
+        let branch = git::branch_current(&clone_dir).unwrap();
+        assert_eq!(branch, "new-name");
+    }
+
+    #[test]
+    fn test_rename_with_branch_prefix() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "my-feature", &refs, Some("jganoff"), &upstream_urls).unwrap();
+
+        let results = rename(&paths, "my-feature", "your-feature").unwrap();
+        assert!(results[0].ok);
+        assert_eq!(results[0].old_branch, "jganoff/my-feature");
+        assert_eq!(results[0].new_branch, "jganoff/your-feature");
+
+        let meta = load_metadata(&dir(&paths.workspaces_dir, "your-feature")).unwrap();
+        assert_eq!(meta.branch, "jganoff/your-feature");
+
+        let clone_dir = dir(&paths.workspaces_dir, "your-feature").join("test-repo");
+        let branch = git::branch_current(&clone_dir).unwrap();
+        assert_eq!(branch, "jganoff/your-feature");
+    }
+
+    #[test]
+    fn test_rename_skips_context_repos() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+        let refs = BTreeMap::from([(identity.clone(), "main".to_string())]);
+        create(&paths, "ctx-ws", &refs, None, &upstream_urls).unwrap();
+
+        let results = rename(&paths, "ctx-ws", "ctx-ws-new").unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].skipped);
+        assert!(results[0].ok);
+
+        assert!(dir(&paths.workspaces_dir, "ctx-ws-new").exists());
+    }
+
+    #[test]
+    fn test_rename_target_exists() {
+        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        create(&paths, "ws-a", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ws-b", &refs, None, &upstream_urls).unwrap();
+
+        let err = rename(&paths, "ws-a", "ws-b").unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn test_rename_source_missing() {
+        let (paths, _d, _r, _identity, _upstream_urls) = setup_test_env();
+        let err = rename(&paths, "nonexistent", "new-name").unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
     }
 }

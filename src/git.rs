@@ -193,6 +193,11 @@ pub fn checkout_new_branch(dir: &Path, branch: &str, start_point: &str) -> Resul
     Ok(())
 }
 
+pub fn branch_rename(dir: &Path, old: &str, new: &str) -> Result<()> {
+    run(Some(dir), &["branch", "-m", old, new])?;
+    Ok(())
+}
+
 pub fn checkout(dir: &Path, ref_or_branch: &str) -> Result<()> {
     run(Some(dir), &["checkout", ref_or_branch])?;
     Ok(())

@@ -13,6 +13,7 @@ pub mod log;
 pub mod new;
 pub mod recover;
 pub mod remove;
+pub mod rename;
 pub mod repo;
 pub mod repo_list;
 pub mod skill;
@@ -104,6 +105,7 @@ pub fn build_cli() -> Command {
         .subcommand(exec::cmd())
         .subcommand(cd::cmd())
         .subcommand(recover::cmd())
+        .subcommand(rename::cmd())
         .subcommand(setup)
 }
 
@@ -157,6 +159,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("sync", m)) => sync::run(m, paths),
         Some(("exec", m)) => exec::run(m, paths),
         Some(("recover", m)) => recover::run(m, paths),
+        Some(("rename", m)) => rename::run(m, paths),
         None => {
             let cwd = std::env::current_dir()?;
             if workspace::detect(&cwd).is_ok() {

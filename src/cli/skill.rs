@@ -82,7 +82,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     // Workspaces — top-level workspace commands + `repo` subcommands
     out.push_str("### Workspaces\n\n```bash\n");
     let ws_cmds = [
-        "new", "ls", "st", "diff", "log", "sync", "exec", "cd", "rm", "recover",
+        "new", "ls", "st", "diff", "log", "sync", "exec", "cd", "rm", "recover", "rename",
     ];
     for name in &ws_cmds {
         if let Some(sub) = cli.find_subcommand(name) {
