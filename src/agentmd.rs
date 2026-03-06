@@ -9,6 +9,7 @@ use crate::workspace::Metadata;
 pub(crate) const MARKER_BEGIN: &str = "<!-- wsp:begin -->";
 pub(crate) const MARKER_END: &str = "<!-- wsp:end -->";
 const SKILL_CONTENT: &str = include_str!("../skills/wsp-manage/SKILL.md");
+const REPORT_SKILL_CONTENT: &str = include_str!("../skills/wsp-report/SKILL.md");
 
 /// Generate or update AGENTS.md, CLAUDE.md symlink, and workspace skill.
 pub fn update(ws_dir: &Path, metadata: &Metadata) -> Result<()> {
@@ -74,6 +75,13 @@ fn build_marked_section(metadata: &Metadata) -> String {
     s.push_str("wsp repo rm <repo>      # remove repo from workspace\n");
     s.push_str("wsp exec <name> -- cmd  # run command in each repo\n");
     s.push_str("```\n");
+    s.push_str("\n## Troubleshooting\n\n");
+    s.push_str(
+        "If you encounter a wsp issue, use the **/wsp-report** skill to gather diagnostics and file a GitHub issue.\n\n",
+    );
+    s.push_str(
+        "Or report manually at <https://github.com/jganoff/wsp/issues> with the output of `wsp --version`, `uname -srm`, and `wsp st --json`.\n",
+    );
     s.push_str(MARKER_END);
     s.push('\n');
 
@@ -160,9 +168,15 @@ fn symlink_file<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> std::io
 }
 
 fn install_skill(ws_dir: &Path) -> Result<()> {
-    let skill_dir = ws_dir.join(".claude/skills/wsp-manage");
-    fs::create_dir_all(&skill_dir).context("creating skill directory")?;
-    fs::write(skill_dir.join("SKILL.md"), SKILL_CONTENT).context("writing SKILL.md")?;
+    let manage_dir = ws_dir.join(".claude/skills/wsp-manage");
+    fs::create_dir_all(&manage_dir).context("creating wsp-manage skill directory")?;
+    fs::write(manage_dir.join("SKILL.md"), SKILL_CONTENT).context("writing wsp-manage SKILL.md")?;
+
+    let report_dir = ws_dir.join(".claude/skills/wsp-report");
+    fs::create_dir_all(&report_dir).context("creating wsp-report skill directory")?;
+    fs::write(report_dir.join("SKILL.md"), REPORT_SKILL_CONTENT)
+        .context("writing wsp-report SKILL.md")?;
+
     Ok(())
 }
 
@@ -354,7 +368,13 @@ mod tests {
             Case {
                 name: "empty repos — valid table with header only",
                 meta: make_metadata("empty", "empty", &[]),
-                want_contains: vec!["| Repo | Role | Ref | Directory |", "## Quick Reference"],
+                want_contains: vec![
+                    "| Repo | Role | Ref | Directory |",
+                    "## Quick Reference",
+                    "## Troubleshooting",
+                    "/wsp-report",
+                    "https://github.com/jganoff/wsp/issues",
+                ],
             },
         ];
 
@@ -409,11 +429,16 @@ mod tests {
         let target = fs::read_link(ws_dir.join("CLAUDE.md")).unwrap();
         assert_eq!(target.to_str().unwrap(), "AGENTS.md");
 
-        // Skill installed
-        let skill_path = ws_dir.join(".claude/skills/wsp-manage/SKILL.md");
-        assert!(skill_path.exists());
-        let skill = fs::read_to_string(&skill_path).unwrap();
+        // Skills installed
+        let manage_skill = ws_dir.join(".claude/skills/wsp-manage/SKILL.md");
+        assert!(manage_skill.exists());
+        let skill = fs::read_to_string(&manage_skill).unwrap();
         assert!(skill.contains("wsp"));
+
+        let report_skill = ws_dir.join(".claude/skills/wsp-report/SKILL.md");
+        assert!(report_skill.exists());
+        let skill = fs::read_to_string(&report_skill).unwrap();
+        assert!(skill.contains("wsp-report"));
     }
 
     #[test]
