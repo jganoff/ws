@@ -423,11 +423,16 @@ fn propagate_mirror_refs(mirrors_dir: &Path, dest: &Path, identity: &str) -> Res
         let _ = git::remote_set_head(dest, "origin", default_br);
     }
 
-    // Fix default branch tracking
+    // Fix default branch tracking and fast-forward local default branch
     if let Some(ref default_br) = mirror_default_br {
+        let local_ref = format!("refs/heads/{}", default_br);
         let origin_ref = format!("origin/{}", default_br);
         if git::ref_exists(dest, &format!("refs/remotes/{}", origin_ref)) {
             let _ = git::set_upstream(dest, default_br, &origin_ref);
+            // Only fast-forward; don't reset a branch that has local-only commits
+            if git::is_ancestor(dest, &local_ref, &origin_ref) {
+                let _ = git::update_ref(dest, &local_ref, &origin_ref);
+            }
         }
     }
 
@@ -1241,12 +1246,18 @@ fn clone_from_mirror(
         let _ = git::remote_set_head(&dest, "origin", default_br);
     }
 
-    // 6. Fix default branch tracking: clone from mirror creates main tracking
-    // origin/main (which now points to upstream). Re-set it explicitly.
+    // 6. Fix default branch tracking and fast-forward local default branch.
+    // Clone from mirror creates main tracking origin/main. Re-set explicitly,
+    // then fast-forward local main to match origin/main (step 1's clone may
+    // have created it from the mirror's stale HEAD).
     if let Some(ref default_br) = mirror_default_br {
+        let local_ref = format!("refs/heads/{}", default_br);
         let origin_ref = format!("origin/{}", default_br);
         if git::ref_exists(&dest, &format!("refs/remotes/{}", origin_ref)) {
             let _ = git::set_upstream(&dest, default_br, &origin_ref);
+            if git::is_ancestor(&dest, &local_ref, &origin_ref) {
+                let _ = git::update_ref(&dest, &local_ref, &origin_ref);
+            }
         } else {
             let _ = git::unset_upstream(&dest, default_br);
         }
@@ -1509,6 +1520,38 @@ mod tests {
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
         create(&paths, "test-ws-dup", &refs, None, &upstream_urls).unwrap();
         assert!(create(&paths, "test-ws-dup", &refs, None, &upstream_urls).is_err());
+    }
+
+    #[test]
+    fn test_local_default_branch_matches_origin_after_create() {
+        let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
+
+        // Add a commit to upstream after mirror was cloned, then fetch into mirror
+        // so the mirror is ahead of what the initial bare clone had.
+        let output = Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "upstream advance"])
+            .current_dir(source_repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        let parsed = giturl::Parsed::from_identity(&identity).unwrap();
+        mirror::fetch(&paths.mirrors_dir, &parsed).unwrap();
+
+        // Create workspace — local main should be fast-forwarded to origin/main
+        let refs = BTreeMap::from([(identity, String::new())]);
+        create(&paths, "ff-test", &refs, None, &upstream_urls).unwrap();
+
+        let clone_dir = dir(&paths.workspaces_dir, "ff-test").join("test-repo");
+
+        let local_main = git::run(Some(&clone_dir), &["rev-parse", "refs/heads/main"]).unwrap();
+        let origin_main =
+            git::run(Some(&clone_dir), &["rev-parse", "refs/remotes/origin/main"]).unwrap();
+
+        assert_eq!(
+            local_main, origin_main,
+            "local main should match origin/main after create"
+        );
     }
 
     #[test]

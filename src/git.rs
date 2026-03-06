@@ -312,6 +312,19 @@ pub fn ref_exists(dir: &Path, git_ref: &str) -> bool {
     run(Some(dir), &["rev-parse", "--verify", git_ref]).is_ok()
 }
 
+pub fn update_ref(dir: &Path, refname: &str, target: &str) -> Result<()> {
+    run(Some(dir), &["update-ref", "--no-deref", refname, target])?;
+    Ok(())
+}
+
+pub fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> bool {
+    run(
+        Some(dir),
+        &["merge-base", "--is-ancestor", ancestor, descendant],
+    )
+    .is_ok()
+}
+
 pub fn branch_current(dir: &Path) -> Result<String> {
     run(Some(dir), &["rev-parse", "--abbrev-ref", "HEAD"])
 }
