@@ -993,11 +993,17 @@ fn check_claude_dir(ws_dir: &Path) -> Vec<String> {
 
     // Known wsp-managed paths (relative to .claude/)
     let managed: std::collections::HashSet<&str> =
-        ["skills/wsp-manage/SKILL.md"].iter().copied().collect();
+        ["skills/wsp-manage/SKILL.md", "skills/wsp-report/SKILL.md"]
+            .iter()
+            .copied()
+            .collect();
 
     // Intermediate directories that only contain managed content
     let managed_dirs: std::collections::HashSet<&str> =
-        ["skills", "skills/wsp-manage"].iter().copied().collect();
+        ["skills", "skills/wsp-manage", "skills/wsp-report"]
+            .iter()
+            .copied()
+            .collect();
 
     fn walk(
         base: &Path,
@@ -2944,12 +2950,14 @@ mod tests {
                 want_contains: vec!["?? CLAUDE.md"],
             },
             Case {
-                name: ".claude/ with only skills/wsp-manage/SKILL.md",
+                name: ".claude/ with only managed skills",
                 setup: Box::new(|ws| {
                     fs::write(ws.join(METADATA_FILE), "").unwrap();
-                    let skill_dir = ws.join(".claude/skills/wsp-manage");
-                    fs::create_dir_all(&skill_dir).unwrap();
-                    fs::write(skill_dir.join("SKILL.md"), "skill content").unwrap();
+                    for name in &["wsp-manage", "wsp-report"] {
+                        let skill_dir = ws.join(format!(".claude/skills/{}", name));
+                        fs::create_dir_all(&skill_dir).unwrap();
+                        fs::write(skill_dir.join("SKILL.md"), "skill content").unwrap();
+                    }
                 }),
                 repos: vec![],
                 want_clean: true,
@@ -2959,9 +2967,11 @@ mod tests {
                 name: ".claude/ with user files",
                 setup: Box::new(|ws| {
                     fs::write(ws.join(METADATA_FILE), "").unwrap();
-                    let skill_dir = ws.join(".claude/skills/wsp-manage");
-                    fs::create_dir_all(&skill_dir).unwrap();
-                    fs::write(skill_dir.join("SKILL.md"), "skill content").unwrap();
+                    for name in &["wsp-manage", "wsp-report"] {
+                        let skill_dir = ws.join(format!(".claude/skills/{}", name));
+                        fs::create_dir_all(&skill_dir).unwrap();
+                        fs::write(skill_dir.join("SKILL.md"), "skill content").unwrap();
+                    }
                     fs::write(ws.join(".claude/settings.json"), "{}").unwrap();
                 }),
                 repos: vec![],
