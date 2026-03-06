@@ -25,6 +25,7 @@ The `codegen` Cargo feature gates `wsp setup skill generate`, which introspects 
 - `src/giturl.rs` - URL parsing and shortname resolution
 - `src/mirror.rs` - Bare clone management
 - `src/workspace.rs` - Workspace CRUD and clone ops
+- `src/gc.rs` - Deferred deletion and recovery (gc pattern)
 - `src/group.rs` - Group management
 - `src/output.rs` - Table formatting and status display
 
@@ -33,6 +34,7 @@ The `codegen` Cargo feature gates `wsp setup skill generate`, which introspects 
 - Config: `~/.local/share/wsp/config.yaml`
 - Mirrors: `~/.local/share/wsp/mirrors/<host>/<user>/<repo>.git/`
 - Workspaces: `~/dev/workspaces/<name>/` with `.wsp.yaml` metadata
+- GC (deferred deletions): `~/dev/workspaces/.gc/<name>__<timestamp>/` with `.wsp-gc.yaml` inside
 
 ## CLI Command Structure
 
@@ -74,6 +76,19 @@ No manual `git fetch` or `git pull` needed — `wsp rm` fetches implicitly via t
 ### Edge case: squash merge with conflict resolution
 
 If a squash merge resolved conflicts by changing file contents, `is_content_merged` may return `false` because the branch's files don't match what's on `origin/main`. The workspace will be detected as `Unmerged` and blocked. Use `--force` to remove.
+
+### Deferred deletion (gc)
+
+`wsp rm` moves workspaces to `<workspaces_dir>/.gc/` by default instead of permanently deleting them. This follows git's reflog+gc pattern — users don't know about it until they need recovery:
+
+- `wsp rm` — silently moves to gc. Same UX as before.
+- `wsp rm --permanent` — true `fs::remove_dir_all`, bypasses gc.
+- `wsp recover` — lists recoverable workspaces, `wsp recover <name>` restores one.
+- `gc::maybe_run()` runs after every command (at most once per hour), purging entries older than `gc.retention-days` (default 7, config key `gc.retention-days`).
+
+The gc dir is co-located with workspaces (`<workspaces_dir>/.gc/`) to guarantee `fs::rename` works (same filesystem). GC metadata (`.wsp-gc.yaml`) is written inside the workspace dir before the rename, making the operation atomic.
+
+`workspace::remove(paths, name, force, permanent)` — the `permanent` parameter controls gc vs. immediate deletion. All existing tests pass `permanent: true` to avoid depending on gc internals.
 
 ## File Locking
 
@@ -118,6 +133,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 
 - **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code, but `src/group.rs` tests have a manual `Config { ... }` initializer. Search for `Config {` across the codebase when adding new fields. Also update `src/cli/cfg.rs` (`run_list`, `run_get`, `run_set`, `run_unset`) to handle the new config key.
 - **Adding fields to `Metadata`**: Test helpers in `src/lang/go.rs`, `src/lang/mod.rs`, and `src/workspace.rs` tests have manual `Metadata { ... }` initializers. Search for `Metadata {` across the codebase when adding new fields.
+- **Adding fields to `Paths`**: `Paths` has manual initializers in `config.rs` (`resolve`, `from_dirs`), `src/cli/status.rs` (`dummy_paths`), and `src/gc.rs` (`test_paths`). Search for `Paths {` across the codebase when adding new fields.
 - **Adding commands or output structs**: The `codegen` feature gates SKILL.md generation. When adding a new command, it appears in SKILL.md automatically via clap introspection. When adding a new output struct, add a `#[cfg(feature = "codegen")] sample()` method in `src/output.rs` and wire it in `src/cli/skill.rs`. Run `just skill` to regenerate. `just ci` will fail if SKILL.md is stale.
 - **Adding skills**: New skills in `skills/` need a corresponding `include_str!` constant in `src/agentmd.rs` and must be wired into `install_skill()` to be installed into workspaces. Also add them to the `SKILLS` array in `src/cli/skill.rs` (until `wsp setup skill` is removed in the CLI restructure).
 - **Test remote URLs**: `giturl::parse()` only handles SSH (`git@host:path`) and HTTPS URLs — not local filesystem paths. Tests that need identity validation from a remote URL must use `git@test.local:user/repo.git` style URLs, not the temp-dir paths used by `setup_test_env()` for upstream URLs.

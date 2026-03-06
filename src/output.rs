@@ -280,6 +280,11 @@ pub struct PathOutput {
 }
 
 #[derive(Serialize)]
+pub struct RecoverListOutput {
+    pub entries: Vec<crate::gc::GcEntry>,
+}
+
+#[derive(Serialize)]
 pub struct ErrorOutput {
     pub error: String,
 }
@@ -580,6 +585,21 @@ impl ImportOutput {
     }
 }
 
+#[cfg(feature = "codegen")]
+impl RecoverListOutput {
+    pub fn sample() -> Self {
+        use chrono::Utc;
+        Self {
+            entries: vec![crate::gc::GcEntry {
+                name: "my-feature".into(),
+                branch: "jganoff/my-feature".into(),
+                trashed_at: Utc::now(),
+                original_path: "~/dev/workspaces/my-feature".into(),
+            }],
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Output enum — returned by all command handlers
 // ---------------------------------------------------------------------------
@@ -600,6 +620,7 @@ pub enum Output {
     ConfigGet(ConfigGetOutput),
     Mutation(MutationOutput),
     Import(ImportOutput),
+    RecoverList(RecoverListOutput),
     Path(PathOutput),
     None,
 }
@@ -627,6 +648,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::ConfigGet(v) => print_json(&v),
             Output::Mutation(v) => print_json(&v),
             Output::Import(v) => print_json(&v),
+            Output::RecoverList(v) => print_json(&v),
             Output::Path(v) => print_json(&v),
         };
     }
@@ -647,6 +669,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::ConfigGet(v) => render_config_get_text(v),
         Output::Mutation(v) => render_mutation_text(v),
         Output::Import(v) => render_import_text(v),
+        Output::RecoverList(v) => render_recover_list_text(v),
         Output::Path(v) => render_path_text(v),
     }
 }
@@ -953,6 +976,35 @@ fn render_import_text(v: ImportOutput) -> Result<()> {
 
 fn render_path_text(v: PathOutput) -> Result<()> {
     println!("{}", v.path);
+    Ok(())
+}
+
+fn render_recover_list_text(v: RecoverListOutput) -> Result<()> {
+    if v.entries.is_empty() {
+        println!("No recoverable workspaces.");
+        return Ok(());
+    }
+    let mut table = Table::new(
+        Box::new(std::io::stdout()),
+        vec![
+            "Name".to_string(),
+            "Branch".to_string(),
+            "Removed".to_string(),
+        ],
+    );
+    for e in &v.entries {
+        let age = chrono::Utc::now() - e.trashed_at;
+        let age_str = if age.num_days() > 0 {
+            format!("{}d ago", age.num_days())
+        } else if age.num_hours() > 0 {
+            format!("{}h ago", age.num_hours())
+        } else {
+            format!("{}m ago", age.num_minutes())
+        };
+        table.add_row(vec![e.name.clone(), e.branch.clone(), age_str])?;
+    }
+    table.render()?;
+    println!("\nUse `wsp recover <name>` to restore.");
     Ok(())
 }
 

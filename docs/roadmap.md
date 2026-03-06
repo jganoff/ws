@@ -235,31 +235,28 @@ repos:
 - [ ] Delete journal on clean completion
 - [ ] `wsp doctor` reads stale journals and reports/retries
 
-### Soft-Delete (`wsp rm` → Trash)
+### Deferred Deletion (`wsp rm` + GC)
 
-**Complexity:** Small-Medium
+**Complexity:** Small-Medium — **Done**
 
-Default `wsp rm` to moving workspaces to trash instead of permanent deletion. Recoverable for a configurable period.
+`wsp rm` silently moves workspaces to a gc area instead of permanent deletion. Follows git's reflog+gc pattern: users don't think about it until they need recovery.
 
 ```
-$ wsp rm add-billing
-Workspace "add-billing" moved to trash (recoverable for 14 days)
-
-$ wsp trash ls
-add-billing   trashed 2026-03-04  expires 2026-03-18
-
-$ wsp trash restore add-billing
-
-$ wsp trash purge          # remove expired
-$ wsp trash purge --all    # remove everything
+$ wsp rm add-billing                   # feels like a delete, silently moves to gc
+$ wsp recover                          # list recoverable workspaces
+$ wsp recover add-billing              # restore a recently removed workspace
+$ wsp rm add-billing --permanent       # bypass gc, true delete
 ```
 
-- [ ] Trash directory: `~/.local/share/wsp/trash/`
-- [ ] `wsp rm` moves to trash by default
-- [ ] `wsp rm --permanent` for immediate deletion
-- [ ] `wsp trash ls`, `wsp trash restore <name>`, `wsp trash purge`
-- [ ] Config key `trash.retention-days` (default 14)
-- [ ] `wsp doctor` reports trash disk usage
+GC runs opportunistically during normal commands (at most once per hour), purging entries older than `gc.retention-days`.
+
+- [x] GC directory: `~/dev/workspaces/.gc/` (co-located with workspaces for same-filesystem rename)
+- [x] `wsp rm` moves to gc by default
+- [x] `wsp rm --permanent` for immediate deletion
+- [x] `wsp recover` to list/restore recently removed workspaces
+- [x] Opportunistic gc via `gc::maybe_run()` after every command
+- [x] Config key `gc.retention-days` (default 7, minimum 1)
+- [ ] `wsp doctor` reports gc disk usage
 
 ### PR Awareness
 

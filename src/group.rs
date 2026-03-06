@@ -83,6 +83,7 @@ mod tests {
             workspaces_dir: None,
             sync_strategy: None,
             agent_md: None,
+            gc_retention_days: None,
         }
     }
 

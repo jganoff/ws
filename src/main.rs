@@ -4,6 +4,7 @@ mod agentmd;
 mod cli;
 mod config;
 mod filelock;
+mod gc;
 mod git;
 mod giturl;
 mod group;
@@ -49,6 +50,11 @@ fn main() {
                 render_error(err, json);
                 process::exit(1);
             }
+            // Opportunistic gc — runs at most once per hour
+            let retention = config::Config::load_from(&paths.config_path)
+                .ok()
+                .and_then(|c| c.gc_retention_days);
+            gc::maybe_run(&paths, retention);
             if code != 0 {
                 process::exit(code);
             }

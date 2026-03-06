@@ -20,10 +20,17 @@ pub fn cmd() -> Command {
                 .action(clap::ArgAction::SetTrue)
                 .help("Remove even if repos have pending changes, unmerged branches, or workspace root has user content"),
         )
+        .arg(
+            Arg::new("permanent")
+                .long("permanent")
+                .action(clap::ArgAction::SetTrue)
+                .help("Permanently delete instead of deferring for gc"),
+        )
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let force = matches.get_flag("force");
+    let permanent = matches.get_flag("permanent");
 
     let name = if let Some(n) = matches.get_one::<String>("workspace") {
         n.clone()
@@ -36,7 +43,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     };
 
     eprintln!("Removing workspace {:?}...", name);
-    workspace::remove(paths, &name, force)?;
+    workspace::remove(paths, &name, force, permanent)?;
 
     Ok(Output::Mutation(MutationOutput {
         ok: true,

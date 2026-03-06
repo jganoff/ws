@@ -49,6 +49,8 @@ pub struct Config {
     pub sync_strategy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_md: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gc_retention_days: Option<u32>,
 }
 
 impl Config {
@@ -90,6 +92,7 @@ pub struct Paths {
     pub config_path: PathBuf,
     pub mirrors_dir: PathBuf,
     pub workspaces_dir: PathBuf,
+    pub gc_dir: PathBuf,
 }
 
 impl Paths {
@@ -106,6 +109,7 @@ impl Paths {
         Ok(Paths {
             config_path,
             mirrors_dir: data.join("mirrors"),
+            gc_dir: workspaces_dir.join(".gc"),
             workspaces_dir,
         })
     }
@@ -116,6 +120,7 @@ impl Paths {
         Paths {
             config_path: data_dir.join("config.yaml"),
             mirrors_dir: data_dir.join("mirrors"),
+            gc_dir: workspaces_dir.join(".gc"),
             workspaces_dir: workspaces_dir.to_path_buf(),
         }
     }

@@ -55,6 +55,10 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             key: "agent-md".into(),
             value: cfg.agent_md.unwrap_or(true).to_string(),
         },
+        ConfigListEntry {
+            key: "gc.retention-days".into(),
+            value: cfg.gc_retention_days.unwrap_or(7).to_string(),
+        },
     ];
 
     // language integrations: show effective value for all known integrations
@@ -94,6 +98,10 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         "agent-md" => Ok(Output::ConfigGet(ConfigGetOutput {
             key: key.clone(),
             value: Some(cfg.agent_md.unwrap_or(true).to_string()),
+        })),
+        "gc.retention-days" => Ok(Output::ConfigGet(ConfigGetOutput {
+            key: key.clone(),
+            value: Some(cfg.gc_retention_days.unwrap_or(7).to_string()),
         })),
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
@@ -160,6 +168,19 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             })?;
             format!("agent-md = {}", enabled)
         }
+        "gc.retention-days" => {
+            let days: u32 = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value must be a positive integer"))?;
+            if days < 1 {
+                bail!("gc.retention-days must be at least 1");
+            }
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.gc_retention_days = Some(days);
+                Ok(())
+            })?;
+            format!("gc.retention-days = {}", days)
+        }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
             let known = crate::lang::integration_names();
@@ -214,6 +235,13 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Ok(())
             })?;
             "agent-md unset (default: true)".into()
+        }
+        "gc.retention-days" => {
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.gc_retention_days = None;
+                Ok(())
+            })?;
+            "gc.retention-days unset (default: 7)".into()
         }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
