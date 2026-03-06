@@ -85,8 +85,15 @@ mod tests {
         let d = dir(&mirrors_dir, &parsed);
         assert!(d.exists());
 
-        let refspec = git::run(Some(&d), &["config", "--get", "remote.origin.fetch"]).unwrap();
-        assert_eq!(refspec, "+refs/heads/*:refs/remotes/origin/*");
+        let refspecs = git::run(Some(&d), &["config", "--get-all", "remote.origin.fetch"]).unwrap();
+        assert!(
+            refspecs.contains("+refs/heads/*:refs/heads/*"),
+            "missing heads refspec"
+        );
+        assert!(
+            refspecs.contains("+refs/heads/*:refs/remotes/origin/*"),
+            "missing remotes refspec"
+        );
     }
 
     #[test]
@@ -105,14 +112,21 @@ mod tests {
 
         // Remove refspec to simulate a pre-fix bare clone
         let d = dir(&mirrors_dir, &parsed);
-        git::run(Some(&d), &["config", "--unset", "remote.origin.fetch"]).unwrap();
+        git::run(Some(&d), &["config", "--unset-all", "remote.origin.fetch"]).unwrap();
         assert!(git::run(Some(&d), &["config", "--get", "remote.origin.fetch"]).is_err());
 
         // Fetch should auto-configure the missing refspec
         fetch(&mirrors_dir, &parsed).unwrap();
 
-        let refspec = git::run(Some(&d), &["config", "--get", "remote.origin.fetch"]).unwrap();
-        assert_eq!(refspec, "+refs/heads/*:refs/remotes/origin/*");
+        let refspecs = git::run(Some(&d), &["config", "--get-all", "remote.origin.fetch"]).unwrap();
+        assert!(
+            refspecs.contains("+refs/heads/*:refs/heads/*"),
+            "missing heads refspec"
+        );
+        assert!(
+            refspecs.contains("+refs/heads/*:refs/remotes/origin/*"),
+            "missing remotes refspec"
+        );
     }
 
     #[test]

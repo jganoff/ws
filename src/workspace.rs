@@ -3414,4 +3414,54 @@ mod tests {
             err
         );
     }
+
+    /// Regression: when the mirror's refs/heads/main was stale (behind
+    /// refs/remotes/origin/main), git clone --local checked out the old tree
+    /// and the subsequent checkout -b left a dirty index.
+    #[test]
+    fn test_create_clean_index_after_mirror_diverges() {
+        let (paths, _d, repo_dir, identity, upstream_urls) = setup_test_env();
+
+        // Push new commits to the upstream AFTER the mirror was created,
+        // then fetch the mirror so refs/remotes/origin/main advances but
+        // (pre-fix) refs/heads/main would stay stale.
+        let cmds: Vec<Vec<&str>> = vec![
+            vec!["git", "commit", "--allow-empty", "-m", "second"],
+            vec!["git", "commit", "--allow-empty", "-m", "third"],
+        ];
+        for args in &cmds {
+            let out = Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(repo_dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        let parsed = giturl::Parsed {
+            host: "test.local".into(),
+            owner: "user".into(),
+            repo: "test-repo".into(),
+        };
+        mirror::fetch(&paths.mirrors_dir, &parsed).unwrap();
+
+        // Create workspace — this used to leave staged diffs
+        let refs = BTreeMap::from([(identity, String::new())]);
+        create(&paths, "clean-idx", &refs, None, &upstream_urls).unwrap();
+
+        let clone_dir = dir(&paths.workspaces_dir, "clean-idx").join("test-repo");
+
+        // Index must match HEAD (no staged changes)
+        let diff = git::run(Some(&clone_dir), &["diff", "--cached", "--stat"]).unwrap();
+        assert!(
+            diff.is_empty(),
+            "expected clean index, got staged changes:\n{}",
+            diff
+        );
+    }
 }

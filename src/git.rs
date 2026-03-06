@@ -57,10 +57,23 @@ pub fn clone_bare(url: &str, dest: &Path) -> Result<()> {
 }
 
 pub fn configure_fetch_refspec(dir: &Path) -> Result<()> {
+    // Clear any existing refspecs first (ignore error if none exist)
+    let _ = run(Some(dir), &["config", "--unset-all", "remote.origin.fetch"]);
+    // Keep refs/heads/* in sync so git clone --local gets a current checkout
     run(
         Some(dir),
         &[
             "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/heads/*",
+        ],
+    )?;
+    // Also map upstream branches into refs/remotes/origin/* for workspace clones
+    run(
+        Some(dir),
+        &[
+            "config",
+            "--add",
             "remote.origin.fetch",
             "+refs/heads/*:refs/remotes/origin/*",
         ],
@@ -69,8 +82,11 @@ pub fn configure_fetch_refspec(dir: &Path) -> Result<()> {
 }
 
 fn ensure_fetch_refspec(dir: &Path) -> Result<()> {
-    let has_refspec = run(Some(dir), &["config", "--get", "remote.origin.fetch"]).is_ok();
-    if !has_refspec {
+    let refspecs =
+        run(Some(dir), &["config", "--get-all", "remote.origin.fetch"]).unwrap_or_default();
+    // Reconfigure if missing entirely or missing the refs/heads→refs/heads mapping
+    // (old mirrors only had +refs/heads/*:refs/remotes/origin/*)
+    if !refspecs.contains("+refs/heads/*:refs/heads/*") {
         configure_fetch_refspec(dir)?;
     }
     Ok(())
@@ -670,12 +686,17 @@ mod tests {
         // Fetch everything into bare — creates refs/remotes/origin/* for all branches
         fetch(&bare, true).unwrap();
 
-        // Create local branches (refs/heads/*) mirroring the remote tracking refs.
+        // Ensure local branches (refs/heads/*) mirror the remote tracking refs.
         // This simulates what workspace clones do: the workspace branch is a
         // local branch that may or may not have a corresponding origin/<branch>.
+        // Use update-ref since the fetch refspec may have already created them.
         for name in &["merged-br", "squash-br", "pushed-br"] {
             let sha = run(Some(&bare), &["rev-parse", &format!("origin/{}", name)]).unwrap();
-            run(Some(&bare), &["branch", name, &sha]).unwrap();
+            run(
+                Some(&bare),
+                &["update-ref", &format!("refs/heads/{}", name), &sha],
+            )
+            .unwrap();
         }
 
         // 4. Unmerged local-only branch (no remote ref)
