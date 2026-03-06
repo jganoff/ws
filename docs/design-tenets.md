@@ -10,6 +10,12 @@ Principles that guide wsp's design. When tenets conflict, higher-ranked tenets w
 4. **Mirrors are invisible infrastructure.** Users never manage mirrors. wsp creates, fetches, and garbage-collects them automatically as a side effect of normal operations.
 5. **Clones are the developer's space.** wsp owns the mirror and `.wsp.yaml`. Inside a clone, the developer has full autonomy.
 
+## Safety
+
+1. **Prevent data loss by default.** Destructive operations use deferred cleanup (like git's reflog + gc pattern) so mistakes are recoverable. Permanent deletion is opt-in, not the default.
+2. **Surface hidden state.** If the user's checkout doesn't match what wsp expects (wrong branch, detached HEAD), say so loudly. Silent "clean" status that hides at-risk work is a bug.
+3. **Fail closed on ambiguity.** When safety checks can't determine if work is saved (fetch fails, branch detection is ambiguous), block the operation rather than guess.
+
 ## Agent Use
 
 1. **Self-discoverable.** An agent dropped into a workspace can discover and operate wsp without human guidance.

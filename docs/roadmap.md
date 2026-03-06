@@ -468,9 +468,13 @@ Allow users to declare per-repo commands (`wsp repo configure api-server --test 
 
 ## Design Principles
 
+See [`docs/design-tenets.md`](design-tenets.md) for the authoritative list. Summary:
+
 - Every command is **workspace-aware** (active vs. context repos, workspace vs. upstream branches)
 - Daily ops are **top-level short commands** (`sync`, `log`)
 - **Always support `--json`** for scripting and AI agents
 - **Parallel by default** for reads, serial for writes
+- **Prevent data loss by default** -- destructive operations use deferred cleanup; permanent deletion is opt-in
+- **Surface hidden state** -- wrong-branch, detached HEAD, and other mismatches are surfaced, not hidden
 - **Workspace as context** -- the workspace metadata (`.wsp.yaml`, AGENTS.md, generated workspace files) is a coordination primitive consumed by AI agents, IDEs, and build tools
 - No new external dependencies unless justified (`gh` for import/PR awareness is the exception)
