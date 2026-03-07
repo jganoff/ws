@@ -170,15 +170,6 @@ pub fn detect(start_dir: &Path) -> Result<PathBuf> {
 
 /// Update `last_used` timestamp in workspace metadata.
 /// Best-effort: errors are logged to stderr but not propagated.
-pub fn touch_last_used(ws_dir: &Path) {
-    if let Err(e) = crate::filelock::with_metadata(ws_dir, |meta| {
-        meta.last_used = Some(chrono::Utc::now());
-        Ok(())
-    }) {
-        eprintln!("warning: failed to update last_used: {}", e);
-    }
-}
-
 pub fn create(
     paths: &Paths,
     name: &str,

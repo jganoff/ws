@@ -30,8 +30,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         workspace::propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, false);
     }
 
-    workspace::touch_last_used(&ws_dir);
-
     if std::env::var("WSP_SHELL").is_err() {
         eprintln!(
             "hint: shell integration not active, printing path only\n\

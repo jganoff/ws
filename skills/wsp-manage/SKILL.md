@@ -99,7 +99,6 @@ wsp config unset <key>                          # Unset a config value
   "workspace_dir": "/home/user/dev/workspaces/my-feature",
   "description": "migrating billing to stripe v3",
   "created": "2026-01-15T10:00:00Z",
-  "last_used": "2026-03-05T14:30:00Z",
   "repos": [
     {
       "name": "api-gateway",

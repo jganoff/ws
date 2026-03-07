@@ -39,7 +39,7 @@ pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             path: ws_dir.display().to_string(),
             description: meta.description,
             created: meta.created.to_rfc3339(),
-            last_used: meta.last_used.map(|t| t.to_rfc3339()),
+            last_used: None,
         });
     }
 
