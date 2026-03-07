@@ -48,7 +48,8 @@ fn new_cmd() -> Command {
         .arg(
             Arg::new("from")
                 .long("from")
-                .help("Create from a workspace name or template file path"),
+                .help("Create from a workspace name or template file path")
+                .add(ArgValueCandidates::new(completers::complete_workspaces)),
         )
         .group(
             clap::ArgGroup::new("source")
