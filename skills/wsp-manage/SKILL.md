@@ -33,14 +33,14 @@ wsp group update <name> [--add <add>]... [--remove <remove>]... # Add or remove 
 ### Workspaces
 
 ```bash
-wsp new <workspace> [<repos>]... [-g <group>] [--no-fetch] # Create a new workspace
+wsp new <workspace> [<repos>]... [-g <group>] [--no-fetch] [-d <description>] # Create a new workspace
 wsp ls                                          # List active workspaces [read-only] (alias: list)
 wsp st [<workspace>] [-v]                       # Git status across workspace repos [read-only] (alias: status)
 wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
 wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo [read-only]
-wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] # Fetch and rebase/merge all workspace repos
+wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] [--abort] # Fetch and rebase/merge all workspace repos
 wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
-wsp cd <workspace>                              # Change directory into a workspace [read-only]
+wsp cd <workspace>                              # Change directory into a workspace
 wsp rm [<workspace>] [-f] [--permanent]         # Remove a workspace (alias: remove)
 wsp recover [<workspace>]                       # List or restore recently removed workspaces [read-only without args]
 wsp rename <old> <new>                          # Rename a workspace, its directory, and git branches
@@ -82,7 +82,10 @@ wsp config unset <key>                          # Unset a config value
       "name": "my-feature",
       "branch": "my-feature",
       "repo_count": 2,
-      "path": "~/dev/workspaces/my-feature"
+      "path": "~/dev/workspaces/my-feature",
+      "description": "migrating billing to stripe v3",
+      "created": "2026-03-01T10:00:00+00:00",
+      "last_used": "2026-03-06T15:30:00+00:00"
     }
   ]
 }
@@ -93,13 +96,17 @@ wsp config unset <key>                          # Unset a config value
 {
   "workspace": "my-feature",
   "branch": "my-feature",
+  "workspace_dir": "/home/user/dev/workspaces/my-feature",
+  "description": "migrating billing to stripe v3",
   "repos": [
     {
       "name": "api-gateway",
       "branch": "my-feature",
       "ahead": 2,
+      "behind": 0,
       "changed": 1,
       "has_upstream": true,
+      "role": "active",
       "status": "2 ahead, 1 modified"
     }
   ]
@@ -148,6 +155,25 @@ wsp config unset <key>                          # Unset a config value
       "action": "rebase onto origin/main",
       "ok": true,
       "detail": "2 commit(s) rebased"
+    }
+  ]
+}
+```
+
+### `wsp sync --abort --json`
+```json
+{
+  "workspace": "my-feature",
+  "repos": [
+    {
+      "name": "api-gateway",
+      "action": "skip",
+      "ok": true
+    },
+    {
+      "name": "user-service",
+      "action": "rebase aborted",
+      "ok": true
     }
   ]
 }
@@ -280,7 +306,7 @@ wsp config unset <key>                          # Unset a config value
     {
       "name": "my-feature",
       "branch": "jganoff/my-feature",
-      "trashed_at": "2026-03-06T23:11:25.949301Z",
+      "trashed_at": "2026-03-07T04:46:13.159904Z",
       "original_path": "~/dev/workspaces/my-feature"
     }
   ]
