@@ -75,6 +75,13 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         bail!("no repos specified (use repo args or --group)");
     }
 
+    // Validate early before expensive I/O
+    workspace::validate_name(ws_name)?;
+    let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
+    if ws_dir.exists() {
+        bail!("workspace {:?} already exists", ws_name);
+    }
+
     // Build upstream URL map from config
     let mut upstream_urls: BTreeMap<String, String> = BTreeMap::new();
     for identity in repo_refs.keys() {
