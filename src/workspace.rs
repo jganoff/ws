@@ -859,8 +859,8 @@ pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<V
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        // Skip .wsp.yaml
-        if name_str == METADATA_FILE {
+        // Skip .wsp.yaml and its lock file
+        if name_str == METADATA_FILE || name_str == ".wsp.yaml.lock" {
             continue;
         }
 
@@ -3191,6 +3191,16 @@ mod tests {
                 repos: vec![],
                 want_clean: false,
                 want_contains: vec!["?? go.work.sum"],
+            },
+            Case {
+                name: "lock file ignored",
+                setup: Box::new(|ws| {
+                    fs::write(ws.join(METADATA_FILE), "").unwrap();
+                    fs::write(ws.join(".wsp.yaml.lock"), "12345").unwrap();
+                }),
+                repos: vec![],
+                want_clean: true,
+                want_contains: vec![],
             },
             Case {
                 name: "noise files (.DS_Store) ignored",
