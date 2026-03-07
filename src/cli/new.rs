@@ -92,9 +92,18 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         created_from = Some(source.clone());
     }
 
-    // Add repos from group (active, no ref)
+    // Add repos from group — migrate to template on-the-fly
     if let Some(gn) = group_name {
         let group_repos = group::get(&cfg, gn)?;
+
+        // Migrate group to a template file if one doesn't exist yet
+        if let Err(e) = template::migrate_group(&paths.templates_dir, &cfg, gn, &group_repos) {
+            eprintln!(
+                "warning: could not migrate group {:?} to template: {}",
+                gn, e
+            );
+        }
+
         for id in group_repos {
             repo_refs.insert(id, String::new());
         }

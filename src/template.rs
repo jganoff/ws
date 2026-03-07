@@ -261,6 +261,59 @@ pub fn auto_register(tmpl: &Template, cfg: &mut config::Config, paths: &Paths) -
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Group migration
+// ---------------------------------------------------------------------------
+
+/// Migrate a single group to a template file. Looks up repo URLs from config.
+/// Skips if a template with the same name already exists.
+/// Returns true if a new template was created.
+pub fn migrate_group(
+    templates_dir: &Path,
+    cfg: &config::Config,
+    group_name: &str,
+    repo_identities: &[String],
+) -> Result<bool> {
+    if exists(templates_dir, group_name) {
+        return Ok(false);
+    }
+
+    let mut repos = Vec::new();
+    for identity in repo_identities {
+        let url = cfg
+            .upstream_url(identity)
+            .ok_or_else(|| anyhow::anyhow!("repo {:?} not in registry", identity))?;
+        repos.push(TemplateRepo {
+            url: url.to_string(),
+        });
+    }
+
+    if repos.is_empty() {
+        return Ok(false);
+    }
+
+    save(templates_dir, group_name, &Template { repos })?;
+    Ok(true)
+}
+
+/// Migrate all groups from config to template files. Returns the count of migrated groups.
+pub fn migrate_all_groups(templates_dir: &Path, cfg: &config::Config) -> Result<usize> {
+    let mut count = 0;
+    for (name, entry) in &cfg.groups {
+        match migrate_group(templates_dir, cfg, name, &entry.repos) {
+            Ok(true) => {
+                eprintln!("  migrated group {:?} to template", name);
+                count += 1;
+            }
+            Ok(false) => {} // already exists, skip silently
+            Err(e) => {
+                eprintln!("  warning: failed to migrate group {:?}: {}", name, e);
+            }
+        }
+    }
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +560,81 @@ mod tests {
         let parsed: Template = serde_yaml_ng::from_str(&yaml).unwrap();
         assert_eq!(parsed.repos.len(), t.repos.len());
         assert_eq!(parsed.repos[0].url, t.repos[0].url);
+    }
+
+    fn sample_config() -> config::Config {
+        use chrono::Utc;
+        use std::collections::BTreeMap;
+        let mut cfg = config::Config::default();
+        cfg.repos.insert(
+            "github.com/acme/api-gateway".into(),
+            RepoEntry {
+                url: "git@github.com:acme/api-gateway.git".into(),
+                added: Utc::now(),
+            },
+        );
+        cfg.repos.insert(
+            "github.com/acme/user-service".into(),
+            RepoEntry {
+                url: "git@github.com:acme/user-service.git".into(),
+                added: Utc::now(),
+            },
+        );
+        cfg.groups.insert(
+            "backend".into(),
+            config::GroupEntry {
+                repos: vec![
+                    "github.com/acme/api-gateway".into(),
+                    "github.com/acme/user-service".into(),
+                ],
+            },
+        );
+        cfg.groups.insert(
+            "frontend".into(),
+            config::GroupEntry {
+                repos: vec!["github.com/acme/api-gateway".into()],
+            },
+        );
+        cfg
+    }
+
+    #[test]
+    fn migrate_group_creates_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+        let cfg = sample_config();
+
+        let created = migrate_group(&dir, &cfg, "backend", &cfg.groups["backend"].repos).unwrap();
+        assert!(created);
+
+        let t = load(&dir, "backend").unwrap();
+        assert_eq!(t.repos.len(), 2);
+        assert_eq!(t.repos[0].url, "git@github.com:acme/api-gateway.git");
+    }
+
+    #[test]
+    fn migrate_group_skips_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+        let cfg = sample_config();
+
+        // Pre-create a template with the same name
+        save(&dir, "backend", &sample_template()).unwrap();
+
+        let created = migrate_group(&dir, &cfg, "backend", &cfg.groups["backend"].repos).unwrap();
+        assert!(!created);
+    }
+
+    #[test]
+    fn migrate_all_groups_creates_templates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+        let cfg = sample_config();
+
+        let count = migrate_all_groups(&dir, &cfg).unwrap();
+        assert_eq!(count, 2);
+
+        assert!(exists(&dir, "backend"));
+        assert!(exists(&dir, "frontend"));
     }
 }

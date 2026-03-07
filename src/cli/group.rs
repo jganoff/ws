@@ -7,12 +7,13 @@ use crate::filelock;
 use crate::giturl;
 use crate::group as grp;
 use crate::output::{GroupListEntry, GroupListOutput, GroupShowOutput, MutationOutput, Output};
+use crate::template;
 
 use super::completers;
 
 pub fn cmd() -> Command {
     Command::new("group")
-        .about("Manage repo groups")
+        .about("Manage repo groups (deprecated, use `wsp template`)")
         .subcommand_required(true)
         .subcommand(new_cmd())
         .subcommand(list_cmd())
@@ -22,6 +23,15 @@ pub fn cmd() -> Command {
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    eprintln!("warning: `wsp group` is deprecated, use `wsp template` instead");
+
+    // Auto-migrate all groups to templates on any group command
+    if let Ok(cfg) = config::Config::load_from(&paths.config_path)
+        && !cfg.groups.is_empty()
+    {
+        let _ = template::migrate_all_groups(&paths.templates_dir, &cfg);
+    }
+
     match matches.subcommand() {
         Some(("new", m)) => run_new(m, paths),
         Some(("ls", m)) => run_list(m, paths),
@@ -98,6 +108,7 @@ pub fn update_cmd() -> Command {
 }
 
 pub fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    eprintln!("hint: use `wsp template new` instead of `wsp group new`");
     let name = matches.get_one::<String>("name").unwrap().clone();
     let repo_names: Vec<String> = matches
         .get_many::<String>("repos")
@@ -105,22 +116,27 @@ pub fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .cloned()
         .collect();
 
-    let mut resolved_count = 0;
+    let mut resolved = Vec::new();
     filelock::with_config(&paths.config_path, |cfg| {
         let identities: Vec<String> = cfg.repos.keys().cloned().collect();
-        let mut resolved = Vec::new();
         for rn in &repo_names {
             let id = giturl::resolve(rn, &identities)?;
             resolved.push(id);
         }
-        resolved_count = resolved.len();
-        grp::create(cfg, &name, resolved)?;
+        grp::create(cfg, &name, resolved.clone())?;
         Ok(())
     })?;
 
+    // Also create corresponding template
+    let cfg = config::Config::load_from(&paths.config_path)?;
+    if let Err(e) = template::migrate_group(&paths.templates_dir, &cfg, &name, &resolved) {
+        eprintln!("warning: could not create template for group: {}", e);
+    }
+
     Ok(Output::Mutation(MutationOutput::new(format!(
         "Created group {:?} with {} repos",
-        name, resolved_count
+        name,
+        resolved.len()
     ))))
 }
 
