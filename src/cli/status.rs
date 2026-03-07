@@ -23,6 +23,7 @@ mod tests {
             config_path: PathBuf::from("/nonexistent/config.yaml"),
             mirrors_dir: PathBuf::from("/nonexistent/mirrors"),
             gc_dir: PathBuf::from("/nonexistent/gc"),
+            templates_dir: PathBuf::from("/nonexistent/templates"),
             workspaces_dir: PathBuf::from("/nonexistent/workspaces"),
         }
     }

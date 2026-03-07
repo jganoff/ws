@@ -5,6 +5,7 @@ use clap_complete::engine::CompletionCandidate;
 use crate::config::{Config, Paths};
 use crate::giturl;
 use crate::group;
+use crate::template;
 use crate::workspace;
 
 pub fn complete_groups() -> Vec<CompletionCandidate> {
@@ -18,6 +19,16 @@ pub fn complete_groups() -> Vec<CompletionCandidate> {
         .into_iter()
         .map(CompletionCandidate::new)
         .collect()
+}
+
+pub fn complete_templates() -> Vec<CompletionCandidate> {
+    let Ok(paths) = Paths::resolve() else {
+        return Vec::new();
+    };
+    let Ok(names) = template::list(&paths.templates_dir) else {
+        return Vec::new();
+    };
+    names.into_iter().map(CompletionCandidate::new).collect()
 }
 
 pub fn complete_repos() -> Vec<CompletionCandidate> {

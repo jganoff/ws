@@ -21,6 +21,7 @@ pub mod repo_list;
 pub mod skill;
 pub mod status;
 pub mod sync;
+pub mod template;
 
 use clap::{Arg, ArgMatches, Command};
 
@@ -38,7 +39,10 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
         ],
     ),
     ("Workflow", &["st", "diff", "log", "sync", "exec"]),
-    ("Admin", &["registry", "group", "config", "completion"]),
+    (
+        "Admin",
+        &["registry", "group", "template", "config", "completion"],
+    ),
 ];
 
 pub fn build_cli() -> Command {
@@ -97,6 +101,7 @@ pub fn build_cli() -> Command {
         // Admin commands (promoted from `wsp setup`)
         .subcommand(registry::cmd())
         .subcommand(group::cmd())
+        .subcommand(template::cmd())
         .subcommand(cfg::cmd())
         .subcommand(completion::cmd())
         // Hidden backward-compat
@@ -176,6 +181,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         // --- Admin commands (promoted from setup) ---
         Some(("registry", sub)) => registry::dispatch(sub, paths),
         Some(("group", sub)) => group::dispatch(sub, paths),
+        Some(("template", sub)) => template::dispatch(sub, paths),
         Some(("config", sub)) => cfg::dispatch(sub, paths),
         Some(("completion", m)) => completion::run(m, paths),
 

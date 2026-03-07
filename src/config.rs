@@ -93,6 +93,7 @@ pub struct Paths {
     pub mirrors_dir: PathBuf,
     pub workspaces_dir: PathBuf,
     pub gc_dir: PathBuf,
+    pub templates_dir: PathBuf,
 }
 
 impl Paths {
@@ -110,6 +111,7 @@ impl Paths {
             config_path,
             mirrors_dir: data.join("mirrors"),
             gc_dir: data.join("gc"),
+            templates_dir: data.join("templates"),
             workspaces_dir,
         })
     }
@@ -121,6 +123,7 @@ impl Paths {
             config_path: data_dir.join("config.yaml"),
             mirrors_dir: data_dir.join("mirrors"),
             gc_dir: data_dir.join("gc"),
+            templates_dir: data_dir.join("templates"),
             workspaces_dir: workspaces_dir.to_path_buf(),
         }
     }

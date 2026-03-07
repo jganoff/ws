@@ -11,6 +11,7 @@ mod group;
 mod lang;
 mod mirror;
 mod output;
+mod template;
 mod workspace;
 
 #[cfg(test)]

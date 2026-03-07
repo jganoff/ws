@@ -3,15 +3,18 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use anyhow::{Result, bail};
+use chrono::Utc;
 use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
-use crate::config::{self, Paths};
+use crate::config::{self, Paths, RepoEntry};
+use crate::filelock;
 use crate::git;
 use crate::giturl;
 use crate::group;
 use crate::mirror;
 use crate::output::{MutationOutput, Output};
+use crate::template;
 use crate::workspace;
 
 use super::completers;
@@ -26,10 +29,17 @@ pub fn cmd() -> Command {
                 .add(ArgValueCandidates::new(completers::complete_repos)),
         )
         .arg(
+            Arg::new("template")
+                .short('t')
+                .long("template")
+                .help("Create workspace from a template")
+                .add(ArgValueCandidates::new(completers::complete_templates)),
+        )
+        .arg(
             Arg::new("group")
                 .short('g')
                 .long("group")
-                .help("Add repos from a group")
+                .help("Add repos from a group (deprecated, use --template)")
                 .add(ArgValueCandidates::new(completers::complete_groups)),
         )
         .arg(
@@ -52,16 +62,34 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .get_many::<String>("repos")
         .map(|v| v.collect())
         .unwrap_or_default();
+    let template_name = matches.get_one::<String>("template");
     let group_name = matches.get_one::<String>("group");
     let no_fetch = matches.get_flag("no-fetch");
     let description = matches.get_one::<String>("description");
 
-    let cfg = config::Config::load_from(&paths.config_path)
+    if group_name.is_some() {
+        eprintln!("warning: --group is deprecated, use --template instead");
+    }
+
+    let mut cfg = config::Config::load_from(&paths.config_path)
         .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
 
-    let identities: Vec<String> = cfg.repos.keys().cloned().collect();
-
     let mut repo_refs: BTreeMap<String, String> = BTreeMap::new();
+    let mut created_from: Option<String> = None;
+
+    // Add repos from template
+    if let Some(tn) = template_name {
+        let tmpl = template::load(&paths.templates_dir, tn)?;
+
+        // Auto-register unknown repos from template
+        auto_register_template_repos(&tmpl, &mut cfg, paths)?;
+
+        let identities = tmpl.identities()?;
+        for id in identities {
+            repo_refs.insert(id, String::new());
+        }
+        created_from = Some(tn.clone());
+    }
 
     // Add repos from group (active, no ref)
     if let Some(gn) = group_name {
@@ -72,6 +100,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     // Add individual repos
+    let identities: Vec<String> = cfg.repos.keys().cloned().collect();
     for rn in &repo_args {
         let name = giturl::parse_repo_ref(rn);
         let id = giturl::resolve(name, &identities)?;
@@ -79,7 +108,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     if repo_refs.is_empty() {
-        bail!("no repos specified (use repo args or --group)");
+        bail!("no repos specified (use repo args, --template, or --group)");
     }
 
     // Validate early before expensive I/O
@@ -154,6 +183,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         branch_prefix,
         &upstream_urls,
         description.map(|s| s.as_str()),
+        created_from.as_deref(),
     )?;
 
     let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
@@ -175,4 +205,68 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         MutationOutput::new(format!("Workspace created: {}", ws_dir.display()))
             .with_duration(duration_ms),
     ))
+}
+
+/// Auto-register any repos from a template that aren't already in the registry.
+/// Clones mirrors and adds entries to config.
+fn auto_register_template_repos(
+    tmpl: &template::Template,
+    cfg: &mut config::Config,
+    paths: &Paths,
+) -> Result<()> {
+    let mut to_register = Vec::new();
+
+    for repo in &tmpl.repos {
+        let parsed = giturl::parse(&repo.url)?;
+        let identity = parsed.identity();
+        if !cfg.repos.contains_key(&identity) {
+            to_register.push((identity, parsed, repo.url.clone()));
+        }
+    }
+
+    if to_register.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "Auto-registering {} repos from template...",
+        to_register.len()
+    );
+
+    for (identity, parsed, url) in &to_register {
+        if !mirror::exists(&paths.mirrors_dir, parsed) {
+            eprintln!("  cloning {}...", url);
+            mirror::clone(&paths.mirrors_dir, parsed, url)
+                .map_err(|e| anyhow::anyhow!("cloning {}: {}", identity, e))?;
+        }
+    }
+
+    // Register under lock
+    filelock::with_config(&paths.config_path, |locked_cfg| {
+        for (identity, _, url) in &to_register {
+            if !locked_cfg.repos.contains_key(identity) {
+                locked_cfg.repos.insert(
+                    identity.clone(),
+                    RepoEntry {
+                        url: url.clone(),
+                        added: Utc::now(),
+                    },
+                );
+            }
+        }
+        Ok(())
+    })?;
+
+    // Update the in-memory config to reflect the new repos
+    for (identity, _, url) in to_register {
+        cfg.repos.insert(
+            identity,
+            RepoEntry {
+                url,
+                added: Utc::now(),
+            },
+        );
+    }
+
+    Ok(())
 }

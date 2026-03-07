@@ -25,7 +25,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
         ConfigGetOutput, ConfigListOutput, DiffOutput, ErrorOutput, ExecOutput, FetchOutput,
         GroupListOutput, GroupShowOutput, ImportOutput, LogOutput, MutationOutput,
         RecoverListOutput, RepoListOutput, StatusOutput, SyncAbortOutput, SyncOutput,
-        WorkspaceListOutput, WorkspaceRepoListOutput,
+        TemplateListOutput, TemplateShowOutput, WorkspaceListOutput, WorkspaceRepoListOutput,
     };
 
     let cli = super::build_cli();
@@ -45,6 +45,11 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     // Groups — top-level
     out.push_str("### Groups (named sets of repos)\n\n```bash\n");
     write_subcommand_section(&cli, &mut out, "group", &["wsp", "group"]);
+    out.push_str("```\n\n");
+
+    // Templates — top-level
+    out.push_str("### Templates (shareable workspace definitions)\n\n```bash\n");
+    write_subcommand_section(&cli, &mut out, "template", &["wsp", "template"]);
     out.push_str("```\n\n");
 
     // Workspaces — top-level workspace commands + `repo` subcommands
@@ -85,6 +90,8 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     write_schema::<FetchOutput>(&mut out, "wsp repo fetch --json");
     write_schema::<GroupListOutput>(&mut out, "wsp group ls --json");
     write_schema::<GroupShowOutput>(&mut out, "wsp group show <name> --json");
+    write_schema::<TemplateListOutput>(&mut out, "wsp template ls --json");
+    write_schema::<TemplateShowOutput>(&mut out, "wsp template show <name> --json");
     write_schema::<ConfigListOutput>(&mut out, "wsp config ls --json");
     write_schema::<ConfigGetOutput>(&mut out, "wsp config get <key> --json");
     write_schema::<MutationOutput>(
@@ -121,6 +128,8 @@ impl_sample!(
     crate::output::RepoListOutput,
     crate::output::GroupListOutput,
     crate::output::GroupShowOutput,
+    crate::output::TemplateListOutput,
+    crate::output::TemplateShowOutput,
     crate::output::WorkspaceListOutput,
     crate::output::StatusOutput,
     crate::output::DiffOutput,

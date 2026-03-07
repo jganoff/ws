@@ -241,6 +241,7 @@ mod tests {
             created: Utc::now(),
             description: None,
             last_used: None,
+            created_from: None,
             dirs: BTreeMap::new(),
         };
         save_metadata(ws_dir, &meta).unwrap();

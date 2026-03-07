@@ -249,6 +249,7 @@ mod tests {
             config_path: tmp.join("config.yaml"),
             mirrors_dir: tmp.join("mirrors"),
             gc_dir: tmp.join("gc"),
+            templates_dir: tmp.join("templates"),
             workspaces_dir: tmp.join("workspaces"),
         }
     }
@@ -264,6 +265,7 @@ mod tests {
             created: Utc::now(),
             description: None,
             last_used: None,
+            created_from: None,
             dirs: std::collections::BTreeMap::new(),
         };
         let yaml = serde_yaml_ng::to_string(&meta).unwrap();

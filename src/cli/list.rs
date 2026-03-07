@@ -28,6 +28,7 @@ pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     description: None,
                     created: String::new(),
                     last_used: None,
+                    created_from: None,
                 });
                 continue;
             }
@@ -40,6 +41,7 @@ pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             description: meta.description,
             created: meta.created.to_rfc3339(),
             last_used: None,
+            created_from: meta.created_from,
         });
     }
 

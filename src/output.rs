@@ -130,6 +130,29 @@ pub struct GroupShowOutput {
 }
 
 #[derive(Serialize)]
+pub struct TemplateListOutput {
+    pub templates: Vec<TemplateListEntry>,
+}
+
+#[derive(Serialize)]
+pub struct TemplateListEntry {
+    pub name: String,
+    pub repo_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct TemplateShowOutput {
+    pub name: String,
+    pub repos: Vec<TemplateShowRepo>,
+}
+
+#[derive(Serialize)]
+pub struct TemplateShowRepo {
+    pub url: String,
+    pub identity: String,
+}
+
+#[derive(Serialize)]
 pub struct WorkspaceListOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
@@ -147,6 +170,8 @@ pub struct WorkspaceListEntry {
     pub created: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_from: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -422,6 +447,37 @@ impl GroupShowOutput {
 }
 
 #[cfg(feature = "codegen")]
+impl TemplateListOutput {
+    pub fn sample() -> Self {
+        Self {
+            templates: vec![TemplateListEntry {
+                name: "backend".into(),
+                repo_count: 3,
+            }],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl TemplateShowOutput {
+    pub fn sample() -> Self {
+        Self {
+            name: "backend".into(),
+            repos: vec![
+                TemplateShowRepo {
+                    url: "git@github.com:acme/api-gateway.git".into(),
+                    identity: "github.com/acme/api-gateway".into(),
+                },
+                TemplateShowRepo {
+                    url: "git@github.com:acme/user-service.git".into(),
+                    identity: "github.com/acme/user-service".into(),
+                },
+            ],
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
 impl WorkspaceListOutput {
     pub fn sample() -> Self {
         Self {
@@ -434,6 +490,7 @@ impl WorkspaceListOutput {
                 description: Some("migrating billing to stripe v3".into()),
                 created: "2026-03-01T10:00:00+00:00".into(),
                 last_used: Some("2026-03-06T15:30:00+00:00".into()),
+                created_from: Some("backend".into()),
             }],
         }
     }
@@ -686,6 +743,8 @@ pub enum Output {
     RepoList(RepoListOutput),
     GroupList(GroupListOutput),
     GroupShow(GroupShowOutput),
+    TemplateList(TemplateListOutput),
+    TemplateShow(TemplateShowOutput),
     WorkspaceList(WorkspaceListOutput),
     WorkspaceRepoList(WorkspaceRepoListOutput),
     Status(StatusOutput),
@@ -715,6 +774,8 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::RepoList(v) => print_json(&v),
             Output::GroupList(v) => print_json(&v),
             Output::GroupShow(v) => print_json(&v),
+            Output::TemplateList(v) => print_json(&v),
+            Output::TemplateShow(v) => print_json(&v),
             Output::WorkspaceList(v) => print_json(&v),
             Output::WorkspaceRepoList(v) => print_json(&v),
             Output::Status(v) => print_json(&v),
@@ -737,6 +798,8 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::RepoList(v) => render_repo_list_table(v),
         Output::GroupList(v) => render_group_list_table(v),
         Output::GroupShow(v) => render_group_show_text(v),
+        Output::TemplateList(v) => render_template_list_table(v),
+        Output::TemplateShow(v) => render_template_show_text(v),
         Output::WorkspaceList(v) => render_workspace_list_table(v),
         Output::WorkspaceRepoList(v) => render_workspace_repo_list_table(v),
         Output::Status(v) => render_status_table(v),
@@ -814,6 +877,29 @@ fn render_group_show_text(v: GroupShowOutput) -> Result<()> {
     println!("Group {:?}:", v.name);
     for r in &v.repos {
         println!("  {}", r);
+    }
+    Ok(())
+}
+
+fn render_template_list_table(v: TemplateListOutput) -> Result<()> {
+    if v.templates.is_empty() {
+        println!("No templates defined.");
+        return Ok(());
+    }
+    let mut table = Table::new(
+        Box::new(std::io::stdout()),
+        vec!["Name".to_string(), "Repos".to_string()],
+    );
+    for t in &v.templates {
+        table.add_row(vec![t.name.clone(), t.repo_count.to_string()])?;
+    }
+    table.render()
+}
+
+fn render_template_show_text(v: TemplateShowOutput) -> Result<()> {
+    println!("Template {:?}:", v.name);
+    for r in &v.repos {
+        println!("  {} ({})", r.identity, r.url);
     }
     Ok(())
 }
@@ -1476,6 +1562,7 @@ mod tests {
                 description: Some("test workspace".into()),
                 created: "2026-03-01T10:00:00+00:00".into(),
                 last_used: None,
+                created_from: None,
             }],
         };
         let val = serde_json::to_value(&output).unwrap();
