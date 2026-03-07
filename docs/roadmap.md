@@ -4,36 +4,16 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### Workspace Templates
-
-**Complexity:** Medium
+### Workspace Templates (remaining phases)
 
 **Design doc:** [`docs/features/workspace-templates.md`](features/workspace-templates.md)
 
-Sharable, self-contained files that describe how to create a workspace — repos and settings. Replaces groups with a richer, portable concept. One file gets a new teammate fully set up.
+Phase 1 (CRUD + `wsp new -t`) and Phase 2 (polymorphic `--from`, export, file-based import) have shipped.
 
-```yaml
-# dash.wsp.yaml
-repos:
-  - url: https://github.com/docker/api-gateway.git
-  - url: https://github.com/docker/user-service.git
-  - url: https://github.com/docker/proto.git
-settings:
-  language_integrations:
-    go: true
-  sync_strategy: rebase
-```
-
-```
-wsp new my-feature -t dash                # create from template
-wsp template export dash                  # share with teammate
-wsp template import dash.wsp.yaml         # teammate imports + auto-registers repos
-```
-
-- [ ] Phase 1: Template CRUD (`wsp template new/ls/show/rm` including `--from-workspace`) and `wsp new -t`
-- [ ] Phase 2: Import/export with auto-registration of unknown repos
 - [ ] Phase 3: Migrate existing groups to templates, deprecate `-g`
 - [ ] Phase 4: Wire template settings into workspace creation
+- [ ] Phase 5: Agent context in templates (AGENTS.md, CLAUDE.md, skills)
+- [ ] Phase 6: Repo-embedded templates (`.wsp-template.yaml` discovered from repos)
 
 ### Git Config Defaults
 
