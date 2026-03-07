@@ -3,12 +3,10 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use anyhow::{Result, bail};
-use chrono::Utc;
 use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
-use crate::config::{self, Paths, RepoEntry};
-use crate::filelock;
+use crate::config::{self, Paths};
 use crate::git;
 use crate::giturl;
 use crate::group;
@@ -32,7 +30,7 @@ pub fn cmd() -> Command {
             Arg::new("template")
                 .short('t')
                 .long("template")
-                .help("Create workspace from a template")
+                .help("Create from a template (name or file path)")
                 .add(ArgValueCandidates::new(completers::complete_templates)),
         )
         .arg(
@@ -62,7 +60,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .get_many::<String>("repos")
         .map(|v| v.collect())
         .unwrap_or_default();
-    let template_name = matches.get_one::<String>("template");
+    let template_source = matches.get_one::<String>("template");
     let group_name = matches.get_one::<String>("group");
     let no_fetch = matches.get_flag("no-fetch");
     let description = matches.get_one::<String>("description");
@@ -77,18 +75,21 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let mut repo_refs: BTreeMap<String, String> = BTreeMap::new();
     let mut created_from: Option<String> = None;
 
-    // Add repos from template
-    if let Some(tn) = template_name {
-        let tmpl = template::load(&paths.templates_dir, tn)?;
+    // Add repos from template (name or file path)
+    if let Some(source) = template_source {
+        let tmpl = match template::classify_source(source) {
+            template::TemplateSource::FilePath(path) => template::load_from_file(&path)?,
+            template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
+        };
 
         // Auto-register unknown repos from template
-        auto_register_template_repos(&tmpl, &mut cfg, paths)?;
+        template::auto_register(&tmpl, &mut cfg, paths)?;
 
         let identities = tmpl.identities()?;
         for id in identities {
             repo_refs.insert(id, String::new());
         }
-        created_from = Some(tn.clone());
+        created_from = Some(source.clone());
     }
 
     // Add repos from group (active, no ref)
@@ -205,68 +206,4 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         MutationOutput::new(format!("Workspace created: {}", ws_dir.display()))
             .with_duration(duration_ms),
     ))
-}
-
-/// Auto-register any repos from a template that aren't already in the registry.
-/// Clones mirrors and adds entries to config.
-fn auto_register_template_repos(
-    tmpl: &template::Template,
-    cfg: &mut config::Config,
-    paths: &Paths,
-) -> Result<()> {
-    let mut to_register = Vec::new();
-
-    for repo in &tmpl.repos {
-        let parsed = giturl::parse(&repo.url)?;
-        let identity = parsed.identity();
-        if !cfg.repos.contains_key(&identity) {
-            to_register.push((identity, parsed, repo.url.clone()));
-        }
-    }
-
-    if to_register.is_empty() {
-        return Ok(());
-    }
-
-    eprintln!(
-        "Auto-registering {} repos from template...",
-        to_register.len()
-    );
-
-    for (identity, parsed, url) in &to_register {
-        if !mirror::exists(&paths.mirrors_dir, parsed) {
-            eprintln!("  cloning {}...", url);
-            mirror::clone(&paths.mirrors_dir, parsed, url)
-                .map_err(|e| anyhow::anyhow!("cloning {}: {}", identity, e))?;
-        }
-    }
-
-    // Register under lock
-    filelock::with_config(&paths.config_path, |locked_cfg| {
-        for (identity, _, url) in &to_register {
-            if !locked_cfg.repos.contains_key(identity) {
-                locked_cfg.repos.insert(
-                    identity.clone(),
-                    RepoEntry {
-                        url: url.clone(),
-                        added: Utc::now(),
-                    },
-                );
-            }
-        }
-        Ok(())
-    })?;
-
-    // Update the in-memory config to reflect the new repos
-    for (identity, _, url) in to_register {
-        cfg.repos.insert(
-            identity,
-            RepoEntry {
-                url,
-                added: Utc::now(),
-            },
-        );
-    }
-
-    Ok(())
 }

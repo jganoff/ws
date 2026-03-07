@@ -3,10 +3,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Paths;
+use crate::config::{self, Paths, RepoEntry};
+use crate::filelock;
 use crate::giturl;
+use crate::mirror;
 use crate::workspace;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +35,30 @@ impl Template {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Source classification
+// ---------------------------------------------------------------------------
+
+/// Classifies a user-provided source string into a name or file path.
+/// Unambiguous because template names cannot contain `/`, `\`, or end in `.yaml`.
+#[derive(Debug, PartialEq)]
+pub enum TemplateSource {
+    Name(String),
+    FilePath(PathBuf),
+}
+
+pub fn classify_source(source: &str) -> TemplateSource {
+    if source.contains('/') || source.contains('\\') || source.ends_with(".yaml") {
+        TemplateSource::FilePath(PathBuf::from(source))
+    } else {
+        TemplateSource::Name(source.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Name validation
+// ---------------------------------------------------------------------------
+
 /// Validate a template name for safe use as a filesystem component.
 /// Same rules as workspace::validate_name — no path separators, traversal, or special prefixes.
 pub fn validate_name(name: &str) -> Result<()> {
@@ -55,6 +82,10 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Stored template CRUD
+// ---------------------------------------------------------------------------
 
 fn template_path(templates_dir: &Path, name: &str) -> PathBuf {
     templates_dir.join(format!("{}.yaml", name))
@@ -80,13 +111,7 @@ pub fn load(templates_dir: &Path, name: &str) -> Result<Template> {
     if !path.exists() {
         bail!("template {:?} not found", name);
     }
-    let data = fs::read_to_string(&path).with_context(|| format!("reading template {:?}", name))?;
-    let t: Template =
-        serde_yaml_ng::from_str(&data).with_context(|| format!("parsing template {:?}", name))?;
-    if t.repos.is_empty() {
-        bail!("template {:?} has no repos", name);
-    }
-    Ok(t)
+    load_from_file(&path)
 }
 
 pub fn delete(templates_dir: &Path, name: &str) -> Result<()> {
@@ -124,12 +149,36 @@ pub fn exists(templates_dir: &Path, name: &str) -> bool {
     validate_name(name).is_ok() && template_path(templates_dir, name).exists()
 }
 
+// ---------------------------------------------------------------------------
+// Load from file
+// ---------------------------------------------------------------------------
+
+/// Load a template from a local file path.
+pub fn load_from_file(path: &Path) -> Result<Template> {
+    let data = fs::read_to_string(path).with_context(|| format!("reading template {:?}", path))?;
+    let t: Template =
+        serde_yaml_ng::from_str(&data).with_context(|| format!("parsing template {:?}", path))?;
+    if t.repos.is_empty() {
+        bail!("template {:?} has no repos", path);
+    }
+    Ok(t)
+}
+
+/// Serialize a template to YAML string.
+pub fn to_yaml(template: &Template) -> Result<String> {
+    serde_yaml_ng::to_string(template).context("serializing template")
+}
+
+// ---------------------------------------------------------------------------
+// Workspace derivation
+// ---------------------------------------------------------------------------
+
 /// Create a template from an existing workspace's repo set.
 pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
     let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
     let meta = workspace::load_metadata(&ws_dir)
         .with_context(|| format!("loading workspace {:?}", ws_name))?;
-    let cfg = crate::config::Config::load_from(&paths.config_path)?;
+    let cfg = config::Config::load_from(&paths.config_path)?;
 
     let mut repos = Vec::new();
     for identity in meta.repos.keys() {
@@ -146,6 +195,70 @@ pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
     }
 
     Ok(Template { repos })
+}
+
+// ---------------------------------------------------------------------------
+// Auto-registration
+// ---------------------------------------------------------------------------
+
+/// Auto-register any repos from a template that aren't already in the registry.
+/// Clones mirrors and adds entries to config.
+pub fn auto_register(tmpl: &Template, cfg: &mut config::Config, paths: &Paths) -> Result<()> {
+    let mut to_register = Vec::new();
+
+    for repo in &tmpl.repos {
+        let parsed = giturl::parse(&repo.url)?;
+        let identity = parsed.identity();
+        if !cfg.repos.contains_key(&identity) {
+            to_register.push((identity, parsed, repo.url.clone()));
+        }
+    }
+
+    if to_register.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "Auto-registering {} repos from template...",
+        to_register.len()
+    );
+
+    for (identity, parsed, url) in &to_register {
+        if !mirror::exists(&paths.mirrors_dir, parsed) {
+            eprintln!("  cloning {}...", url);
+            mirror::clone(&paths.mirrors_dir, parsed, url)
+                .map_err(|e| anyhow::anyhow!("cloning {}: {}", identity, e))?;
+        }
+    }
+
+    // Register under lock
+    filelock::with_config(&paths.config_path, |locked_cfg| {
+        for (identity, _, url) in &to_register {
+            if !locked_cfg.repos.contains_key(identity) {
+                locked_cfg.repos.insert(
+                    identity.clone(),
+                    RepoEntry {
+                        url: url.clone(),
+                        added: Utc::now(),
+                    },
+                );
+            }
+        }
+        Ok(())
+    })?;
+
+    // Update the in-memory config to reflect the new repos
+    for (identity, _, url) in to_register {
+        cfg.repos.insert(
+            identity,
+            RepoEntry {
+                url,
+                added: Utc::now(),
+            },
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -308,5 +421,91 @@ mod tests {
             let result = validate_name(tc.input);
             assert_eq!(result.is_err(), tc.want_err, "case: {}", tc.name);
         }
+    }
+
+    #[test]
+    fn classify_source_cases() {
+        struct Case {
+            name: &'static str,
+            input: &'static str,
+            want: TemplateSource,
+        }
+
+        let cases = vec![
+            Case {
+                name: "plain name",
+                input: "backend",
+                want: TemplateSource::Name("backend".into()),
+            },
+            Case {
+                name: "name with hyphens",
+                input: "my-team-backend",
+                want: TemplateSource::Name("my-team-backend".into()),
+            },
+            Case {
+                name: "relative file path",
+                input: "./backend.wsp.yaml",
+                want: TemplateSource::FilePath("./backend.wsp.yaml".into()),
+            },
+            Case {
+                name: "absolute file path",
+                input: "/tmp/backend.yaml",
+                want: TemplateSource::FilePath("/tmp/backend.yaml".into()),
+            },
+            Case {
+                name: "file ending in .yaml",
+                input: "backend.yaml",
+                want: TemplateSource::FilePath("backend.yaml".into()),
+            },
+            Case {
+                name: "file with slash no extension",
+                input: "path/to/template",
+                want: TemplateSource::FilePath("path/to/template".into()),
+            },
+        ];
+
+        for tc in cases {
+            let got = classify_source(tc.input);
+            assert_eq!(got, tc.want, "case: {}", tc.name);
+        }
+    }
+
+    #[test]
+    fn load_from_file_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test.wsp.yaml");
+
+        let t = sample_template();
+        let yaml = to_yaml(&t).unwrap();
+        std::fs::write(&path, &yaml).unwrap();
+
+        let loaded = load_from_file(&path).unwrap();
+        assert_eq!(loaded.repos.len(), 2);
+        assert_eq!(loaded.repos[0].url, t.repos[0].url);
+    }
+
+    #[test]
+    fn load_from_file_missing() {
+        let result = load_from_file(Path::new("/nonexistent/template.yaml"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_from_file_empty_repos() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("empty.yaml");
+        std::fs::write(&path, "repos: []\n").unwrap();
+
+        let err = load_from_file(&path).unwrap_err();
+        assert!(err.to_string().contains("no repos"));
+    }
+
+    #[test]
+    fn to_yaml_round_trip() {
+        let t = sample_template();
+        let yaml = to_yaml(&t).unwrap();
+        let parsed: Template = serde_yaml_ng::from_str(&yaml).unwrap();
+        assert_eq!(parsed.repos.len(), t.repos.len());
+        assert_eq!(parsed.repos[0].url, t.repos[0].url);
     }
 }

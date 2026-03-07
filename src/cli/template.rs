@@ -1,3 +1,6 @@
+use std::fs;
+use std::io::Write;
+
 use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
@@ -19,6 +22,7 @@ pub fn cmd() -> Command {
         .subcommand(list_cmd())
         .subcommand(show_cmd())
         .subcommand(rm_cmd())
+        .subcommand(export_cmd())
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -27,6 +31,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Some(("ls", m)) => run_list(m, paths),
         Some(("show", m)) => run_show(m, paths),
         Some(("rm", m)) => run_rm(m, paths),
+        Some(("export", m)) => run_export(m, paths),
         _ => unreachable!(),
     }
 }
@@ -41,14 +46,13 @@ fn new_cmd() -> Command {
                 .help("Repo URLs for the template"),
         )
         .arg(
-            Arg::new("from-workspace")
-                .long("from-workspace")
-                .help("Derive template from an existing workspace")
-                .add(ArgValueCandidates::new(completers::complete_workspaces)),
+            Arg::new("from")
+                .long("from")
+                .help("Create from a workspace name or template file path"),
         )
         .group(
             clap::ArgGroup::new("source")
-                .args(["repos", "from-workspace"])
+                .args(["repos", "from"])
                 .required(true),
         )
 }
@@ -80,18 +84,37 @@ fn rm_cmd() -> Command {
         )
 }
 
+fn export_cmd() -> Command {
+    Command::new("export")
+        .about("Export a template to a file or stdout [read-only]")
+        .arg(
+            Arg::new("name")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_templates)),
+        )
+        .arg(
+            Arg::new("stdout")
+                .long("stdout")
+                .action(clap::ArgAction::SetTrue)
+                .help("Print to stdout instead of writing a file"),
+        )
+}
+
 fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
-    let from_workspace = matches.get_one::<String>("from-workspace");
+    let from = matches.get_one::<String>("from");
 
     if tmpl::exists(&paths.templates_dir, name) {
         anyhow::bail!("template {:?} already exists", name);
     }
 
-    let template = if let Some(ws_name) = from_workspace {
-        tmpl::from_workspace(paths, ws_name)?
+    let template = if let Some(source) = from {
+        match tmpl::classify_source(source) {
+            tmpl::TemplateSource::FilePath(path) => tmpl::load_from_file(&path)?,
+            tmpl::TemplateSource::Name(ws_name) => tmpl::from_workspace(paths, &ws_name)?,
+        }
     } else {
-        // Safe to unwrap: clap ArgGroup ensures either repos or --from-workspace is present
+        // Safe to unwrap: clap ArgGroup ensures either repos or --from is present
         let repo_urls: Vec<String> = matches
             .get_many::<String>("repos")
             .unwrap()
@@ -172,4 +195,29 @@ fn run_rm(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         "Removed template {:?}",
         name
     ))))
+}
+
+fn run_export(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let to_stdout = matches.get_flag("stdout");
+
+    let t = tmpl::load(&paths.templates_dir, name)?;
+    let yaml = tmpl::to_yaml(&t)?;
+
+    if to_stdout {
+        print!("{}", yaml);
+        Ok(Output::None)
+    } else {
+        let filename = format!("{}.wsp.yaml", name);
+        let dest = std::env::current_dir()?.join(&filename);
+        if dest.exists() {
+            anyhow::bail!("{:?} already exists", filename);
+        }
+        let mut f = fs::File::create(&dest)?;
+        f.write_all(yaml.as_bytes())?;
+        Ok(Output::Mutation(MutationOutput::new(format!(
+            "Exported template to {}",
+            dest.display()
+        ))))
+    }
 }
