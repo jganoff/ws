@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
-use crate::config::Paths;
+use crate::config::{self, Paths};
 use crate::giturl;
 use crate::output::{
     MutationOutput, Output, TemplateListEntry, TemplateListOutput, TemplateShowOutput,
@@ -26,6 +26,13 @@ pub fn cmd() -> Command {
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    // Auto-migrate any existing groups to templates
+    if let Ok(cfg) = config::Config::load_from(&paths.config_path)
+        && !cfg.groups.is_empty()
+    {
+        let _ = tmpl::migrate_all_groups(&paths.templates_dir, &cfg);
+    }
+
     match matches.subcommand() {
         Some(("new", m)) => run_new(m, paths),
         Some(("ls", m)) => run_list(m, paths),
