@@ -203,11 +203,6 @@ pub fn checkout(dir: &Path, ref_or_branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn checkout_detached(dir: &Path, git_ref: &str) -> Result<()> {
-    run(Some(dir), &["checkout", "--detach", git_ref])?;
-    Ok(())
-}
-
 pub fn default_branch_for_remote(dir: &Path, remote: &str) -> Result<String> {
     let ref_path = format!("refs/remotes/{}/HEAD", remote);
     let r = run(Some(dir), &["symbolic-ref", &ref_path]);

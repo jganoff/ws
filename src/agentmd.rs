@@ -50,21 +50,14 @@ fn build_marked_section(metadata: &Metadata) -> String {
     s.push('\n');
 
     s.push_str("## Repositories\n\n");
-    s.push_str("| Repo | Role | Ref | Directory |\n");
-    s.push_str("|------|------|-----|-----------|\n");
+    s.push_str("| Repo | Directory |\n");
+    s.push_str("|------|-----------|\n");
 
-    for (identity, repo_ref) in &metadata.repos {
-        let (role, ref_val) = match repo_ref {
-            Some(rr) if !rr.r#ref.is_empty() => ("context", rr.r#ref.as_str()),
-            _ => ("active", "-"),
-        };
+    for identity in metadata.repos.keys() {
         let dir = metadata
             .dir_name(identity)
             .unwrap_or_else(|_| identity.clone());
-        s.push_str(&format!(
-            "| {} | {} | {} | {} |\n",
-            identity, role, ref_val, dir
-        ));
+        s.push_str(&format!("| {} | {} |\n", identity, dir));
     }
 
     s.push_str("\n## Quick Reference\n\n");
@@ -331,30 +324,25 @@ mod tests {
 
         let cases = vec![
             Case {
-                name: "active repos — role=active, ref=-",
+                name: "single repo",
                 meta: make_metadata("feat", "feat", &[("github.com/acme/api-gateway", None)]),
-                want_contains: vec!["| github.com/acme/api-gateway | active | - | api-gateway |"],
+                want_contains: vec!["| github.com/acme/api-gateway | api-gateway |"],
             },
             Case {
-                name: "context repos — role=context, ref shown",
-                meta: make_metadata("feat", "feat", &[("github.com/acme/proto", Some("v1.0"))]),
-                want_contains: vec!["| github.com/acme/proto | context | v1.0 | proto |"],
-            },
-            Case {
-                name: "mixed active and context",
+                name: "multiple repos",
                 meta: make_metadata(
                     "feat",
                     "jg/feat",
                     &[
                         ("github.com/acme/api-gateway", None),
-                        ("github.com/acme/proto", Some("main")),
+                        ("github.com/acme/proto", None),
                     ],
                 ),
                 want_contains: vec![
                     "| Workspace | feat |",
                     "| Branch | jg/feat |",
-                    "| github.com/acme/api-gateway | active | - | api-gateway |",
-                    "| github.com/acme/proto | context | main | proto |",
+                    "| github.com/acme/api-gateway | api-gateway |",
+                    "| github.com/acme/proto | proto |",
                 ],
             },
             Case {
@@ -365,13 +353,13 @@ mod tests {
                     &[("github.com/acme/api-gateway", None)],
                     &[("github.com/acme/api-gateway", "custom-dir")],
                 ),
-                want_contains: vec!["| github.com/acme/api-gateway | active | - | custom-dir |"],
+                want_contains: vec!["| github.com/acme/api-gateway | custom-dir |"],
             },
             Case {
                 name: "empty repos — valid table with header only",
                 meta: make_metadata("empty", "empty", &[]),
                 want_contains: vec![
-                    "| Repo | Role | Ref | Directory |",
+                    "| Repo | Directory |",
                     "## Quick Reference",
                     "## Troubleshooting",
                     "/wsp-report",
@@ -406,7 +394,7 @@ mod tests {
         assert!(result.contains("<!-- Add your project-specific notes"));
         assert!(result.contains(MARKER_BEGIN));
         assert!(result.contains(MARKER_END));
-        assert!(result.contains("| github.com/acme/api | active | - | api |"));
+        assert!(result.contains("| github.com/acme/api | api |"));
     }
 
     // --- Filesystem integration tests ---
@@ -423,7 +411,7 @@ mod tests {
         let content = fs::read_to_string(ws_dir.join("AGENTS.md")).unwrap();
         assert!(content.contains("# Workspace: test-ws"));
         assert!(content.contains(MARKER_BEGIN));
-        assert!(content.contains("| github.com/acme/api | active | - | api |"));
+        assert!(content.contains("| github.com/acme/api | api |"));
 
         // CLAUDE.md is a symlink to AGENTS.md
         let link_meta = fs::symlink_metadata(ws_dir.join("CLAUDE.md")).unwrap();
@@ -472,7 +460,7 @@ mod tests {
         let result = fs::read_to_string(&agents_path).unwrap();
         assert!(result.contains("## My Custom Notes"));
         assert!(result.contains("This is my important context."));
-        assert!(result.contains("| github.com/acme/web | active | - | web |"));
+        assert!(result.contains("| github.com/acme/web | web |"));
     }
 
     #[test]
@@ -542,7 +530,7 @@ mod tests {
         update(ws_dir, &meta).unwrap();
 
         let content = fs::read_to_string(ws_dir.join("AGENTS.md")).unwrap();
-        assert!(content.contains("| Repo | Role | Ref | Directory |"));
+        assert!(content.contains("| Repo | Directory |"));
         assert!(content.contains(MARKER_BEGIN));
         assert!(content.contains(MARKER_END));
     }

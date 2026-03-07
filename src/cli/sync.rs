@@ -148,133 +148,86 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
         let fetch_failed = fetch_failures.contains(&info.dir_name);
 
-        if info.is_context {
-            let pinned = info.pinned_ref.as_deref().unwrap_or("HEAD");
-            let action = format!("checkout {}", pinned);
-            if dry_run {
+        // Resolve default branch first (used in all paths)
+        let default_branch = match git::default_branch(&info.clone_dir) {
+            Ok(b) => b,
+            Err(e) => {
                 results.push(SyncRepoResult {
                     name: info.dir_name.clone(),
-                    action,
-                    ok: true,
-                    detail: Some("(dry run)".into()),
-                    error: None,
-                    repo_dir: info.clone_dir.clone(),
-                    target: pinned.to_string(),
-                    strategy: String::new(),
-                });
-            } else {
-                match sync_context_repo(&info.clone_dir, pinned) {
-                    Ok(mut detail) => {
-                        if fetch_failed {
-                            detail.push_str(" (fetch failed, data may be stale)");
-                        }
-                        results.push(SyncRepoResult {
-                            name: info.dir_name.clone(),
-                            action,
-                            ok: true,
-                            detail: Some(detail),
-                            error: None,
-                            repo_dir: info.clone_dir.clone(),
-                            target: pinned.to_string(),
-                            strategy: String::new(),
-                        });
-                    }
-                    Err(e) => {
-                        results.push(SyncRepoResult {
-                            name: info.dir_name.clone(),
-                            action,
-                            ok: false,
-                            detail: None,
-                            error: Some(e.to_string()),
-                            repo_dir: info.clone_dir.clone(),
-                            target: pinned.to_string(),
-                            strategy: String::new(),
-                        });
-                    }
-                }
-            }
-        } else {
-            // Active repo: resolve default branch first (used in all paths)
-            let default_branch = match git::default_branch(&info.clone_dir) {
-                Ok(b) => b,
-                Err(e) => {
-                    results.push(SyncRepoResult {
-                        name: info.dir_name.clone(),
-                        action: format!("{} onto origin/?", strategy),
-                        ok: false,
-                        detail: None,
-                        error: Some(format!("cannot detect default branch: {}", e)),
-                        repo_dir: info.clone_dir.clone(),
-                        target: String::new(),
-                        strategy: strategy.to_string(),
-                    });
-                    continue;
-                }
-            };
-            let target = format!("origin/{}", default_branch);
-            let action = format!("{} onto {}", strategy, target);
-
-            // Check for dirty working tree
-            let changed = git::changed_file_count(&info.clone_dir).unwrap_or(0);
-            if changed > 0 {
-                results.push(SyncRepoResult {
-                    name: info.dir_name.clone(),
-                    action,
+                    action: format!("{} onto origin/?", strategy),
                     ok: false,
                     detail: None,
-                    error: Some(format!(
-                        "uncommitted changes ({} file(s)), skipping",
-                        changed
-                    )),
+                    error: Some(format!("cannot detect default branch: {}", e)),
                     repo_dir: info.clone_dir.clone(),
-                    target,
+                    target: String::new(),
                     strategy: strategy.to_string(),
                 });
                 continue;
             }
+        };
+        let target = format!("origin/{}", default_branch);
+        let action = format!("{} onto {}", strategy, target);
 
-            if dry_run {
-                let detail = describe_pending_sync(&info.clone_dir, &target);
-                results.push(SyncRepoResult {
-                    name: info.dir_name.clone(),
-                    action,
-                    ok: true,
-                    detail: Some(detail),
-                    error: None,
-                    repo_dir: info.clone_dir.clone(),
-                    target,
-                    strategy: strategy.to_string(),
-                });
-            } else {
-                match sync_active_repo(&info.clone_dir, &target, strategy) {
-                    Ok(sync_action) => {
-                        let mut detail = format_sync_action(&sync_action);
-                        if fetch_failed {
-                            detail.push_str(" (fetch failed, data may be stale)");
-                        }
-                        results.push(SyncRepoResult {
-                            name: info.dir_name.clone(),
-                            action,
-                            ok: true,
-                            detail: Some(detail),
-                            error: None,
-                            repo_dir: info.clone_dir.clone(),
-                            target,
-                            strategy: strategy.to_string(),
-                        });
+        // Check for dirty working tree
+        let changed = git::changed_file_count(&info.clone_dir).unwrap_or(0);
+        if changed > 0 {
+            results.push(SyncRepoResult {
+                name: info.dir_name.clone(),
+                action,
+                ok: false,
+                detail: None,
+                error: Some(format!(
+                    "uncommitted changes ({} file(s)), skipping",
+                    changed
+                )),
+                repo_dir: info.clone_dir.clone(),
+                target,
+                strategy: strategy.to_string(),
+            });
+            continue;
+        }
+
+        if dry_run {
+            let detail = describe_pending_sync(&info.clone_dir, &target);
+            results.push(SyncRepoResult {
+                name: info.dir_name.clone(),
+                action,
+                ok: true,
+                detail: Some(detail),
+                error: None,
+                repo_dir: info.clone_dir.clone(),
+                target,
+                strategy: strategy.to_string(),
+            });
+        } else {
+            match sync_active_repo(&info.clone_dir, &target, strategy) {
+                Ok(sync_action) => {
+                    let mut detail = format_sync_action(&sync_action);
+                    if fetch_failed {
+                        detail.push_str(" (fetch failed, data may be stale)");
                     }
-                    Err(_) => {
-                        results.push(SyncRepoResult {
-                            name: info.dir_name.clone(),
-                            action,
-                            ok: false,
-                            detail: None,
-                            error: Some("aborted, repo unchanged".into()),
-                            repo_dir: info.clone_dir.clone(),
-                            target,
-                            strategy: strategy.to_string(),
-                        });
-                    }
+                    results.push(SyncRepoResult {
+                        name: info.dir_name.clone(),
+                        action,
+                        ok: true,
+                        detail: Some(detail),
+                        error: None,
+                        repo_dir: info.clone_dir.clone(),
+                        target,
+                        strategy: strategy.to_string(),
+                    });
+                }
+                Err(_) => {
+                    results.push(SyncRepoResult {
+                        name: info.dir_name.clone(),
+                        action,
+                        ok: false,
+                        detail: None,
+                        error: Some("aborted, repo unchanged".into()),
+                        repo_dir: info.clone_dir.clone(),
+                        target,
+                        strategy: strategy.to_string(),
+                    });
                 }
             }
         }
@@ -347,28 +300,6 @@ fn sync_active_repo(dir: &Path, target: &str, strategy: &str) -> Result<SyncActi
     match strategy {
         "merge" => git::merge_from(dir, target),
         _ => git::rebase_onto(dir, target),
-    }
-}
-
-fn sync_context_repo(dir: &Path, pinned_ref: &str) -> Result<String> {
-    let origin_ref = format!("origin/{}", pinned_ref);
-
-    // Check if origin/<ref> exists (branch tracking)
-    if git::ref_exists(dir, &format!("refs/remotes/{}", origin_ref)) {
-        // It's a branch — fast-forward the local branch
-        match git::merge_from(dir, &origin_ref) {
-            Ok(SyncAction::UpToDate) => Ok("already up to date".into()),
-            Ok(SyncAction::FastForward { commits }) => {
-                Ok(format!("fast-forwarded {} commit(s)", commits))
-            }
-            Ok(SyncAction::Merged) => Ok("merged".into()),
-            Ok(SyncAction::Rebased { commits }) => Ok(format!("{} commit(s) rebased", commits)),
-            Err(e) => Err(e),
-        }
-    } else {
-        // Tag or SHA — ensure checkout is on the expected ref
-        git::checkout(dir, pinned_ref)?;
-        Ok("already up to date".into())
     }
 }
 

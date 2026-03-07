@@ -30,14 +30,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         old_name, new_name
     )];
     for r in &results {
-        if r.skipped {
-            lines.push(format!("  {}    (context repo, skipped)", r.name));
-        } else {
-            lines.push(format!(
-                "  {}    branch: {} -> {}",
-                r.name, r.old_branch, r.new_branch,
-            ));
-        }
+        lines.push(format!(
+            "  {}    branch: {} -> {}",
+            r.name, r.old_branch, r.new_branch,
+        ));
     }
 
     Ok(Output::Mutation(MutationOutput::new(lines.join("\n"))))

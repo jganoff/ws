@@ -245,8 +245,6 @@ pub struct WorkspaceRepoListEntry {
     pub identity: String,
     pub shortname: String,
     pub dir_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub git_ref: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -584,13 +582,11 @@ impl WorkspaceRepoListOutput {
                     identity: "github.com/acme/api-gateway".into(),
                     shortname: "api-gateway".into(),
                     dir_name: "api-gateway".into(),
-                    git_ref: None,
                 },
                 WorkspaceRepoListEntry {
                     identity: "github.com/acme/shared-lib".into(),
                     shortname: "shared-lib".into(),
                     dir_name: "shared-lib".into(),
-                    git_ref: Some("main".into()),
                 },
             ],
         }
@@ -670,7 +666,9 @@ impl RecoverListOutput {
             entries: vec![crate::gc::GcEntry {
                 name: "my-feature".into(),
                 branch: "jganoff/my-feature".into(),
-                trashed_at: Utc::now(),
+                trashed_at: "2026-01-01T00:00:00Z"
+                    .parse::<chrono::DateTime<Utc>>()
+                    .unwrap(),
                 original_path: "~/dev/workspaces/my-feature".into(),
             }],
         }
@@ -871,7 +869,6 @@ fn render_workspace_repo_list_table(v: WorkspaceRepoListOutput) -> Result<()> {
             "Identity".to_string(),
             "Shortname".to_string(),
             "Dir".to_string(),
-            "Ref".to_string(),
         ],
     );
     for r in &v.repos {
@@ -879,7 +876,6 @@ fn render_workspace_repo_list_table(v: WorkspaceRepoListOutput) -> Result<()> {
             r.identity.clone(),
             r.shortname.clone(),
             r.dir_name.clone(),
-            r.git_ref.clone().unwrap_or_else(|| "-".to_string()),
         ])?;
     }
     table.render()
@@ -1498,20 +1494,18 @@ mod tests {
     fn test_json_workspace_repo_list() {
         let cases: Vec<(&str, WorkspaceRepoListOutput, serde_json::Value)> = vec![
             (
-                "active and context repos",
+                "two repos",
                 WorkspaceRepoListOutput {
                     repos: vec![
                         WorkspaceRepoListEntry {
                             identity: "github.com/user/repo-a".into(),
                             shortname: "repo-a".into(),
                             dir_name: "repo-a".into(),
-                            git_ref: None,
                         },
                         WorkspaceRepoListEntry {
                             identity: "github.com/user/repo-b".into(),
                             shortname: "repo-b".into(),
                             dir_name: "repo-b".into(),
-                            git_ref: Some("main".into()),
                         },
                     ],
                 },
@@ -1525,8 +1519,7 @@ mod tests {
                         {
                             "identity": "github.com/user/repo-b",
                             "shortname": "repo-b",
-                            "dir_name": "repo-b",
-                            "git_ref": "main"
+                            "dir_name": "repo-b"
                         }
                     ]
                 }),
@@ -1571,7 +1564,7 @@ mod tests {
                     behind: 0,
                     changed: 0,
                     has_upstream: false,
-                    role: "context".into(),
+                    role: "active".into(),
                     status: String::new(),
                     files: vec![],
                     error: Some("parse error".into()),
@@ -1596,7 +1589,7 @@ mod tests {
         // repo-b has empty files → omitted
         assert!(val["repos"][1].get("files").is_none());
         assert_eq!(val["repos"][1]["has_upstream"], false);
-        assert_eq!(val["repos"][1]["role"], "context");
+        assert_eq!(val["repos"][1]["role"], "active");
         assert_eq!(val["repos"][1]["error"], "parse error");
         // root is empty → omitted
         assert!(val.get("root").is_none());

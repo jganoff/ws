@@ -151,15 +151,14 @@ This provides:
 ### `wsp new <workspace> [repos...] [-g group]`
 
 Create a workspace. Each listed repo gets a local clone checked out to a branch
-matching the workspace name. Repos with `@ref` are checked out at that ref as
-context repos (no workspace branch created).
+matching the workspace name.
 
 | Flag          | Description                |
 |---------------|----------------------------|
 | `-g, --group` | Include repos from a group |
 
 ```
-$ wsp new add-billing -g backend web-app proto@v1.0
+$ wsp new add-billing -g backend web-app proto
 Creating workspace "add-billing" with 4 repos...
 Workspace created: /Users/you/dev/workspaces/add-billing
 ```
@@ -167,7 +166,7 @@ Workspace created: /Users/you/dev/workspaces/add-billing
 ### `wsp repo add [repos...] [-g group]`
 
 Add repos to the current workspace. Must be run from inside a workspace
-directory. Supports `@ref` syntax for context repos.
+directory.
 
 | Flag          | Description                |
 |---------------|----------------------------|
@@ -175,7 +174,7 @@ directory. Supports `@ref` syntax for context repos.
 
 ```
 $ cd ~/dev/workspaces/add-billing
-$ wsp repo add proto@v1.0
+$ wsp repo add proto
 Adding 1 repos to workspace...
 Done.
 ```
@@ -254,19 +253,6 @@ ok
 ### `wsp cd <workspace>`
 
 Change directory into a workspace. Requires shell integration.
-
-## Context repos (`@ref`)
-
-Some repos are just for reference -- you won't change them. Pin them to a
-branch or tag with `@ref`:
-
-```
-$ wsp new add-billing api-gateway user-service@main proto@v1.0
-```
-
-- `api-gateway` -- checked out on the `add-billing` branch (active)
-- `user-service@main` -- checked out at `main` (context, no workspace branch)
-- `proto@v1.0` -- checked out at tag `v1.0` (context, detached HEAD)
 
 ## Branch prefix
 

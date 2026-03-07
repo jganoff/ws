@@ -191,8 +191,7 @@ wsp config unset <key>                          # Unset a config value
     {
       "identity": "github.com/acme/shared-lib",
       "shortname": "shared-lib",
-      "dir_name": "shared-lib",
-      "git_ref": "main"
+      "dir_name": "shared-lib"
     }
   ]
 }
@@ -306,7 +305,7 @@ wsp config unset <key>                          # Unset a config value
     {
       "name": "my-feature",
       "branch": "jganoff/my-feature",
-      "trashed_at": "2026-03-07T04:46:13.159904Z",
+      "trashed_at": "2026-01-01T00:00:00Z",
       "original_path": "~/dev/workspaces/my-feature"
     }
   ]
@@ -325,16 +324,6 @@ wsp config unset <key>                          # Unset a config value
 Repos are identified by `host/owner/repo` (e.g., `github.com/acme/api-gateway`). You can use the shortest unique suffix:
 - `api-gateway` if unambiguous
 - `acme/api-gateway` to disambiguate from `other-org/api-gateway`
-
-## `@ref` Syntax for Context Repos
-
-When creating a workspace, pin a repo to a specific branch/tag/SHA:
-```bash
-wsp new my-feature api-gateway user-service@main proto@v1.0
-```
-- `api-gateway` — active repo, gets the workspace branch
-- `user-service@main` — context repo, checked out at `main`
-- `proto@v1.0` — context repo, checked out at tag `v1.0`
 
 ## Directory Layout
 

@@ -10,16 +10,14 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 **Design doc:** [`docs/features/workspace-templates.md`](features/workspace-templates.md)
 
-Sharable, self-contained files that describe how to create a workspace — repos, context repos, and settings. Replaces groups with a richer, portable concept. One file gets a new teammate fully set up.
+Sharable, self-contained files that describe how to create a workspace — repos and settings. Replaces groups with a richer, portable concept. One file gets a new teammate fully set up.
 
 ```yaml
 # dash.wsp.yaml
 repos:
   - url: https://github.com/docker/api-gateway.git
   - url: https://github.com/docker/user-service.git
-context:
   - url: https://github.com/docker/proto.git
-    ref: main
 settings:
   language_integrations:
     go: true
@@ -308,7 +306,7 @@ Allow users to declare per-repo commands (`wsp repo configure api-server --test 
 
 See [`docs/design-tenets.md`](design-tenets.md) for the authoritative list. Summary:
 
-- Every command is **workspace-aware** (active vs. context repos, workspace vs. upstream branches)
+- Every command is **workspace-aware** (workspace vs. upstream branches)
 - Daily ops are **top-level short commands** (`sync`, `log`)
 - **Always support `--json`** for scripting and AI agents
 - **Parallel by default** for reads, serial for writes

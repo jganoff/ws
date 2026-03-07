@@ -33,15 +33,10 @@ pub fn run(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
                     String::new()
                 }
             };
-            let git_ref = meta.repos[id]
-                .as_ref()
-                .map(|r| r.r#ref.clone())
-                .filter(|r| !r.is_empty());
             WorkspaceRepoListEntry {
                 identity: id.clone(),
                 shortname: short,
                 dir_name,
-                git_ref,
             }
         })
         .collect();

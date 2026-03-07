@@ -1,10 +1,10 @@
 # Feature: Workspace Templates
 
-Sharable, self-contained artifacts that describe how to create a workspace — repos, context repos, and settings.
+Sharable, self-contained artifacts that describe how to create a workspace — repos and settings.
 
 ## Motivation
 
-Today, groups are named repo lists in global config. They carry no settings, no context repo declarations, and aren't shareable. When a teammate asks "how do I set up the dash workspace?", the answer is a series of manual commands.
+Today, groups are named repo lists in global config. They carry no settings and aren't shareable. When a teammate asks "how do I set up the dash workspace?", the answer is a series of manual commands.
 
 Workspace templates solve this by packaging everything needed to create a workspace into a single file that can be shared, version-controlled, or committed to a team repo.
 
@@ -15,9 +15,7 @@ Workspace templates solve this by packaging everything needed to create a worksp
 repos:
   - url: https://github.com/docker/api-gateway.git
   - url: https://github.com/docker/user-service.git
-context:
   - url: https://github.com/docker/proto.git
-    ref: main
 settings:
   language_integrations:
     go: true
@@ -29,7 +27,7 @@ settings:
 - **Explicit URLs.** Templates are shareable artifacts. A new person may not have repos registered, so URLs must be explicit — not shortnames or identities.
 - **Identities are derived.** The identity (`github.com/docker/api-gateway`) is derived from the URL using `giturl::parse`, not stored separately.
 - **Settings are optional.** A template with just `repos` is valid.
-- **Context repos declare their ref.** Active repos don't — they get the workspace branch.
+- **All repos are active.** Every repo in a template gets the workspace branch.
 - **Stamp-and-go.** Once a workspace is created from a template, there is no live link. The workspace is independent. See [Relationship Model](#relationship-model) below.
 
 ## Storage
@@ -56,7 +54,7 @@ wsp template new dash                             # interactive or from flags
 wsp template new dash --from-workspace billing    # derive from an existing workspace
 ```
 
-When `--from-workspace` is given, the template is populated from the workspace's current repo set (with URLs looked up from the registry), context repos, and applicable settings.
+When `--from-workspace` is given, the template is populated from the workspace's current repo set (with URLs looked up from the registry) and applicable settings.
 
 ### Import / Export
 
@@ -128,7 +126,7 @@ For example, if a template sets `language_integrations.go: true` but global conf
 
 Templates replace groups. Migration path:
 
-1. Auto-migrate: each existing `GroupEntry` becomes a template file with just `repos` (no settings, no context). URLs are looked up from registered repos.
+1. Auto-migrate: each existing `GroupEntry` becomes a template file with just `repos` (no settings). URLs are looked up from registered repos.
 2. `wsp new -g` continues to work as an alias for `-t` with a deprecation warning.
 3. Remove `-g` in a future major version.
 

@@ -76,7 +76,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     let mut repos = Vec::new();
 
-    for (identity, entry) in &meta.repos {
+    for identity in meta.repos.keys() {
         let dir_name = match meta.dir_name(identity) {
             Ok(d) => d,
             Err(e) => {
@@ -99,16 +99,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
         let repo_dir = ws_dir.join(&dir_name);
 
-        let is_active = match entry {
-            None => true,
-            Some(re) => re.r#ref.is_empty(),
-        };
-        let role = if is_active { "active" } else { "context" };
-
         let branch = git::branch_current(&repo_dir).unwrap_or_else(|_| "?".to_string());
 
-        // Detect wrong-branch: active repo HEAD differs from workspace branch
-        let wrong_branch = if is_active && branch != meta.branch && branch != "?" {
+        // Detect wrong-branch: HEAD differs from workspace branch
+        let wrong_branch = if branch != meta.branch && branch != "?" {
             Some(meta.branch.clone())
         } else {
             None
@@ -130,7 +124,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             behind,
             changed,
             has_upstream,
-            role: role.into(),
+            role: "active".into(),
             status,
             files,
             error: None,

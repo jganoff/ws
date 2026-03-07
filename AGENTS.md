@@ -29,6 +29,10 @@ The `codegen` Cargo feature gates `wsp generate` (hidden command), which introsp
 - `src/group.rs` - Group management
 - `src/output.rs` - Table formatting and status display
 
+## Context Repos (Removed)
+
+Context repos (pinned to a specific ref via `@ref` syntax) have been removed. All repos in a workspace are active and get the workspace branch. The `@ref` syntax is silently stripped by `parse_repo_ref`. The `WorkspaceRepoRef` struct and `BTreeMap<String, Option<WorkspaceRepoRef>>` type are kept for backward-compatible deserialization of old `.wsp.yaml` files — the `ref` field is ignored at runtime.
+
 ## Data Storage
 
 - Config: `~/.local/share/wsp/config.yaml`

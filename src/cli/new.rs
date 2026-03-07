@@ -71,11 +71,11 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
-    // Add individual repos (may have @ref)
+    // Add individual repos
     for rn in &repo_args {
-        let (name, r) = giturl::parse_repo_ref(rn);
+        let name = giturl::parse_repo_ref(rn);
         let id = giturl::resolve(name, &identities)?;
-        repo_refs.insert(id, r.to_string());
+        repo_refs.insert(id, String::new());
     }
 
     if repo_refs.is_empty() {

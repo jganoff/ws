@@ -253,16 +253,6 @@ Repos are identified by `host/owner/repo` (e.g., `github.com/acme/api-gateway`).
 - `api-gateway` if unambiguous
 - `acme/api-gateway` to disambiguate from `other-org/api-gateway`
 
-## `@ref` Syntax for Context Repos
-
-When creating a workspace, pin a repo to a specific branch/tag/SHA:
-```bash
-wsp new my-feature api-gateway user-service@main proto@v1.0
-```
-- `api-gateway` — active repo, gets the workspace branch
-- `user-service@main` — context repo, checked out at `main`
-- `proto@v1.0` — context repo, checked out at tag `v1.0`
-
 ## Directory Layout
 
 ```

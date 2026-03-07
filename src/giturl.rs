@@ -181,12 +181,16 @@ pub fn resolve(name: &str, identities: &[String]) -> Result<String> {
     }
 }
 
-/// Splits a "repo@ref" argument into the repo name and ref.
-/// Splits on the last "@" so repo names with "@" are handled.
-pub fn parse_repo_ref(arg: &str) -> (&str, &str) {
+/// Strips any trailing `@ref` from a repo argument.
+/// The `@ref` syntax for context repos has been removed — if a ref is
+/// present it is silently ignored (the repo will be treated as active).
+pub fn parse_repo_ref(arg: &str) -> &str {
     match arg.rfind('@') {
-        Some(i) if i < arg.len() - 1 => (&arg[..i], &arg[i + 1..]),
-        _ => (arg, ""),
+        // Ignore SSH-style git@host:... — the @ comes before the host
+        Some(i) if i < arg.len() - 1 && !arg[i + 1..].contains(':') && !arg[..i].contains(':') => {
+            &arg[..i]
+        }
+        _ => arg,
     }
 }
 
@@ -444,34 +448,24 @@ mod tests {
     #[test]
     fn test_parse_repo_ref() {
         let cases = vec![
-            ("no ref", "api-gateway", "api-gateway", ""),
-            ("branch ref", "user-service@main", "user-service", "main"),
-            ("tag ref", "proto@v1.0", "proto", "v1.0"),
-            ("sha ref", "proto@abc123", "proto", "abc123"),
+            ("no ref", "api-gateway", "api-gateway"),
+            ("strips branch ref", "user-service@main", "user-service"),
+            ("strips tag ref", "proto@v1.0", "proto"),
             (
-                "full identity with ref",
+                "full identity strips ref",
                 "github.com/acme/api@main",
                 "github.com/acme/api",
-                "main",
             ),
-            ("trailing @", "repo@", "repo@", ""),
+            ("trailing @ kept", "repo@", "repo@"),
             (
-                "multiple @ splits on last",
-                "user@host/repo@main",
-                "user@host/repo",
-                "main",
-            ),
-            (
-                "ssh url with ref",
-                "git@github.com:user/repo@main",
+                "ssh url preserved",
                 "git@github.com:user/repo",
-                "main",
+                "git@github.com:user/repo",
             ),
         ];
-        for (name, input, want_name, want_ref) in cases {
-            let (got_name, got_ref) = parse_repo_ref(input);
-            assert_eq!(got_name, want_name, "{}", name);
-            assert_eq!(got_ref, want_ref, "{}", name);
+        for (name, input, want) in cases {
+            let got = parse_repo_ref(input);
+            assert_eq!(got, want, "{}", name);
         }
     }
 }

@@ -841,11 +841,10 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_includes_context_repos() {
+    fn test_apply_includes_all_repos() {
         let tmp = tempfile::tempdir().unwrap();
         let ws_dir = tmp.path();
 
-        // Active repo
         let api_dir = ws_dir.join("api-gateway");
         fs::create_dir_all(&api_dir).unwrap();
         fs::write(
@@ -854,7 +853,6 @@ mod tests {
         )
         .unwrap();
 
-        // Context repo (pinned to main)
         let proto_dir = ws_dir.join("proto");
         fs::create_dir_all(&proto_dir).unwrap();
         fs::write(
@@ -865,7 +863,7 @@ mod tests {
 
         let meta = make_metadata_with_refs(&[
             ("github.com/acme/api-gateway", None),
-            ("github.com/acme/proto", Some("main")),
+            ("github.com/acme/proto", None),
         ]);
         let integration = GoIntegration;
         integration.apply(ws_dir, &meta).unwrap();

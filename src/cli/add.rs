@@ -60,12 +60,12 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let mut to_register: Vec<(String, String)> = Vec::new(); // (identity, url)
 
     for rn in &repo_args {
-        let (name, r) = giturl::parse_repo_ref(rn);
+        let name = giturl::parse_repo_ref(rn);
 
         // Try resolving as a registered shortname first
         match giturl::resolve(name, &identities) {
             Ok(id) => {
-                repo_refs.insert(id, r.to_string());
+                repo_refs.insert(id, String::new());
             }
             Err(_) => {
                 // Not a registered shortname — try parsing as a URL
@@ -74,7 +74,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 })?;
                 let identity = parsed.identity();
                 to_register.push((identity.clone(), name.to_string()));
-                repo_refs.insert(identity, r.to_string());
+                repo_refs.insert(identity, String::new());
             }
         }
     }

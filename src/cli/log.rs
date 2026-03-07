@@ -50,16 +50,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let use_color = !is_json && !is_oneline && std::io::stdout().is_terminal();
 
     let mut repos = Vec::new();
-    for (identity, entry) in &meta.repos {
-        // Skip context repos (pinned to a specific ref)
-        let is_context = match entry {
-            Some(re) => !re.r#ref.is_empty(),
-            None => false,
-        };
-        if is_context {
-            continue;
-        }
-
+    for identity in meta.repos.keys() {
         let dir_name = match meta.dir_name(identity) {
             Ok(d) => d,
             Err(e) => {

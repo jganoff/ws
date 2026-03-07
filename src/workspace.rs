@@ -229,15 +229,8 @@ fn create_inner(
     description: Option<&str>,
 ) -> Result<()> {
     let mut repos: BTreeMap<String, Option<WorkspaceRepoRef>> = BTreeMap::new();
-    for (identity, r) in repo_refs {
-        if r.is_empty() {
-            repos.insert(identity.clone(), None);
-        } else {
-            repos.insert(
-                identity.clone(),
-                Some(WorkspaceRepoRef { r#ref: r.clone() }),
-            );
-        }
+    for identity in repo_refs.keys() {
+        repos.insert(identity.clone(), None);
     }
 
     let identities: Vec<&str> = repo_refs.keys().map(|s| s.as_str()).collect();
@@ -254,13 +247,13 @@ fn create_inner(
         dirs: dirs.clone(),
     };
 
-    for (identity, r) in repo_refs {
+    for identity in repo_refs.keys() {
         let dn = meta.dir_name(identity)?;
         let upstream = upstream_urls
             .get(identity)
             .map(|s| s.as_str())
             .unwrap_or("");
-        clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, branch, r, upstream)
+        clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, branch, upstream)
             .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
     }
 
@@ -520,13 +513,11 @@ pub fn add_repos(
 
     struct CloneInfo {
         identity: String,
-        git_ref: String,
         dir_name: String,
     }
     let mut clones: Vec<CloneInfo> = Vec::new();
 
     for identity in &new_identities {
-        let r = &repo_refs[identity.as_str()];
         let upstream = upstream_urls
             .get(identity.as_str())
             .map(|s| s.as_str())
@@ -549,18 +540,15 @@ pub fn add_repos(
             if !upstream.is_empty() {
                 prompt_origin_url_for_adopt(&dest, upstream)?;
             }
-            if r.is_empty() {
-                prompt_branch_for_adopt(&dest, &branch)?;
-            }
+            prompt_branch_for_adopt(&dest, &branch)?;
             eprintln!("  adopted existing directory {}/", dn);
         } else {
-            clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, r, upstream)
+            clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, &branch, upstream)
                 .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
         }
 
         clones.push(CloneInfo {
             identity: identity.to_string(),
-            git_ref: r.clone(),
             dir_name: dn,
         });
     }
@@ -587,16 +575,7 @@ pub fn add_repos(
                 meta.dirs.insert(ci.identity.clone(), ci.dir_name.clone());
             }
 
-            if ci.git_ref.is_empty() {
-                meta.repos.insert(ci.identity.clone(), None);
-            } else {
-                meta.repos.insert(
-                    ci.identity.clone(),
-                    Some(WorkspaceRepoRef {
-                        r#ref: ci.git_ref.clone(),
-                    }),
-                );
-            }
+            meta.repos.insert(ci.identity.clone(), None);
         }
         Ok(())
     })?;
@@ -641,15 +620,6 @@ pub fn remove_repos(
     if !force {
         let mut problems: Vec<String> = Vec::new();
         for identity in identities_to_remove {
-            let entry = &snapshot.repos[identity];
-            let is_active = match entry {
-                None => true,
-                Some(re) => re.r#ref.is_empty(),
-            };
-            if !is_active {
-                continue;
-            }
-
             let dn = snapshot.dir_name(identity)?;
             let clone_dir = ws_dir.join(&dn);
 
@@ -763,8 +733,6 @@ pub struct RepoInfo {
     pub identity: String,
     pub dir_name: String,
     pub clone_dir: PathBuf,
-    pub is_context: bool,
-    pub pinned_ref: Option<String>,
     pub error: Option<String>,
 }
 
@@ -772,15 +740,7 @@ impl Metadata {
     /// Build a RepoInfo for each repo in the workspace.
     pub fn repo_infos(&self, ws_dir: &Path) -> Vec<RepoInfo> {
         let mut infos = Vec::new();
-        for (identity, entry) in &self.repos {
-            let is_context = match entry {
-                Some(re) => !re.r#ref.is_empty(),
-                None => false,
-            };
-            let pinned_ref = match entry {
-                Some(re) if !re.r#ref.is_empty() => Some(re.r#ref.clone()),
-                _ => None,
-            };
+        for identity in self.repos.keys() {
             let dir_name = match self.dir_name(identity) {
                 Ok(d) => d,
                 Err(e) => {
@@ -788,8 +748,6 @@ impl Metadata {
                         identity: identity.clone(),
                         dir_name: identity.clone(),
                         clone_dir: PathBuf::new(),
-                        is_context,
-                        pinned_ref,
                         error: Some(e.to_string()),
                     });
                     continue;
@@ -800,8 +758,6 @@ impl Metadata {
                 identity: identity.clone(),
                 dir_name,
                 clone_dir,
-                is_context,
-                pinned_ref,
                 error: None,
             });
         }
@@ -1096,15 +1052,7 @@ pub fn remove(paths: &Paths, name: &str, force: bool, permanent: bool) -> Result
     if !force {
         let mut problems: Vec<String> = Vec::new();
 
-        for (identity, entry) in &meta.repos {
-            let is_active = match entry {
-                None => true,
-                Some(re) => re.r#ref.is_empty(),
-            };
-            if !is_active {
-                continue;
-            }
-
+        for identity in meta.repos.keys() {
             let dn = meta.dir_name(identity)?;
             let clone_dir = ws_dir.join(&dn);
 
@@ -1238,7 +1186,6 @@ pub struct RenameRepoResult {
     pub old_branch: String,
     pub new_branch: String,
     pub ok: bool,
-    pub skipped: bool,
     pub error: Option<String>,
 }
 
@@ -1272,24 +1219,8 @@ pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<Renam
     let old_branch = meta.branch.clone();
     let mut results = Vec::new();
 
-    // Rename branches in active repos
-    for (identity, entry) in &meta.repos {
-        let is_active = match entry {
-            None => true,
-            Some(re) => re.r#ref.is_empty(),
-        };
-        if !is_active {
-            results.push(RenameRepoResult {
-                name: meta.dir_name(identity).unwrap_or_else(|_| identity.clone()),
-                old_branch: old_branch.clone(),
-                new_branch: new_branch.clone(),
-                ok: true,
-                skipped: true,
-                error: None,
-            });
-            continue;
-        }
-
+    // Rename branches in all repos
+    for identity in meta.repos.keys() {
         let dn = meta.dir_name(identity)?;
         let clone_dir = old_dir.join(&dn);
 
@@ -1300,7 +1231,7 @@ pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<Renam
                     old_branch: old_branch.clone(),
                     new_branch: new_branch.clone(),
                     ok: true,
-                    skipped: false,
+
                     error: None,
                 });
             }
@@ -1310,7 +1241,7 @@ pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<Renam
                     old_branch: old_branch.clone(),
                     new_branch: new_branch.clone(),
                     ok: false,
-                    skipped: false,
+
                     error: Some(e.to_string()),
                 });
             }
@@ -1320,7 +1251,7 @@ pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<Renam
     // Bail if any branch rename failed — roll back successful renames first
     let failures: Vec<&RenameRepoResult> = results.iter().filter(|r| !r.ok).collect();
     if !failures.is_empty() {
-        for r in results.iter().filter(|r| r.ok && !r.skipped) {
+        for r in results.iter().filter(|r| r.ok) {
             let clone_dir = old_dir.join(&r.name);
             if let Err(e) = git::branch_rename(&clone_dir, &new_branch, &old_branch) {
                 eprintln!("  warning: rollback failed for {}: {}", r.name, e);
@@ -1396,16 +1327,14 @@ pub fn list_all(workspaces_dir: &Path) -> Result<Vec<String>> {
 ///      — populate origin refs from mirror (local-only, no network, no trace)
 ///   5. `git remote set-head origin <default_branch>`
 ///   6. Fix tracking: set-upstream-to origin/<default> or unset
-///   7. Checkout: context repos get pinned ref; active repos get workspace
-///      branch via `--no-track` (intentional: tracking `origin/main`
-///      would cause bare `git push` to target the wrong branch)
+///   7. Checkout workspace branch via `--no-track` (intentional: tracking
+///      `origin/main` would cause bare `git push` to target the wrong branch)
 fn clone_from_mirror(
     mirrors_dir: &Path,
     ws_dir: &Path,
     identity: &str,
     dir_name: &str,
     branch: &str,
-    git_ref: &str,
     upstream_url: &str,
 ) -> Result<()> {
     let parsed = parse_identity(identity)?;
@@ -1454,26 +1383,7 @@ fn clone_from_mirror(
         }
     }
 
-    // 7. Checkout the right ref/branch
-    // Context repo: check out at the specified ref
-    if !git_ref.is_empty() {
-        let origin_ref = format!("origin/{}", git_ref);
-        if git::branch_exists(&dest, git_ref) {
-            // Local branch already exists
-            git::checkout(&dest, git_ref)?;
-        } else if git::ref_exists(&dest, &format!("refs/remotes/origin/{}", git_ref)) {
-            // Create branch from origin/<ref>, no tracking — devs must
-            // explicitly `git push -u` to avoid accidentally pushing to the
-            // wrong branch.
-            git::checkout_new_branch(&dest, git_ref, &origin_ref)?;
-        } else {
-            // Tag or SHA: detached HEAD
-            git::checkout_detached(&dest, git_ref)?;
-        }
-        return Ok(());
-    }
-
-    // Active repo: create/checkout workspace branch
+    // 7. Checkout workspace branch
     if git::branch_exists(&dest, branch) {
         git::checkout(&dest, branch)?;
         return Ok(());
@@ -1617,34 +1527,6 @@ mod tests {
         assert!(
             result.is_err(),
             "workspace branch should have no upstream tracking"
-        );
-    }
-
-    #[test]
-    fn test_context_repo_default_branch_tracks_origin() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-
-        // Context repo pinned to "main" — same as default branch
-        let refs = BTreeMap::from([(identity, "main".into())]);
-        create(&paths, "ctx-track", &refs, None, &upstream_urls, None).unwrap();
-
-        let ws_dir = dir(&paths.workspaces_dir, "ctx-track");
-        let clone_dir = ws_dir.join("test-repo");
-
-        // main should track origin/main (the real upstream), not wsp-mirror/main
-        let upstream = git::run(
-            Some(&clone_dir),
-            &[
-                "for-each-ref",
-                "--format=%(upstream:short)",
-                "refs/heads/main",
-            ],
-        )
-        .unwrap();
-        assert_eq!(
-            upstream, "origin/main",
-            "context repo main should track origin/main, got {:?}",
-            upstream
         );
     }
 
@@ -2145,22 +2027,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_with_context_repo() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-
-        // Create workspace with the repo as context (ref = "main")
-        let refs = BTreeMap::from([(identity.clone(), "main".into())]);
-        create(&paths, "ctx-ws", &refs, None, &upstream_urls, None).unwrap();
-
-        let ws_dir = dir(&paths.workspaces_dir, "ctx-ws");
-        let meta = load_metadata(&ws_dir).unwrap();
-
-        assert!(meta.repos[&identity].is_some());
-        assert_eq!(meta.repos[&identity].as_ref().unwrap().r#ref, "main");
-        assert!(ws_dir.join("test-repo").exists());
-    }
-
-    #[test]
     fn test_add_repos_to_existing_workspace() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
@@ -2205,18 +2071,6 @@ mod tests {
             result.is_err(),
             "repo added via add_repos should have no upstream tracking"
         );
-    }
-
-    #[test]
-    fn test_remove_context_repo() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-
-        // Create workspace with context repo (pinned to "main")
-        let refs = BTreeMap::from([(identity, "main".into())]);
-        create(&paths, "rm-ws-ctx", &refs, None, &upstream_urls, None).unwrap();
-
-        // Remove should succeed without touching context repo branches
-        remove(&paths, "rm-ws-ctx", false, true).unwrap();
     }
 
     /// Creates a second mirror with a different owner but same repo name.
@@ -2540,20 +2394,6 @@ mod tests {
         assert!(ws_dir.join("test-repo").exists());
         assert!(!ws_dir.join("user-test-repo").exists());
         assert!(!ws_dir.join("other-test-repo").exists());
-    }
-
-    #[test]
-    fn test_remove_repos_context_repo() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-
-        let refs = BTreeMap::from([(identity.clone(), "main".into())]);
-        create(&paths, "rm-repo-ctx", &refs, None, &upstream_urls, None).unwrap();
-
-        let ws_dir = dir(&paths.workspaces_dir, "rm-repo-ctx");
-        remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false).unwrap();
-
-        let meta = load_metadata(&ws_dir).unwrap();
-        assert!(meta.repos.is_empty());
     }
 
     /// Helper: squash-merge a branch into target in the source repo.
@@ -3707,7 +3547,6 @@ mod tests {
         let results = rename(&paths, "old-name", "new-name").unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].ok);
-        assert!(!results[0].skipped);
         assert_eq!(results[0].old_branch, "old-name");
         assert_eq!(results[0].new_branch, "new-name");
 
@@ -3751,20 +3590,6 @@ mod tests {
         let clone_dir = dir(&paths.workspaces_dir, "your-feature").join("test-repo");
         let branch = git::branch_current(&clone_dir).unwrap();
         assert_eq!(branch, "jganoff/your-feature");
-    }
-
-    #[test]
-    fn test_rename_skips_context_repos() {
-        let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
-        let refs = BTreeMap::from([(identity.clone(), "main".to_string())]);
-        create(&paths, "ctx-ws", &refs, None, &upstream_urls, None).unwrap();
-
-        let results = rename(&paths, "ctx-ws", "ctx-ws-new").unwrap();
-        assert_eq!(results.len(), 1);
-        assert!(results[0].skipped);
-        assert!(results[0].ok);
-
-        assert!(dir(&paths.workspaces_dir, "ctx-ws-new").exists());
     }
 
     #[test]

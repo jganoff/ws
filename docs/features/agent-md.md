@@ -4,7 +4,7 @@ Generate `AGENTS.md` (with `CLAUDE.md` symlink) at the workspace root so AI agen
 
 ## Motivation
 
-When working inside a repo in a wsp workspace, AI agents (Claude Code, Cursor, etc.) have no visibility into workspace-level context: what other repos exist, which are active vs. context, what branch the workspace is on, or what `wsp` commands are available. Generating a standard agent context file at the workspace root solves this.
+When working inside a repo in a wsp workspace, AI agents (Claude Code, Cursor, etc.) have no visibility into workspace-level context: what other repos exist, what branch the workspace is on, or what `wsp` commands are available. Generating a standard agent context file at the workspace root solves this.
 
 ## File Layout
 
