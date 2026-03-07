@@ -903,7 +903,7 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
             }
         }
     } else if has_detail {
-        println!("\nUse -v to see file details.");
+        println!("\nUse `wsp st -v` to see file details.");
     }
 
     Ok(())
