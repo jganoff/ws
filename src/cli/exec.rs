@@ -92,6 +92,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
+    workspace::touch_last_used(&ws_dir);
+
     Ok(Output::Exec(ExecOutput { repos: results }))
 }
 

@@ -75,6 +75,8 @@ mod tests {
             branch: "test".into(),
             repos: map,
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         }
     }

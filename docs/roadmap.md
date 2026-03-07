@@ -65,23 +65,6 @@ Applied via `git config --local` in each clone during `wsp new` and `wsp repo ad
 - [ ] `wsp config set/get/unset` support for `git_config.*` keys
 - [ ] Include in `--json` output of `wsp config ls`
 
-### Workspace Descriptions
-
-**Complexity:** Small
-
-Record the purpose of a workspace so `wsp ls` remains interpretable at scale. Stored in `.wsp.yaml`.
-
-```
-$ wsp new add-billing -g backend --description "migrating billing to stripe v3"
-$ wsp ls
-add-billing   3 repos  jganoff/add-billing  "migrating billing to stripe v3"
-```
-
-- [ ] `--description` flag on `wsp new`
-- [ ] `description` field in `.wsp.yaml` metadata
-- [ ] Show in `wsp ls` (human and `--json`)
-- [ ] `wsp describe <workspace> <text>` to set/update after creation
-
 ### `wsp doctor`
 
 **Complexity:** Medium
@@ -181,24 +164,6 @@ Shell-script hooks that run at key points in the workspace lifecycle. Enables te
 - [ ] Timeout and error handling (hook failure = warning, not abort)
 - [ ] Trust model: per-workspace hooks from `.wsp.yaml` require explicit `wsp hooks trust` with content hash verification
 - [ ] No shell interpolation of workspace variables — pass as env vars (`WSP_WORKSPACE_NAME`, etc.)
-
-### Workspace Age & Staleness Signals
-
-**Complexity:** Small
-
-Surface creation date, last-used date, and staleness signals in `wsp ls` and `wsp st` so old workspaces are obvious at a glance.
-
-```
-$ wsp ls
-add-billing   3 repos  jganoff/add-billing  created 14d ago  used 2d ago
-old-feature   2 repos  jganoff/old-feature  created 45d ago  used 30d ago  (merged)
-```
-
-- [ ] Show `created` (already in `.wsp.yaml`) in `wsp ls` and `wsp st` (human and `--json`)
-- [ ] `last_used` field in `.wsp.yaml` — updated on `wsp cd`, `wsp sync`, `wsp exec`, `wsp repo add/rm`
-- [ ] `last_activity` — most recent commit timestamp across all repos
-- [ ] `merged` — are all active branches merged into their default branch?
-- [ ] Include all fields in `--json` output
 
 ## P2 — Agent & Ecosystem
 

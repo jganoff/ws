@@ -150,6 +150,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         workspace: meta.name,
         branch: meta.branch,
         workspace_dir: ws_dir,
+        description: meta.description,
         repos,
         root,
         verbose,

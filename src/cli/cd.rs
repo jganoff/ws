@@ -10,7 +10,7 @@ use super::completers;
 
 pub fn cmd() -> Command {
     Command::new("cd")
-        .about("Change directory into a workspace [read-only]")
+        .about("Change directory into a workspace")
         .arg(
             Arg::new("workspace")
                 .required(true)
@@ -29,6 +29,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     if let Ok(meta) = workspace::load_metadata(&ws_dir) {
         workspace::propagate_mirror_to_clones(&paths.mirrors_dir, &ws_dir, &meta, false);
     }
+
+    workspace::touch_last_used(&ws_dir);
 
     if std::env::var("WSP_SHELL").is_err() {
         eprintln!(

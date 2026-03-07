@@ -280,6 +280,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
+    if !dry_run {
+        workspace::touch_last_used(&ws_dir);
+    }
+
     Ok(Output::Sync(SyncOutput {
         workspace: meta.name,
         branch: meta.branch,

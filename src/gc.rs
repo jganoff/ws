@@ -262,6 +262,8 @@ mod tests {
             branch: format!("test/{}", name),
             repos: std::collections::BTreeMap::new(),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: std::collections::BTreeMap::new(),
         };
         let yaml = serde_yaml_ng::to_string(&meta).unwrap();

@@ -61,6 +61,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     eprintln!("Removing {} repo(s) from workspace...", resolved.len());
     workspace::remove_repos(&paths.mirrors_dir, &ws_dir, &resolved, force)?;
+    workspace::touch_last_used(&ws_dir);
 
     let meta_result = workspace::load_metadata(&ws_dir);
     match &meta_result {

@@ -4,6 +4,7 @@ pub mod cfg;
 pub mod completers;
 pub mod completion;
 pub mod delete;
+pub mod describe;
 pub mod diff;
 pub mod exec;
 pub mod fetch;
@@ -32,7 +33,9 @@ use crate::workspace;
 const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     (
         "Workspace",
-        &["new", "repo", "cd", "ls", "rename", "rm", "recover"],
+        &[
+            "new", "repo", "cd", "ls", "rename", "describe", "rm", "recover",
+        ],
     ),
     ("Workflow", &["st", "diff", "log", "sync", "exec"]),
     ("Admin", &["registry", "group", "config", "completion"]),
@@ -88,6 +91,7 @@ pub fn build_cli() -> Command {
         .subcommand(cd::cmd())
         .subcommand(recover::cmd())
         .subcommand(rename::cmd())
+        .subcommand(describe::cmd())
         // Workspace-scoped repo commands
         .subcommand(repo_ws)
         // Admin commands (promoted from `wsp setup`)
@@ -167,6 +171,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("exec", m)) => exec::run(m, paths),
         Some(("recover", m)) => recover::run(m, paths),
         Some(("rename", m)) => rename::run(m, paths),
+        Some(("describe", m)) => describe::run(m, paths),
 
         // --- Admin commands (promoted from setup) ---
         Some(("registry", sub)) => registry::dispatch(sub, paths),

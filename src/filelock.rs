@@ -239,6 +239,8 @@ mod tests {
             branch: "test-branch".into(),
             repos: BTreeMap::new(),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         };
         save_metadata(ws_dir, &meta).unwrap();

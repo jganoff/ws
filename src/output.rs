@@ -141,6 +141,11 @@ pub struct WorkspaceListEntry {
     pub branch: String,
     pub repo_count: usize,
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub created: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -148,6 +153,8 @@ pub struct StatusOutput {
     pub workspace: String,
     pub branch: String,
     pub workspace_dir: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub repos: Vec<RepoStatusEntry>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub root: Vec<String>,
@@ -424,6 +431,9 @@ impl WorkspaceListOutput {
                 branch: "my-feature".into(),
                 repo_count: 2,
                 path: "~/dev/workspaces/my-feature".into(),
+                description: Some("migrating billing to stripe v3".into()),
+                created: "2026-03-01T10:00:00+00:00".into(),
+                last_used: Some("2026-03-06T15:30:00+00:00".into()),
             }],
         }
     }
@@ -435,6 +445,7 @@ impl StatusOutput {
         Self {
             workspace: "my-feature".into(),
             branch: "my-feature".into(),
+            description: Some("migrating billing to stripe v3".into()),
             workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
             repos: vec![RepoStatusEntry {
                 name: "api-gateway".into(),
@@ -814,21 +825,36 @@ fn render_workspace_list_table(v: WorkspaceListOutput) -> Result<()> {
         println!("No workspaces.");
         return Ok(());
     }
+    let now = chrono::Utc::now().timestamp();
     let mut table = Table::new(
         Box::new(std::io::stdout()),
         vec![
             "Name".to_string(),
             "Branch".to_string(),
             "Repos".to_string(),
-            "Path".to_string(),
+            "Created".to_string(),
+            "Used".to_string(),
+            "Description".to_string(),
         ],
     );
     for ws in &v.workspaces {
+        let created = chrono::DateTime::parse_from_rfc3339(&ws.created)
+            .map(|t| format_relative_time(t.timestamp(), now))
+            .unwrap_or_default();
+        let used = ws
+            .last_used
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|t| format_relative_time(t.timestamp(), now))
+            .unwrap_or_else(|| "-".to_string());
+        let desc = ws.description.as_deref().unwrap_or("").to_string();
         table.add_row(vec![
             ws.name.clone(),
             ws.branch.clone(),
             ws.repo_count.to_string(),
-            ws.path.clone(),
+            created,
+            used,
+            desc,
         ])?;
     }
     table.render()
@@ -860,7 +886,14 @@ fn render_workspace_repo_list_table(v: WorkspaceRepoListOutput) -> Result<()> {
 }
 
 fn render_status_table(v: StatusOutput) -> Result<()> {
-    println!("Workspace: {}  Branch: {}\n", v.workspace, v.branch);
+    if let Some(ref desc) = v.description {
+        println!(
+            "Workspace: {}  Branch: {}  ({})\n",
+            v.workspace, v.branch, desc
+        );
+    } else {
+        println!("Workspace: {}  Branch: {}\n", v.workspace, v.branch);
+    }
 
     let mut table = Table::new(
         Box::new(std::io::stdout()),
@@ -1448,11 +1481,17 @@ mod tests {
                 branch: "my-ws".into(),
                 repo_count: 2,
                 path: "/home/user/dev/workspaces/my-ws".into(),
+                description: Some("test workspace".into()),
+                created: "2026-03-01T10:00:00+00:00".into(),
+                last_used: None,
             }],
         };
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["workspaces"][0]["name"], "my-ws");
         assert_eq!(val["workspaces"][0]["repo_count"], 2);
+        assert_eq!(val["workspaces"][0]["description"], "test workspace");
+        assert_eq!(val["workspaces"][0]["created"], "2026-03-01T10:00:00+00:00");
+        assert!(val["workspaces"][0].get("last_used").is_none());
     }
 
     #[test]
@@ -1510,6 +1549,7 @@ mod tests {
             workspace: "my-ws".into(),
             branch: "my-ws".into(),
             workspace_dir: PathBuf::from("/tmp/workspaces/my-ws"),
+            description: None,
             repos: vec![
                 RepoStatusEntry {
                     name: "repo-a".into(),
@@ -1568,6 +1608,7 @@ mod tests {
             workspace: "my-ws".into(),
             branch: "my-ws".into(),
             workspace_dir: PathBuf::from("/tmp/workspaces/my-ws"),
+            description: None,
             repos: vec![],
             root: vec!["?? notes.md".into(), "?? my-stuff/".into()],
             verbose: true,

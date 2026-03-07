@@ -40,6 +40,10 @@ pub struct Metadata {
     pub branch: String,
     pub repos: BTreeMap<String, Option<WorkspaceRepoRef>>,
     pub created: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dirs: BTreeMap<String, String>,
 }
@@ -164,12 +168,24 @@ pub fn detect(start_dir: &Path) -> Result<PathBuf> {
     }
 }
 
+/// Update `last_used` timestamp in workspace metadata.
+/// Best-effort: errors are logged to stderr but not propagated.
+pub fn touch_last_used(ws_dir: &Path) {
+    if let Err(e) = crate::filelock::with_metadata(ws_dir, |meta| {
+        meta.last_used = Some(chrono::Utc::now());
+        Ok(())
+    }) {
+        eprintln!("warning: failed to update last_used: {}", e);
+    }
+}
+
 pub fn create(
     paths: &Paths,
     name: &str,
     repo_refs: &BTreeMap<String, String>,
     branch_prefix: Option<&str>,
     upstream_urls: &BTreeMap<String, String>,
+    description: Option<&str>,
 ) -> Result<()> {
     validate_name(name)?;
 
@@ -192,6 +208,7 @@ pub fn create(
         name,
         repo_refs,
         upstream_urls,
+        description,
     ) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -209,6 +226,7 @@ fn create_inner(
     name: &str,
     repo_refs: &BTreeMap<String, String>,
     upstream_urls: &BTreeMap<String, String>,
+    description: Option<&str>,
 ) -> Result<()> {
     let mut repos: BTreeMap<String, Option<WorkspaceRepoRef>> = BTreeMap::new();
     for (identity, r) in repo_refs {
@@ -231,6 +249,8 @@ fn create_inner(
         branch: branch.to_string(),
         repos,
         created: Utc::now(),
+        description: description.map(|s| s.to_string()),
+        last_used: None,
         dirs: dirs.clone(),
     };
 
@@ -1564,7 +1584,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "test-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "test-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "test-ws");
         let meta = load_metadata(&ws_dir).unwrap();
@@ -1587,7 +1607,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "no-track", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "no-track", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "no-track");
         let clone_dir = ws_dir.join("test-repo");
@@ -1606,7 +1626,7 @@ mod tests {
 
         // Context repo pinned to "main" — same as default branch
         let refs = BTreeMap::from([(identity, "main".into())]);
-        create(&paths, "ctx-track", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ctx-track", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "ctx-track");
         let clone_dir = ws_dir.join("test-repo");
@@ -1633,7 +1653,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "track-origin", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "track-origin", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "track-origin");
         let clone_dir = ws_dir.join("test-repo");
@@ -1660,7 +1680,15 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "my-feature", &refs, Some("jganoff"), &upstream_urls).unwrap();
+        create(
+            &paths,
+            "my-feature",
+            &refs,
+            Some("jganoff"),
+            &upstream_urls,
+            None,
+        )
+        .unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "my-feature");
         let meta = load_metadata(&ws_dir).unwrap();
@@ -1676,7 +1704,15 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "empty-prefix", &refs, Some(""), &upstream_urls).unwrap();
+        create(
+            &paths,
+            "empty-prefix",
+            &refs,
+            Some(""),
+            &upstream_urls,
+            None,
+        )
+        .unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "empty-prefix");
         let meta = load_metadata(&ws_dir).unwrap();
@@ -1689,8 +1725,8 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "test-ws-dup", &refs, None, &upstream_urls).unwrap();
-        assert!(create(&paths, "test-ws-dup", &refs, None, &upstream_urls).is_err());
+        create(&paths, "test-ws-dup", &refs, None, &upstream_urls, None).unwrap();
+        assert!(create(&paths, "test-ws-dup", &refs, None, &upstream_urls, None).is_err());
     }
 
     #[test]
@@ -1711,7 +1747,7 @@ mod tests {
 
         // Create workspace — local main should be fast-forwarded to origin/main
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "ff-test", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ff-test", &refs, None, &upstream_urls, None).unwrap();
 
         let clone_dir = dir(&paths.workspaces_dir, "ff-test").join("test-repo");
 
@@ -1730,7 +1766,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "test-ws-detect", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "test-ws-detect", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "test-ws-detect");
 
@@ -1755,7 +1791,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-merged", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-merged", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-merged");
         assert!(ws_dir.exists());
@@ -1799,7 +1835,7 @@ mod tests {
 
         // Create workspace
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-origin-ahead", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-origin-ahead", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-origin-ahead");
         assert!(ws_dir.exists());
@@ -1814,7 +1850,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-unmerged", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-unmerged", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-unmerged");
         let repo_dir = ws_dir.join("test-repo");
@@ -1858,7 +1894,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-force", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-force", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-force");
         let repo_dir = ws_dir.join("test-repo");
@@ -1894,7 +1930,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "rm-dirty", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-dirty", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-dirty");
         let repo_dir = ws_dir.join("test-repo");
@@ -1921,7 +1957,7 @@ mod tests {
 
         // Create a workspace
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "ws-1-list", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ws-1-list", &refs, None, &upstream_urls, None).unwrap();
 
         let names = list_all(&paths.workspaces_dir).unwrap();
         assert_eq!(names, vec!["ws-1-list"]);
@@ -1939,6 +1975,8 @@ mod tests {
                 ("github.com/user/repo-b".into(), None),
             ]),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         };
 
@@ -1976,6 +2014,8 @@ mod tests {
                 ),
             ]),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         };
 
@@ -2093,7 +2133,7 @@ mod tests {
         // Try to create with a nonexistent repo identity — will fail
         let refs = BTreeMap::from([("nonexistent.local/user/nope".into(), String::new())]);
         let upstream_urls = BTreeMap::new();
-        let result = create(&paths, "fail-ws", &refs, None, &upstream_urls);
+        let result = create(&paths, "fail-ws", &refs, None, &upstream_urls, None);
         assert!(result.is_err());
 
         // Workspace dir should have been cleaned up
@@ -2110,7 +2150,7 @@ mod tests {
 
         // Create workspace with the repo as context (ref = "main")
         let refs = BTreeMap::from([(identity.clone(), "main".into())]);
-        create(&paths, "ctx-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ctx-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "ctx-ws");
         let meta = load_metadata(&ws_dir).unwrap();
@@ -2126,7 +2166,7 @@ mod tests {
 
         // Create workspace with active repo
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "add-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "add-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "add-ws");
 
@@ -2142,7 +2182,7 @@ mod tests {
         let (paths, _d, source_repo, identity1, mut upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity1, String::new())]);
-        create(&paths, "add-no-track", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "add-no-track", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "add-no-track");
 
@@ -2173,7 +2213,7 @@ mod tests {
 
         // Create workspace with context repo (pinned to "main")
         let refs = BTreeMap::from([(identity, "main".into())]);
-        create(&paths, "rm-ws-ctx", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-ws-ctx", &refs, None, &upstream_urls, None).unwrap();
 
         // Remove should succeed without touching context repo branches
         remove(&paths, "rm-ws-ctx", false, true).unwrap();
@@ -2249,6 +2289,8 @@ mod tests {
             branch: "test".into(),
             repos: BTreeMap::from([("github.com/acme/utils".into(), None)]),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::from([("github.com/acme/utils".into(), "acme-utils".into())]),
         };
         assert_eq!(
@@ -2265,6 +2307,8 @@ mod tests {
             branch: "test".into(),
             repos: BTreeMap::from([("github.com/acme/utils".into(), None)]),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         };
         assert_eq!(meta.dir_name("github.com/acme/utils").unwrap(), "utils");
@@ -2299,7 +2343,7 @@ mod tests {
             (identity1.clone(), String::new()),
             (identity2.clone(), String::new()),
         ]);
-        create(&paths, "collide-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "collide-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "collide-ws");
         let meta = load_metadata(&ws_dir).unwrap();
@@ -2315,7 +2359,7 @@ mod tests {
         let (paths, _d, source_repo, identity1, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity1.clone(), String::new())]);
-        create(&paths, "add-collide", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "add-collide", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "add-collide");
         assert!(ws_dir.join("test-repo").exists());
@@ -2344,7 +2388,7 @@ mod tests {
 
         // Create workspace with no repos
         let refs = BTreeMap::new();
-        create(&paths, "batch-collide", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "batch-collide", &refs, None, &upstream_urls, None).unwrap();
         let ws_dir = dir(&paths.workspaces_dir, "batch-collide");
 
         // Add two repos with the same short name ("test-repo") in one batch
@@ -2391,7 +2435,7 @@ mod tests {
             (identity1.clone(), String::new()),
             (identity2.clone(), String::new()),
         ]);
-        create(&paths, "rm-repo-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-repo-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-ws");
         assert!(ws_dir.join("test-repo").exists());
@@ -2412,7 +2456,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "rm-repo-nf", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-repo-nf", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-nf");
         let result = remove_repos(
@@ -2435,7 +2479,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-repo-dirty", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-repo-dirty", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-dirty");
         let repo_dir = ws_dir.join("test-repo");
@@ -2451,7 +2495,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-repo-force", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-repo-force", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-force");
         let repo_dir = ws_dir.join("test-repo");
@@ -2481,7 +2525,7 @@ mod tests {
             (identity1.clone(), String::new()),
             (identity2.clone(), String::new()),
         ]);
-        create(&paths, "rm-repo-col", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-repo-col", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-col");
         assert!(ws_dir.join("user-test-repo").exists());
@@ -2503,7 +2547,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), "main".into())]);
-        create(&paths, "rm-repo-ctx", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-repo-ctx", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-repo-ctx");
         remove_repos(&paths.mirrors_dir, &ws_dir, &[identity.clone()], false).unwrap();
@@ -2600,7 +2644,7 @@ mod tests {
         let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-squash", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-squash", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-squash");
         let repo_dir = ws_dir.join("test-repo");
@@ -2618,7 +2662,7 @@ mod tests {
         let (paths, _d, _source_repo, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-pushed", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-pushed", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-pushed");
         let repo_dir = ws_dir.join("test-repo");
@@ -2641,7 +2685,7 @@ mod tests {
         let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rmr-squash", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rmr-squash", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rmr-squash");
         let repo_dir = ws_dir.join("test-repo");
@@ -2659,7 +2703,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rmr-pushed", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rmr-pushed", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rmr-pushed");
         let repo_dir = ws_dir.join("test-repo");
@@ -2681,7 +2725,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "only-origin", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "only-origin", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "only-origin");
         let clone_dir = ws_dir.join("test-repo");
@@ -2704,7 +2748,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-no-mirror", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-no-mirror", &refs, None, &upstream_urls, None).unwrap();
 
         // The workspace branch should NOT exist in the mirror (clones are independent)
         let parsed = parse_identity(&identity).unwrap();
@@ -2721,7 +2765,7 @@ mod tests {
         let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "prop-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "prop-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "prop-ws");
         let clone_dir = ws_dir.join("test-repo");
@@ -2772,7 +2816,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "prop-legacy", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "prop-legacy", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "prop-legacy");
         let clone_dir = ws_dir.join("test-repo");
@@ -2806,7 +2850,7 @@ mod tests {
         let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "prop-prune", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "prop-prune", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "prop-prune");
         let clone_dir = ws_dir.join("test-repo");
@@ -2867,7 +2911,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "origin-refs", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "origin-refs", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "origin-refs");
         let clone_dir = ws_dir.join("test-repo");
@@ -2884,7 +2928,7 @@ mod tests {
         let (paths, _d, source_repo, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "rm-div-squash", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "rm-div-squash", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "rm-div-squash");
         let repo_dir = ws_dir.join("test-repo");
@@ -2949,6 +2993,8 @@ mod tests {
             branch: "my-ws".into(),
             repos: BTreeMap::from([("github.com/user/repo-a".into(), None)]),
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         };
 
@@ -2999,6 +3045,8 @@ mod tests {
             branch: "test".into(),
             repos: map,
             created: Utc::now(),
+            description: None,
+            last_used: None,
             dirs: BTreeMap::new(),
         }
     }
@@ -3462,7 +3510,7 @@ mod tests {
 
         // Create workspace with the repo first
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "adopt-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "adopt-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "adopt-ws");
         let meta = load_metadata(&ws_dir).unwrap();
@@ -3545,7 +3593,7 @@ mod tests {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
 
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "adopt-mismatch", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "adopt-mismatch", &refs, None, &upstream_urls, None).unwrap();
 
         let ws_dir = dir(&paths.workspaces_dir, "adopt-mismatch");
 
@@ -3637,7 +3685,7 @@ mod tests {
 
         // Create workspace — this used to leave staged diffs
         let refs = BTreeMap::from([(identity, String::new())]);
-        create(&paths, "clean-idx", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "clean-idx", &refs, None, &upstream_urls, None).unwrap();
 
         let clone_dir = dir(&paths.workspaces_dir, "clean-idx").join("test-repo");
 
@@ -3654,7 +3702,7 @@ mod tests {
     fn test_rename_basic() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "old-name", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "old-name", &refs, None, &upstream_urls, None).unwrap();
 
         let results = rename(&paths, "old-name", "new-name").unwrap();
         assert_eq!(results.len(), 1);
@@ -3682,7 +3730,15 @@ mod tests {
     fn test_rename_with_branch_prefix() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "my-feature", &refs, Some("jganoff"), &upstream_urls).unwrap();
+        create(
+            &paths,
+            "my-feature",
+            &refs,
+            Some("jganoff"),
+            &upstream_urls,
+            None,
+        )
+        .unwrap();
 
         let results = rename(&paths, "my-feature", "your-feature").unwrap();
         assert!(results[0].ok);
@@ -3701,7 +3757,7 @@ mod tests {
     fn test_rename_skips_context_repos() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
         let refs = BTreeMap::from([(identity.clone(), "main".to_string())]);
-        create(&paths, "ctx-ws", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ctx-ws", &refs, None, &upstream_urls, None).unwrap();
 
         let results = rename(&paths, "ctx-ws", "ctx-ws-new").unwrap();
         assert_eq!(results.len(), 1);
@@ -3715,8 +3771,8 @@ mod tests {
     fn test_rename_target_exists() {
         let (paths, _d, _r, identity, upstream_urls) = setup_test_env();
         let refs = BTreeMap::from([(identity.clone(), String::new())]);
-        create(&paths, "ws-a", &refs, None, &upstream_urls).unwrap();
-        create(&paths, "ws-b", &refs, None, &upstream_urls).unwrap();
+        create(&paths, "ws-a", &refs, None, &upstream_urls, None).unwrap();
+        create(&paths, "ws-b", &refs, None, &upstream_urls, None).unwrap();
 
         let err = rename(&paths, "ws-a", "ws-b").unwrap_err();
         assert!(err.to_string().contains("already exists"));

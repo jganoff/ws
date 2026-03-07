@@ -38,6 +38,12 @@ pub fn cmd() -> Command {
                 .action(clap::ArgAction::SetTrue)
                 .help("Skip fetching mirrors before cloning"),
         )
+        .arg(
+            Arg::new("description")
+                .short('d')
+                .long("description")
+                .help("Purpose of the workspace"),
+        )
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -48,6 +54,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .unwrap_or_default();
     let group_name = matches.get_one::<String>("group");
     let no_fetch = matches.get_flag("no-fetch");
+    let description = matches.get_one::<String>("description");
 
     let cfg = config::Config::load_from(&paths.config_path)
         .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
@@ -140,7 +147,14 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         branch,
         repo_refs.len()
     );
-    workspace::create(paths, ws_name, &repo_refs, branch_prefix, &upstream_urls)?;
+    workspace::create(
+        paths,
+        ws_name,
+        &repo_refs,
+        branch_prefix,
+        &upstream_urls,
+        description.map(|s| s.as_str()),
+    )?;
 
     let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
     let meta_result = workspace::load_metadata(&ws_dir);

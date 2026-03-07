@@ -137,6 +137,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     eprintln!("Adding {} repos to workspace...", repo_refs.len());
     workspace::add_repos(&paths.mirrors_dir, &ws_dir, &repo_refs, &upstream_urls)?;
+    workspace::touch_last_used(&ws_dir);
 
     let meta_result = workspace::load_metadata(&ws_dir);
     match &meta_result {
