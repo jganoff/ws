@@ -139,6 +139,7 @@ fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 .into_iter()
                 .map(|url| tmpl::TemplateRepo { url })
                 .collect(),
+            settings: None,
         }
     };
 

@@ -15,6 +15,16 @@ use crate::workspace;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Template {
     pub repos: Vec<TemplateRepo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<TemplateSettings>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TemplateSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language_integrations: Option<std::collections::BTreeMap<String, bool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +33,26 @@ pub struct TemplateRepo {
 }
 
 impl Template {
+    /// Apply template settings onto a config, returning a modified copy.
+    /// Template settings override global config; absent template fields leave config unchanged.
+    pub fn apply_settings(&self, cfg: &config::Config) -> config::Config {
+        let mut effective = cfg.clone();
+        if let Some(ref settings) = self.settings {
+            if let Some(ref li) = settings.language_integrations {
+                let target = effective
+                    .language_integrations
+                    .get_or_insert_with(std::collections::BTreeMap::new);
+                for (k, v) in li {
+                    target.insert(k.clone(), *v);
+                }
+            }
+            if let Some(ref strategy) = settings.sync_strategy {
+                effective.sync_strategy = Some(strategy.clone());
+            }
+        }
+        effective
+    }
+
     /// Derive identities from repo URLs using giturl::parse.
     pub fn identities(&self) -> Result<Vec<String>> {
         self.repos
@@ -194,7 +224,10 @@ pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
         bail!("workspace {:?} has no repos", ws_name);
     }
 
-    Ok(Template { repos })
+    Ok(Template {
+        repos,
+        settings: None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +325,14 @@ pub fn migrate_group(
         return Ok(false);
     }
 
-    save(templates_dir, group_name, &Template { repos })?;
+    save(
+        templates_dir,
+        group_name,
+        &Template {
+            repos,
+            settings: None,
+        },
+    )?;
     Ok(true)
 }
 
@@ -328,6 +368,7 @@ mod tests {
                     url: "git@github.com:acme/user-service.git".into(),
                 },
             ],
+            settings: None,
         }
     }
 
@@ -636,5 +677,76 @@ mod tests {
 
         assert!(exists(&dir, "backend"));
         assert!(exists(&dir, "frontend"));
+    }
+
+    #[test]
+    fn apply_settings_overrides_config() {
+        use std::collections::BTreeMap;
+
+        let mut cfg = config::Config::default();
+        cfg.sync_strategy = Some("rebase".into());
+        let mut li = BTreeMap::new();
+        li.insert("go".into(), false);
+        cfg.language_integrations = Some(li);
+
+        let tmpl = Template {
+            repos: vec![],
+            settings: Some(TemplateSettings {
+                language_integrations: Some(BTreeMap::from([("go".into(), true)])),
+                sync_strategy: Some("merge".into()),
+            }),
+        };
+
+        let effective = tmpl.apply_settings(&cfg);
+        assert_eq!(effective.sync_strategy.as_deref(), Some("merge"));
+        assert_eq!(
+            effective.language_integrations.as_ref().unwrap()["go"],
+            true
+        );
+    }
+
+    #[test]
+    fn apply_settings_preserves_config_when_absent() {
+        use std::collections::BTreeMap;
+
+        let mut cfg = config::Config::default();
+        cfg.sync_strategy = Some("rebase".into());
+        let mut li = BTreeMap::new();
+        li.insert("go".into(), true);
+        cfg.language_integrations = Some(li);
+
+        let tmpl = Template {
+            repos: vec![],
+            settings: None,
+        };
+
+        let effective = tmpl.apply_settings(&cfg);
+        assert_eq!(effective.sync_strategy.as_deref(), Some("rebase"));
+        assert_eq!(
+            effective.language_integrations.as_ref().unwrap()["go"],
+            true
+        );
+    }
+
+    #[test]
+    fn settings_round_trip_yaml() {
+        use std::collections::BTreeMap;
+
+        let tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            settings: Some(TemplateSettings {
+                language_integrations: Some(BTreeMap::from([("go".into(), true)])),
+                sync_strategy: Some("merge".into()),
+            }),
+        };
+
+        let yaml = to_yaml(&tmpl).unwrap();
+        let parsed: Template = serde_yaml_ng::from_str(&yaml).unwrap();
+
+        let s = parsed.settings.unwrap();
+        assert_eq!(s.sync_strategy.as_deref(), Some("merge"));
+        assert_eq!(s.language_integrations.as_ref().unwrap()["go"], true);
     }
 }

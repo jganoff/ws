@@ -74,6 +74,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     let mut repo_refs: BTreeMap<String, String> = BTreeMap::new();
     let mut created_from: Option<String> = None;
+    let mut loaded_template: Option<template::Template> = None;
 
     // Add repos from template (name or file path)
     if let Some(source) = template_source {
@@ -90,6 +91,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             repo_refs.insert(id, String::new());
         }
         created_from = Some(source.clone());
+        loaded_template = Some(tmpl);
     }
 
     // Add repos from group — migrate to template on-the-fly
@@ -198,8 +200,15 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
     let meta_result = workspace::load_metadata(&ws_dir);
+
+    // Apply template settings over global config for integrations
+    let effective_cfg = match &loaded_template {
+        Some(tmpl) => tmpl.apply_settings(&cfg),
+        None => cfg.clone(),
+    };
+
     match &meta_result {
-        Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &cfg),
+        Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &effective_cfg),
         Err(e) => eprintln!("warning: skipping language integrations: {}", e),
     }
     if cfg.agent_md.unwrap_or(true)
