@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tabwriter::TabWriter;
 
@@ -155,6 +156,9 @@ pub struct StatusOutput {
     pub workspace_dir: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    pub created: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<DateTime<Utc>>,
     pub repos: Vec<RepoStatusEntry>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub root: Vec<String>,
@@ -445,6 +449,8 @@ impl StatusOutput {
             branch: "my-feature".into(),
             description: Some("migrating billing to stripe v3".into()),
             workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
+            created: "2026-01-15T10:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+            last_used: Some("2026-03-05T14:30:00Z".parse::<DateTime<Utc>>().unwrap()),
             repos: vec![RepoStatusEntry {
                 name: "api-gateway".into(),
                 branch: "my-feature".into(),
@@ -882,14 +888,23 @@ fn render_workspace_repo_list_table(v: WorkspaceRepoListOutput) -> Result<()> {
 }
 
 fn render_status_table(v: StatusOutput) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    let created_age = format_relative_time(v.created.timestamp(), now);
+    let used_age = v
+        .last_used
+        .map(|ts| format_relative_time(ts.timestamp(), now));
+
+    let mut header = format!("Workspace: {}  Branch: {}", v.workspace, v.branch);
     if let Some(ref desc) = v.description {
-        println!(
-            "Workspace: {}  Branch: {}  ({})\n",
-            v.workspace, v.branch, desc
-        );
-    } else {
-        println!("Workspace: {}  Branch: {}\n", v.workspace, v.branch);
+        header.push_str(&format!("  ({})", desc));
     }
+    println!("{}", header);
+
+    let mut age_line = format!("Created: {}", created_age);
+    if let Some(ref used) = used_age {
+        age_line.push_str(&format!("  Last used: {}", used));
+    }
+    println!("{}\n", age_line);
 
     let mut table = Table::new(
         Box::new(std::io::stdout()),
@@ -1543,6 +1558,8 @@ mod tests {
             branch: "my-ws".into(),
             workspace_dir: PathBuf::from("/tmp/workspaces/my-ws"),
             description: None,
+            created: "2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+            last_used: None,
             repos: vec![
                 RepoStatusEntry {
                     name: "repo-a".into(),
@@ -1602,6 +1619,8 @@ mod tests {
             branch: "my-ws".into(),
             workspace_dir: PathBuf::from("/tmp/workspaces/my-ws"),
             description: None,
+            created: "2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+            last_used: None,
             repos: vec![],
             root: vec!["?? notes.md".into(), "?? my-stuff/".into()],
             verbose: true,
