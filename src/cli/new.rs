@@ -203,7 +203,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     // Apply template settings over global config for integrations
     let effective_cfg = match &loaded_template {
-        Some(tmpl) => tmpl.apply_settings(&cfg),
+        Some(tmpl) => tmpl.apply_config(&cfg),
         None => cfg.clone(),
     };
 

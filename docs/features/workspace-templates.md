@@ -16,7 +16,7 @@ repos:
   - url: https://github.com/docker/api-gateway.git
   - url: https://github.com/docker/user-service.git
   - url: https://github.com/docker/proto.git
-settings:
+config:
   language_integrations:
     go: true
   sync_strategy: rebase
@@ -114,10 +114,10 @@ This field is informational — `wsp ls` can display it, but no behavior depends
 - **Violates "clones are the developer's space."** Design tenet 5 says the developer has full autonomy inside a clone. A live link extends this tension to the workspace level.
 - **Fast recreation replaces reconciliation.** If a template evolves, the user creates a new workspace. Mirror-backed cloning makes this cheap.
 
-## Settings Precedence
+## Config Precedence
 
 ```
-workspace override > template setting > global default
+workspace override > template config > global default
 ```
 
 For example, if a template sets `language_integrations.go: true` but global config sets `go: false`, the template wins. If a future workspace-level override exists, it wins over both.

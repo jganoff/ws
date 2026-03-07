@@ -16,11 +16,11 @@ use crate::workspace;
 pub struct Template {
     pub repos: Vec<TemplateRepo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings: Option<TemplateSettings>,
+    pub config: Option<TemplateConfig>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TemplateSettings {
+pub struct TemplateConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language_integrations: Option<std::collections::BTreeMap<String, bool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,11 +33,11 @@ pub struct TemplateRepo {
 }
 
 impl Template {
-    /// Apply template settings onto a config, returning a modified copy.
-    /// Template settings override global config; absent template fields leave config unchanged.
-    pub fn apply_settings(&self, cfg: &config::Config) -> config::Config {
+    /// Apply template config onto global config, returning a modified copy.
+    /// Template config overrides global config; absent template fields leave config unchanged.
+    pub fn apply_config(&self, cfg: &config::Config) -> config::Config {
         let mut effective = cfg.clone();
-        if let Some(ref settings) = self.settings {
+        if let Some(ref settings) = self.config {
             if let Some(ref li) = settings.language_integrations {
                 let target = effective
                     .language_integrations
@@ -226,7 +226,7 @@ pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
 
     Ok(Template {
         repos,
-        settings: None,
+        config: None,
     })
 }
 
@@ -330,7 +330,7 @@ pub fn migrate_group(
         group_name,
         &Template {
             repos,
-            settings: None,
+            config: None,
         },
     )?;
     Ok(true)
@@ -368,7 +368,7 @@ mod tests {
                     url: "git@github.com:acme/user-service.git".into(),
                 },
             ],
-            settings: None,
+            config: None,
         }
     }
 
@@ -680,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_settings_overrides_config() {
+    fn apply_config_overrides_config() {
         use std::collections::BTreeMap;
 
         let mut cfg = config::Config::default();
@@ -691,13 +691,13 @@ mod tests {
 
         let tmpl = Template {
             repos: vec![],
-            settings: Some(TemplateSettings {
+            config: Some(TemplateConfig {
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
                 sync_strategy: Some("merge".into()),
             }),
         };
 
-        let effective = tmpl.apply_settings(&cfg);
+        let effective = tmpl.apply_config(&cfg);
         assert_eq!(effective.sync_strategy.as_deref(), Some("merge"));
         assert_eq!(
             effective.language_integrations.as_ref().unwrap()["go"],
@@ -706,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_settings_preserves_config_when_absent() {
+    fn apply_config_preserves_config_when_absent() {
         use std::collections::BTreeMap;
 
         let mut cfg = config::Config::default();
@@ -717,10 +717,10 @@ mod tests {
 
         let tmpl = Template {
             repos: vec![],
-            settings: None,
+            config: None,
         };
 
-        let effective = tmpl.apply_settings(&cfg);
+        let effective = tmpl.apply_config(&cfg);
         assert_eq!(effective.sync_strategy.as_deref(), Some("rebase"));
         assert_eq!(
             effective.language_integrations.as_ref().unwrap()["go"],
@@ -736,7 +736,7 @@ mod tests {
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
-            settings: Some(TemplateSettings {
+            config: Some(TemplateConfig {
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
                 sync_strategy: Some("merge".into()),
             }),
@@ -745,7 +745,7 @@ mod tests {
         let yaml = to_yaml(&tmpl).unwrap();
         let parsed: Template = serde_yaml_ng::from_str(&yaml).unwrap();
 
-        let s = parsed.settings.unwrap();
+        let s = parsed.config.unwrap();
         assert_eq!(s.sync_strategy.as_deref(), Some("merge"));
         assert_eq!(s.language_integrations.as_ref().unwrap()["go"], true);
     }
