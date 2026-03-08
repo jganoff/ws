@@ -182,6 +182,22 @@ pub fn exists(templates_dir: &Path, name: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/// Reject agent_md content that contains wsp markers, which would corrupt
+/// the marker-based section management in AGENTS.md.
+fn validate_agent_md(tmpl: &Template) -> Result<()> {
+    if let Some(ref content) = tmpl.agent_md
+        && (content.contains(crate::agentmd::MARKER_BEGIN)
+            || content.contains(crate::agentmd::MARKER_END))
+    {
+        bail!("agent_md content cannot contain wsp markers (<!-- wsp:begin/end -->)");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Load from file
 // ---------------------------------------------------------------------------
 
@@ -197,21 +213,24 @@ pub fn load_from_file(path: &Path) -> Result<Template> {
             if t.repos.is_empty() {
                 bail!("template {:?} has no repos", path);
             }
+            validate_agent_md(&t)?;
             return Ok(t);
         }
         Err(e) => e,
     };
 
     // Try .wsp.yaml metadata format
-    match serde_yaml_ng::from_str::<workspace::Metadata>(&data) {
-        Ok(meta) => template_from_metadata(&meta),
+    let tmpl = match serde_yaml_ng::from_str::<workspace::Metadata>(&data) {
+        Ok(meta) => template_from_metadata(&meta)?,
         Err(meta_err) => bail!(
             "could not parse {:?}:\n  as template: {}\n  as .wsp.yaml: {}",
             path,
             tmpl_err,
             meta_err
         ),
-    }
+    };
+    validate_agent_md(&tmpl)?;
+    Ok(tmpl)
 }
 
 /// Convert a .wsp.yaml Metadata into a Template by extracting repo URLs.
@@ -954,5 +973,25 @@ created: 2026-03-07T10:00:00Z
 
         assert_eq!(loaded.agent_md, tmpl.agent_md);
         assert_eq!(loaded.repos.len(), 1);
+    }
+
+    #[test]
+    fn agent_md_with_markers_rejected() {
+        use crate::agentmd::MARKER_BEGIN;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("evil.yaml");
+        let yaml = format!(
+            "repos:\n  - url: git@github.com:acme/api.git\nagent_md: \"fake\\n{}\\nevil\"\n",
+            MARKER_BEGIN
+        );
+        std::fs::write(&path, &yaml).unwrap();
+
+        let err = load_from_file(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("wsp markers"),
+            "expected marker rejection, got: {}",
+            err
+        );
     }
 }

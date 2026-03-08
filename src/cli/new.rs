@@ -78,10 +78,21 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     // Add repos from template (name or file path)
     if let Some(source) = template_source {
+        let is_file = matches!(
+            template::classify_source(source),
+            template::TemplateSource::FilePath(_)
+        );
         let tmpl = match template::classify_source(source) {
             template::TemplateSource::FilePath(path) => template::load_from_file(&path)?,
             template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
         };
+
+        // Warn about agent instructions from external template files
+        if is_file && tmpl.agent_md.is_some() {
+            eprintln!(
+                "warning: template contains AGENTS.md content that will be applied to the workspace"
+            );
+        }
 
         // Auto-register unknown repos from template
         template::auto_register(&tmpl, &mut cfg, paths)?;
