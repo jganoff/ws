@@ -147,7 +147,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - **Adding skills**: New skills in `skills/` need a corresponding `include_str!` constant in `src/agentmd.rs` and must be wired into `install_skill()` to be installed into workspaces.
 - **Test remote URLs**: `giturl::parse()` only handles SSH (`git@host:path`) and HTTPS URLs — not local filesystem paths. Tests that need identity validation from a remote URL must use `git@test.local:user/repo.git` style URLs, not the temp-dir paths used by `setup_test_env()` for upstream URLs.
 - **Default dispatch uses root-level ArgMatches**: `list::run` and `status::run` are called from the default dispatch path (`cli/mod.rs`, no subcommand) with root-level `ArgMatches` that lack subcommand-specific args. Use `try_get_one().ok().flatten()` (not `get_flag()`) to safely handle missing args without panicking.
-- **CLI changes require regeneration**: After adding/changing commands, flags, or output structs, run `just skill` and `just man` to regenerate SKILL.md and manpages. `just ci` checks freshness and will fail if stale.
+- **CLI changes require regeneration**: After adding/changing commands, flags, or output structs, run `just skill` to regenerate SKILL.md and manpages. `just ci` checks freshness and will fail if stale.
 
 ## Releasing
 

@@ -144,9 +144,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     eprintln!("Adding {} repos to workspace...", repo_refs.len());
+    let new_ids: Vec<String> = repo_refs.keys().cloned().collect();
     workspace::add_repos(&paths.mirrors_dir, &ws_dir, &repo_refs, &upstream_urls)?;
 
     let meta_result = workspace::load_metadata(&ws_dir);
+
+    // Apply git config defaults to newly added clones only
+    if let Ok(ref meta) = meta_result {
+        let git_config = cfg.effective_git_config();
+        workspace::apply_git_config(&ws_dir, meta, &git_config, Some(&new_ids));
+    }
     match &meta_result {
         Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &cfg),
         Err(e) => eprintln!("warning: skipping language integrations: {}", e),

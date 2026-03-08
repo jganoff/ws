@@ -51,6 +51,8 @@ pub struct Config {
     pub agent_md: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gc_retention_days: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_config: Option<BTreeMap<String, String>>,
 }
 
 impl Config {
@@ -68,6 +70,28 @@ impl Config {
             );
         }
         Ok(cfg)
+    }
+
+    /// Hardcoded defaults for git config applied to each clone.
+    pub fn default_git_config() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("push.autoSetupRemote".into(), "true".into()),
+            ("push.default".into(), "current".into()),
+            ("rerere.enabled".into(), "true".into()),
+            ("branch.sort".into(), "-committerdate".into()),
+        ])
+    }
+
+    /// Effective git config: hardcoded defaults merged with user overrides.
+    /// User values win over defaults.
+    pub fn effective_git_config(&self) -> BTreeMap<String, String> {
+        let mut result = Self::default_git_config();
+        if let Some(ref overrides) = self.git_config {
+            for (k, v) in overrides {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        result
     }
 
     pub fn upstream_url(&self, identity: &str) -> Option<&str> {
@@ -405,5 +429,67 @@ mod tests {
         let cfg = Config::load_from(&cfg_path).unwrap();
         assert_eq!(cfg.version, 99);
         assert_eq!(cfg.branch_prefix.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn test_default_git_config() {
+        let defaults = Config::default_git_config();
+        assert_eq!(defaults.get("push.autoSetupRemote").unwrap(), "true");
+        assert_eq!(defaults.get("push.default").unwrap(), "current");
+        assert_eq!(defaults.get("rerere.enabled").unwrap(), "true");
+        assert_eq!(defaults.get("branch.sort").unwrap(), "-committerdate");
+    }
+
+    #[test]
+    fn test_effective_git_config_defaults_only() {
+        let cfg = Config::default();
+        let effective = cfg.effective_git_config();
+        assert_eq!(effective, Config::default_git_config());
+    }
+
+    #[test]
+    fn test_effective_git_config_with_overrides() {
+        let mut cfg = Config::default();
+        let mut overrides = BTreeMap::new();
+        overrides.insert("push.autoSetupRemote".into(), "false".into());
+        overrides.insert("merge.conflictstyle".into(), "zdiff3".into());
+        cfg.git_config = Some(overrides);
+
+        let effective = cfg.effective_git_config();
+        // Override wins
+        assert_eq!(effective.get("push.autoSetupRemote").unwrap(), "false");
+        // Custom key included
+        assert_eq!(effective.get("merge.conflictstyle").unwrap(), "zdiff3");
+        // Other defaults preserved
+        assert_eq!(effective.get("push.default").unwrap(), "current");
+    }
+
+    #[test]
+    fn test_git_config_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+
+        let mut cfg = Config::default();
+        let mut gc = BTreeMap::new();
+        gc.insert("push.autoSetupRemote".into(), "false".into());
+        cfg.git_config = Some(gc);
+        cfg.save_to(&cfg_path).unwrap();
+
+        let loaded = Config::load_from(&cfg_path).unwrap();
+        let gc = loaded.git_config.unwrap();
+        assert_eq!(gc["push.autoSetupRemote"], "false");
+    }
+
+    #[test]
+    fn test_backward_compat_no_git_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+        std::fs::write(&cfg_path, "branch_prefix: test\n").unwrap();
+
+        let cfg = Config::load_from(&cfg_path).unwrap();
+        assert!(cfg.git_config.is_none());
+        // Effective still returns defaults
+        let effective = cfg.effective_git_config();
+        assert_eq!(effective.get("push.autoSetupRemote").unwrap(), "true");
     }
 }

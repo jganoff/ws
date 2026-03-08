@@ -84,6 +84,7 @@ mod tests {
             sync_strategy: None,
             agent_md: None,
             gc_retention_days: None,
+            git_config: None,
         }
     }
 

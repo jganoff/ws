@@ -92,6 +92,11 @@ fn ensure_fetch_refspec(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn set_config(dir: &Path, key: &str, value: &str) -> Result<()> {
+    run(Some(dir), &["config", "--local", key, value])?;
+    Ok(())
+}
+
 pub fn fetch(dir: &Path, prune: bool) -> Result<()> {
     ensure_fetch_refspec(dir)?;
     let mut args = vec!["fetch", "--all"];

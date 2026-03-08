@@ -280,6 +280,12 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         None => cfg.clone(),
     };
 
+    // Apply git config defaults to all clones
+    if let Ok(ref meta) = meta_result {
+        let git_config = effective_cfg.effective_git_config();
+        workspace::apply_git_config(&ws_dir, meta, &git_config, None);
+    }
+
     match &meta_result {
         Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &effective_cfg),
         Err(e) => eprintln!("warning: skipping language integrations: {}", e),

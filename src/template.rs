@@ -27,6 +27,8 @@ pub struct TemplateConfig {
     pub language_integrations: Option<std::collections::BTreeMap<String, bool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_strategy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_config: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,14 @@ impl Template {
             }
             if let Some(ref strategy) = settings.sync_strategy {
                 effective.sync_strategy = Some(strategy.clone());
+            }
+            if let Some(ref gc) = settings.git_config {
+                let target = effective
+                    .git_config
+                    .get_or_insert_with(std::collections::BTreeMap::new);
+                for (k, v) in gc {
+                    target.insert(k.clone(), v.clone());
+                }
             }
         }
         effective
@@ -804,6 +814,7 @@ created: 2026-03-07T10:00:00Z
             config: Some(TemplateConfig {
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
                 sync_strategy: Some("merge".into()),
+                git_config: None,
             }),
             agent_md: None,
         };
@@ -851,6 +862,7 @@ created: 2026-03-07T10:00:00Z
             config: Some(TemplateConfig {
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
                 sync_strategy: Some("merge".into()),
+                git_config: None,
             }),
             agent_md: None,
         };
@@ -994,5 +1006,60 @@ created: 2026-03-07T10:00:00Z
             "expected marker rejection, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn apply_config_git_config_overrides() {
+        use std::collections::BTreeMap;
+
+        let mut cfg = config::Config::default();
+        let mut gc = BTreeMap::new();
+        gc.insert("push.autoSetupRemote".into(), "true".into());
+        cfg.git_config = Some(gc);
+
+        let tmpl = Template {
+            repos: vec![],
+            config: Some(TemplateConfig {
+                language_integrations: None,
+                sync_strategy: None,
+                git_config: Some(BTreeMap::from([(
+                    "push.autoSetupRemote".into(),
+                    "false".into(),
+                )])),
+            }),
+            agent_md: None,
+        };
+
+        let effective = tmpl.apply_config(&cfg);
+        assert_eq!(
+            effective.git_config.as_ref().unwrap()["push.autoSetupRemote"],
+            "false"
+        );
+    }
+
+    #[test]
+    fn git_config_round_trip_yaml() {
+        use std::collections::BTreeMap;
+
+        let tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: Some(TemplateConfig {
+                language_integrations: None,
+                sync_strategy: None,
+                git_config: Some(BTreeMap::from([
+                    ("push.default".into(), "simple".into()),
+                    ("rerere.enabled".into(), "false".into()),
+                ])),
+            }),
+            agent_md: None,
+        };
+
+        let yaml = to_yaml(&tmpl).unwrap();
+        let parsed: Template = serde_yaml_ng::from_str(&yaml).unwrap();
+        let gc = parsed.config.unwrap().git_config.unwrap();
+        assert_eq!(gc["push.default"], "simple");
+        assert_eq!(gc["rerere.enabled"], "false");
     }
 }

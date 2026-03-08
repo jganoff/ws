@@ -12,34 +12,7 @@ Phases 1-4 have shipped (CRUD, `-w`/`-f` source flags, export, file import, grou
 
 - [ ] Phase 5: Format unification — `.wsp.yaml` gains URLs, becomes the template format
 - [ ] Phase 6: Agent context — workspace definition repos with CLAUDE.md + skills alongside `.wsp.yaml`
-
-### Git Config Defaults
-
-**Complexity:** Small
-
-Apply opinionated-but-configurable git config values to each clone at workspace creation time. Stored under the `git_config` namespace in `config.yaml`.
-
-Out-of-the-box defaults:
-
-```yaml
-git_config:
-  push.autoSetupRemote: "true"      # first push just works, no -u needed
-  push.default: "current"            # push to same-named remote branch
-  rerere.enabled: "true"             # remember conflict resolutions
-  branch.sort: "-committerdate"      # git branch shows most recent first
-```
-
-```
-wsp config set git_config.push.autoSetupRemote false   # opt out
-wsp config set git_config.merge.conflictstyle zdiff3   # add your own
-```
-
-Applied via `git config --local` in each clone during `wsp new` and `wsp repo add`. Users' global `~/.gitconfig` still works — repo-local config wins per standard git precedence, which is the intended behavior.
-
-- [ ] `git_config` map in `Config` with hardcoded defaults
-- [ ] Apply to clones during `clone_from_mirror` and `propagate_mirror_refs` (adopt path)
-- [ ] `wsp config set/get/unset` support for `git_config.*` keys
-- [ ] Include in `--json` output of `wsp config ls`
+- [ ] Template content preview — when importing/applying a template with sensitive content (agent_md, git_config, skills), show a summary on stderr before applying
 
 ### `wsp doctor`
 

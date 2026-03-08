@@ -1407,6 +1407,39 @@ fn clone_from_mirror(
     Ok(())
 }
 
+/// Apply git config values to repo clones in a workspace.
+/// If `only` is Some, only apply to the listed identities.
+pub fn apply_git_config(
+    ws_dir: &Path,
+    meta: &Metadata,
+    git_config: &std::collections::BTreeMap<String, String>,
+    only: Option<&[String]>,
+) {
+    for identity in meta.repos.keys() {
+        if let Some(filter) = only
+            && !filter.iter().any(|f| f == identity)
+        {
+            continue;
+        }
+        let dir_name = match meta.dir_name(identity) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let repo_dir = ws_dir.join(&dir_name);
+        if !repo_dir.join(".git").exists() {
+            continue;
+        }
+        for (key, value) in git_config {
+            if let Err(e) = git::set_config(&repo_dir, key, value) {
+                eprintln!(
+                    "  warning: git config {} = {} failed for {}: {}",
+                    key, value, dir_name, e
+                );
+            }
+        }
+    }
+}
+
 fn parse_identity(identity: &str) -> Result<giturl::Parsed> {
     giturl::Parsed::from_identity(identity)
 }

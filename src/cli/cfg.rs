@@ -13,8 +13,8 @@ pub fn cmd() -> Command {
         .long_about(
             "Manage wsp settings.\n\n\
              Settings are stored in ~/.local/share/wsp/config.yaml. Keys include \
-             branch-prefix, workspaces-dir, gc.retention-days, and language integration \
-             toggles. Use `wsp config ls` to see all current values.",
+             branch-prefix, workspaces-dir, gc.retention-days, git_config.* overrides, \
+             and language integration toggles. Use `wsp config ls` to see all current values.",
         )
         .subcommand_required(true)
         .subcommand(list_cmd())
@@ -87,6 +87,15 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         },
     ];
 
+    // git config: show effective values (defaults merged with overrides)
+    let git_config = cfg.effective_git_config();
+    for (key, value) in &git_config {
+        entries.push(ConfigListEntry {
+            key: format!("git_config.{}", key),
+            value: value.clone(),
+        });
+    }
+
     // language integrations: show effective value for all known integrations
     for name in crate::lang::integration_names() {
         let enabled = cfg
@@ -140,6 +149,14 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
                 value: Some(enabled.to_string()),
+            }))
+        }
+        k if k.starts_with("git_config.") => {
+            let git_key = &k["git_config.".len()..];
+            let effective = cfg.effective_git_config();
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: effective.get(git_key).cloned(),
             }))
         }
         _ => bail!("unknown config key: {}", key),
@@ -224,6 +241,19 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             })?;
             format!("language-integrations.{} = {}", lang, enabled)
         }
+        k if k.starts_with("git_config.") => {
+            let git_key = k["git_config.".len()..].to_string();
+            if git_key.is_empty() {
+                bail!("git_config key cannot be empty");
+            }
+            let v = value.clone();
+            filelock::with_config(&paths.config_path, |cfg| {
+                let gc = cfg.git_config.get_or_insert_with(BTreeMap::new);
+                gc.insert(git_key.clone(), v);
+                Ok(())
+            })?;
+            format!("git_config.{} = {}", git_key, value)
+        }
         _ => bail!("unknown config key: {}", key),
     };
 
@@ -286,6 +316,27 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Ok(())
             })?;
             format!("language-integrations.{} unset (default: true)", lang)
+        }
+        k if k.starts_with("git_config.") => {
+            let git_key = k["git_config.".len()..].to_string();
+            // Validate key even on unset — prevents confusing "unset" messages for invalid keys
+            if git_key.is_empty() {
+                bail!("git_config key cannot be empty");
+            }
+            let default_val = config::Config::default_git_config().get(&git_key).cloned();
+            filelock::with_config(&paths.config_path, |cfg| {
+                if let Some(ref mut m) = cfg.git_config {
+                    m.remove(&git_key);
+                    if m.is_empty() {
+                        cfg.git_config = None;
+                    }
+                }
+                Ok(())
+            })?;
+            match default_val {
+                Some(v) => format!("git_config.{} unset (default: {})", git_key, v),
+                None => format!("git_config.{} unset", git_key),
+            }
         }
         _ => bail!("unknown config key: {}", key),
     };
