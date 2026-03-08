@@ -817,14 +817,159 @@ pub fn propagate_mirror_to_clones(mirrors_dir: &Path, ws_dir: &Path, meta: &Meta
     });
 }
 
-/// Noise files that are safe to delete without warning.
-const NOISE_FILES: &[&str] = &[".DS_Store", "Thumbs.db", "desktop.ini"];
+// ---------------------------------------------------------------------------
+// RootProblem — structured representation of workspace root issues
+// ---------------------------------------------------------------------------
+
+/// A problem detected in the workspace root directory.
+#[derive(Debug, Clone)]
+pub(crate) struct RootProblem {
+    /// Relative path from workspace root (e.g. ".claude/settings.local.json", "notes.md")
+    pub path: String,
+    pub kind: RootProblemKind,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum RootProblemKind {
+    /// Untracked file or directory (path ends with `/` for directories)
+    Untracked,
+    /// Modified managed file with detail description
+    Modified { detail: String },
+}
+
+impl std::fmt::Display for RootProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            RootProblemKind::Untracked => write!(f, "?? {}", self.path),
+            RootProblemKind::Modified { detail } => write!(f, " M {} ({})", self.path, detail),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// .wspignore — pattern parsing and matching
+// ---------------------------------------------------------------------------
+
+/// Default content for the global wspignore file, seeded on first use.
+const DEFAULT_WSPIGNORE: &str = "\
+# Global wspignore — paths to suppress in workspace root checks.
+# Edit this file to add/remove patterns. One path per line.
+# Trailing / matches a directory and everything inside it.
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# AI coding assistants
+.claude/
+.cursor/
+
+# IDE settings
+.vscode/
+.idea/
+";
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum IgnorePattern {
+    /// Exact filename match (e.g. "settings.local.json")
+    Exact(String),
+    /// Directory prefix match — matches any path starting with this prefix (e.g. ".claude/")
+    DirPrefix(String),
+}
+
+/// Parse wspignore file content into patterns.
+fn parse_wspignore(content: &str) -> Vec<IgnorePattern> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+            if let Some(dir) = trimmed.strip_suffix('/') {
+                Some(IgnorePattern::DirPrefix(format!("{}/", dir)))
+            } else {
+                Some(IgnorePattern::Exact(trimmed.to_string()))
+            }
+        })
+        .collect()
+}
+
+/// Load patterns from a wspignore file, returning empty vec if the file doesn't exist.
+fn load_wspignore_file(path: &Path) -> Vec<IgnorePattern> {
+    match fs::read_to_string(path) {
+        Ok(content) => parse_wspignore(&content),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Check if a root problem path matches any ignore pattern.
+fn is_ignored(path: &str, patterns: &[IgnorePattern]) -> bool {
+    for pat in patterns {
+        match pat {
+            IgnorePattern::Exact(name) => {
+                if path == name {
+                    return true;
+                }
+            }
+            IgnorePattern::DirPrefix(prefix) => {
+                // Match the directory itself (e.g. ".claude/" matches ".claude/")
+                // and anything inside it (e.g. ".claude/" matches ".claude/settings.json")
+                // Also matches bare dir name without slash (e.g. ".claude/" matches ".claude")
+                if path.starts_with(prefix.as_str()) || path == prefix.trim_end_matches('/') {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Load wspignore patterns from both global and per-workspace files.
+/// Creates the global wspignore with defaults on first use.
+pub(crate) fn load_wspignore(data_dir: &Path, ws_dir: &Path) -> Vec<IgnorePattern> {
+    let _ = ensure_global_wspignore(data_dir);
+    let mut patterns = load_wspignore_file(&data_dir.join("wspignore"));
+    patterns.extend(load_wspignore_file(&ws_dir.join(".wspignore")));
+    patterns
+}
+
+/// Filter out ignored problems from a list of root problems.
+pub(crate) fn filter_ignored(
+    problems: Vec<RootProblem>,
+    patterns: &[IgnorePattern],
+) -> Vec<RootProblem> {
+    problems
+        .into_iter()
+        .filter(|p| !is_ignored(&p.path, patterns))
+        .collect()
+}
+
+/// Create the default global wspignore if it doesn't exist.
+/// Uses O_CREAT|O_EXCL (create_new) for atomic creation — no TOCTOU race.
+pub(crate) fn ensure_global_wspignore(data_dir: &Path) -> Result<()> {
+    let path = data_dir.join("wspignore");
+    // Ensure the data dir exists (may not on first ever use)
+    fs::create_dir_all(data_dir).context("creating data directory")?;
+    match fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            f.write_all(DEFAULT_WSPIGNORE.as_bytes())
+                .context("writing default wspignore")?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e).context("creating default wspignore"),
+    }
+    Ok(())
+}
 
 /// Check workspace root for user content not managed by wsp.
-/// Returns a list of human-readable problem descriptions.
-// TODO: support .wspignore (global + per-workspace) to let users suppress
-// specific paths from this check. See docs/roadmap.md.
-pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<Vec<String>> {
+/// Returns a list of structured root problems.
+pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<Vec<RootProblem>> {
     let mut problems = Vec::new();
 
     // Build set of known repo dir names
@@ -847,13 +992,13 @@ pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<V
             continue;
         }
 
-        // Skip repo clone dirs (checked by repo safety)
-        if repo_dirs.contains(name_str.as_ref()) {
+        // Skip .wspignore
+        if name_str == ".wspignore" {
             continue;
         }
 
-        // Skip noise files
-        if NOISE_FILES.contains(&name_str.as_ref()) {
+        // Skip repo clone dirs (checked by repo safety)
+        if repo_dirs.contains(name_str.as_ref()) {
             continue;
         }
 
@@ -895,9 +1040,15 @@ pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<V
         // Everything else is flagged
         let ft = entry.file_type()?;
         if ft.is_dir() {
-            problems.push(format!("?? {}/", name_str));
+            problems.push(RootProblem {
+                path: format!("{}/", name_str),
+                kind: RootProblemKind::Untracked,
+            });
         } else {
-            problems.push(format!("?? {}", name_str));
+            problems.push(RootProblem {
+                path: name_str.to_string(),
+                kind: RootProblemKind::Untracked,
+            });
         }
     }
 
@@ -905,17 +1056,31 @@ pub(crate) fn check_root_content(ws_dir: &Path, metadata: &Metadata) -> Result<V
 }
 
 /// Check AGENTS.md for user content outside wsp markers.
-fn check_agents_md(ws_dir: &Path) -> Option<String> {
+fn check_agents_md(ws_dir: &Path) -> Option<RootProblem> {
     let path = ws_dir.join("AGENTS.md");
     let content = match fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(_) => return Some(" M AGENTS.md (unreadable)".into()),
+        Err(_) => {
+            return Some(RootProblem {
+                path: "AGENTS.md".into(),
+                kind: RootProblemKind::Modified {
+                    detail: "unreadable".into(),
+                },
+            });
+        }
     };
 
     // Find the begin marker
     let begin_idx = match content.find(crate::agentmd::MARKER_BEGIN) {
         Some(idx) => idx,
-        None => return Some(" M AGENTS.md (wsp markers missing)".into()),
+        None => {
+            return Some(RootProblem {
+                path: "AGENTS.md".into(),
+                kind: RootProblemKind::Modified {
+                    detail: "wsp markers missing".into(),
+                },
+            });
+        }
     };
 
     // Check content before the begin marker for user additions
@@ -933,7 +1098,12 @@ fn check_agents_md(ws_dir: &Path) -> Option<String> {
             continue;
         }
         // Any other non-blank line is user content
-        return Some(" M AGENTS.md (user-added content)".into());
+        return Some(RootProblem {
+            path: "AGENTS.md".into(),
+            kind: RootProblemKind::Modified {
+                detail: "user-added content".into(),
+            },
+        });
     }
 
     // Check content after the end marker for user additions.
@@ -943,7 +1113,12 @@ fn check_agents_md(ws_dir: &Path) -> Option<String> {
         let after_end = &content[end_idx + crate::agentmd::MARKER_END.len()..];
         for line in after_end.lines() {
             if !line.trim().is_empty() {
-                return Some(" M AGENTS.md (user-added content after markers)".into());
+                return Some(RootProblem {
+                    path: "AGENTS.md".into(),
+                    kind: RootProblemKind::Modified {
+                        detail: "user-added content after markers".into(),
+                    },
+                });
             }
         }
     }
@@ -952,17 +1127,25 @@ fn check_agents_md(ws_dir: &Path) -> Option<String> {
 }
 
 /// Check CLAUDE.md — symlink to AGENTS.md is fine, anything else is flagged.
-fn check_claude_md(ws_dir: &Path) -> Option<String> {
+fn check_claude_md(ws_dir: &Path) -> Option<RootProblem> {
     let path = ws_dir.join("CLAUDE.md");
     match fs::symlink_metadata(&path) {
         Ok(meta) => {
             if meta.file_type().is_symlink() {
                 match fs::read_link(&path) {
                     Ok(target) if target == Path::new("AGENTS.md") => None,
-                    _ => Some(" M CLAUDE.md (symlink to unexpected target)".into()),
+                    _ => Some(RootProblem {
+                        path: "CLAUDE.md".into(),
+                        kind: RootProblemKind::Modified {
+                            detail: "symlink to unexpected target".into(),
+                        },
+                    }),
                 }
             } else {
-                Some("?? CLAUDE.md".into())
+                Some(RootProblem {
+                    path: "CLAUDE.md".into(),
+                    kind: RootProblemKind::Untracked,
+                })
             }
         }
         Err(_) => None, // doesn't exist, fine
@@ -970,7 +1153,7 @@ fn check_claude_md(ws_dir: &Path) -> Option<String> {
 }
 
 /// Check .claude/ directory for non-wsp content.
-fn check_claude_dir(ws_dir: &Path) -> Vec<String> {
+fn check_claude_dir(ws_dir: &Path) -> Vec<RootProblem> {
     let claude_dir = ws_dir.join(".claude");
     let mut problems = Vec::new();
 
@@ -993,7 +1176,7 @@ fn check_claude_dir(ws_dir: &Path) -> Vec<String> {
         rel: &str,
         managed: &std::collections::HashSet<&str>,
         managed_dirs: &std::collections::HashSet<&str>,
-        problems: &mut Vec<String>,
+        problems: &mut Vec<RootProblem>,
     ) {
         let dir = if rel.is_empty() {
             base.to_path_buf()
@@ -1026,10 +1209,16 @@ fn check_claude_dir(ws_dir: &Path) -> Vec<String> {
                 if managed_dirs.contains(child_rel.as_str()) {
                     walk(base, &child_rel, managed, managed_dirs, problems);
                 } else {
-                    problems.push(format!("?? .claude/{}", child_rel));
+                    problems.push(RootProblem {
+                        path: format!(".claude/{}/", child_rel),
+                        kind: RootProblemKind::Untracked,
+                    });
                 }
             } else if !managed.contains(child_rel.as_str()) {
-                problems.push(format!("?? .claude/{}", child_rel));
+                problems.push(RootProblem {
+                    path: format!(".claude/{}", child_rel),
+                    kind: RootProblemKind::Untracked,
+                });
             }
         }
     }
@@ -1039,15 +1228,23 @@ fn check_claude_dir(ws_dir: &Path) -> Vec<String> {
 }
 
 /// Check go.work — wsp-generated header means it's managed.
-fn check_go_work(ws_dir: &Path) -> Option<String> {
+fn check_go_work(ws_dir: &Path) -> Option<RootProblem> {
     let path = ws_dir.join("go.work");
     if !path.exists() {
         return None;
     }
     match fs::read_to_string(&path) {
         Ok(content) if content.starts_with(crate::lang::GO_WORK_HEADER) => None,
-        Ok(_) => Some("?? go.work".into()),
-        Err(_) => Some("?? go.work (unreadable)".into()),
+        Ok(_) => Some(RootProblem {
+            path: "go.work".into(),
+            kind: RootProblemKind::Untracked,
+        }),
+        Err(_) => Some(RootProblem {
+            path: "go.work".into(),
+            kind: RootProblemKind::Modified {
+                detail: "unreadable".into(),
+            },
+        }),
     }
 }
 
@@ -1147,8 +1344,20 @@ pub fn remove(paths: &Paths, name: &str, force: bool, permanent: bool) -> Result
         }
 
         // Check workspace root for user content
+        let ignore_patterns =
+            load_wspignore(paths.config_path.parent().unwrap_or(Path::new("")), &ws_dir);
         match check_root_content(&ws_dir, &meta) {
-            Ok(root_problems) => {
+            Ok(raw_problems) => {
+                let ignored_count = raw_problems.len();
+                let root_problems = filter_ignored(raw_problems, &ignore_patterns);
+                let ignored_count = ignored_count - root_problems.len();
+                if ignored_count > 0 {
+                    eprintln!(
+                        "  note: {} root item{} suppressed by wspignore",
+                        ignored_count,
+                        if ignored_count == 1 { "" } else { "s" }
+                    );
+                }
                 if !root_problems.is_empty() {
                     let mut msg = String::from("workspace root has user content:");
                     for p in &root_problems {
@@ -3371,7 +3580,7 @@ mod tests {
                 want_contains: vec![],
             },
             Case {
-                name: "noise files (.DS_Store) ignored",
+                name: "noise files (.DS_Store) reported by check_root_content (filtered by wspignore)",
                 setup: Box::new(|ws| {
                     fs::write(ws.join(METADATA_FILE), "").unwrap();
                     fs::write(ws.join(".DS_Store"), "").unwrap();
@@ -3379,8 +3588,8 @@ mod tests {
                     fs::write(ws.join("desktop.ini"), "").unwrap();
                 }),
                 repos: vec![],
-                want_clean: true,
-                want_contains: vec![],
+                want_clean: false,
+                want_contains: vec!["?? .DS_Store", "?? Thumbs.db", "?? desktop.ini"],
             },
             Case {
                 name: "multiple issues combined",
@@ -3422,7 +3631,7 @@ mod tests {
 
             for want in &tc.want_contains {
                 assert!(
-                    problems.iter().any(|p| p.contains(want)),
+                    problems.iter().any(|p| p.to_string().contains(want)),
                     "case {:?}: expected problem containing {:?}, got {:?}",
                     tc.name,
                     want,
@@ -3508,7 +3717,7 @@ mod tests {
                 );
                 if let Some(want) = tc.want_contains {
                     assert!(
-                        result.as_ref().unwrap().contains(want),
+                        result.as_ref().unwrap().to_string().contains(want),
                         "case {:?}: expected {:?} in {:?}",
                         tc.name,
                         want,
@@ -3517,6 +3726,258 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_parse_wspignore() {
+        struct Case {
+            name: &'static str,
+            input: &'static str,
+            want: Vec<IgnorePattern>,
+        }
+
+        let cases = vec![
+            Case {
+                name: "empty",
+                input: "",
+                want: vec![],
+            },
+            Case {
+                name: "only comments and blank lines",
+                input: "# comment\n\n# another\n  \n",
+                want: vec![],
+            },
+            Case {
+                name: "exact paths",
+                input: ".DS_Store\nnotes.md\n",
+                want: vec![
+                    IgnorePattern::Exact(".DS_Store".into()),
+                    IgnorePattern::Exact("notes.md".into()),
+                ],
+            },
+            Case {
+                name: "directory prefixes",
+                input: ".claude/\n.vscode/\n",
+                want: vec![
+                    IgnorePattern::DirPrefix(".claude/".into()),
+                    IgnorePattern::DirPrefix(".vscode/".into()),
+                ],
+            },
+            Case {
+                name: "mixed with comments",
+                input: "# OS noise\n.DS_Store\n\n# IDE\n.vscode/\nfoo.txt\n",
+                want: vec![
+                    IgnorePattern::Exact(".DS_Store".into()),
+                    IgnorePattern::DirPrefix(".vscode/".into()),
+                    IgnorePattern::Exact("foo.txt".into()),
+                ],
+            },
+            Case {
+                name: "whitespace trimming",
+                input: "  .DS_Store  \n  .claude/  \n",
+                want: vec![
+                    IgnorePattern::Exact(".DS_Store".into()),
+                    IgnorePattern::DirPrefix(".claude/".into()),
+                ],
+            },
+        ];
+
+        for tc in &cases {
+            let got = parse_wspignore(tc.input);
+            assert_eq!(got, tc.want, "case {:?}", tc.name);
+        }
+    }
+
+    #[test]
+    fn test_is_ignored() {
+        struct Case {
+            name: &'static str,
+            path: &'static str,
+            patterns: Vec<IgnorePattern>,
+            want: bool,
+        }
+
+        let cases = vec![
+            Case {
+                name: "exact match",
+                path: ".DS_Store",
+                patterns: vec![IgnorePattern::Exact(".DS_Store".into())],
+                want: true,
+            },
+            Case {
+                name: "exact no match",
+                path: "notes.md",
+                patterns: vec![IgnorePattern::Exact(".DS_Store".into())],
+                want: false,
+            },
+            Case {
+                name: "dir prefix matches dir itself",
+                path: ".claude/",
+                patterns: vec![IgnorePattern::DirPrefix(".claude/".into())],
+                want: true,
+            },
+            Case {
+                name: "dir prefix matches files inside",
+                path: ".claude/settings.json",
+                patterns: vec![IgnorePattern::DirPrefix(".claude/".into())],
+                want: true,
+            },
+            Case {
+                name: "dir prefix matches nested files",
+                path: ".claude/skills/custom/SKILL.md",
+                patterns: vec![IgnorePattern::DirPrefix(".claude/".into())],
+                want: true,
+            },
+            Case {
+                name: "dir prefix no match",
+                path: ".cursor/settings.json",
+                patterns: vec![IgnorePattern::DirPrefix(".claude/".into())],
+                want: false,
+            },
+            Case {
+                name: "empty patterns",
+                path: "anything",
+                patterns: vec![],
+                want: false,
+            },
+            Case {
+                name: "dir name without slash not matched by dir prefix",
+                path: ".claude",
+                patterns: vec![IgnorePattern::DirPrefix(".claude/".into())],
+                want: true,
+            },
+        ];
+
+        for tc in &cases {
+            let got = is_ignored(tc.path, &tc.patterns);
+            assert_eq!(got, tc.want, "case {:?}", tc.name);
+        }
+    }
+
+    #[test]
+    fn test_filter_ignored() {
+        let problems = vec![
+            RootProblem {
+                path: ".claude/settings.json".into(),
+                kind: RootProblemKind::Untracked,
+            },
+            RootProblem {
+                path: "notes.md".into(),
+                kind: RootProblemKind::Untracked,
+            },
+            RootProblem {
+                path: ".DS_Store".into(),
+                kind: RootProblemKind::Untracked,
+            },
+        ];
+
+        let patterns = vec![
+            IgnorePattern::DirPrefix(".claude/".into()),
+            IgnorePattern::Exact(".DS_Store".into()),
+        ];
+
+        let filtered = filter_ignored(problems, &patterns);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].path, "notes.md");
+    }
+
+    #[test]
+    fn test_ensure_global_wspignore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+
+        // First call creates the file
+        ensure_global_wspignore(data_dir).unwrap();
+        let path = data_dir.join("wspignore");
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains(".DS_Store"));
+        assert!(content.contains(".claude/"));
+
+        // Second call doesn't overwrite
+        fs::write(&path, "custom content").unwrap();
+        ensure_global_wspignore(data_dir).unwrap();
+        let content2 = fs::read_to_string(&path).unwrap();
+        assert_eq!(content2, "custom content");
+    }
+
+    #[test]
+    fn test_wspignore_skip_file() {
+        // .wspignore at workspace root should be skipped by check_root_content
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path();
+        fs::write(ws_dir.join(METADATA_FILE), "").unwrap();
+        fs::write(ws_dir.join(".wspignore"), ".claude/\n").unwrap();
+
+        let meta = make_simple_metadata(&[]);
+        let problems = check_root_content(ws_dir, &meta).unwrap();
+        assert!(
+            problems.is_empty(),
+            "expected .wspignore to be skipped, got {:?}",
+            problems
+        );
+    }
+
+    #[test]
+    fn test_check_root_content_with_wspignore_filter() {
+        // End-to-end: check_root_content + filter_ignored with a .wspignore file
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path();
+        // data_dir must be outside ws_dir — check_root_content scans the workspace root
+        let data_tmp = tempfile::tempdir().unwrap();
+        let data_dir = data_tmp.path();
+
+        fs::write(ws_dir.join(METADATA_FILE), "").unwrap();
+        fs::create_dir_all(ws_dir.join(".claude")).unwrap();
+        fs::write(ws_dir.join(".claude/settings.json"), "{}").unwrap();
+        fs::write(ws_dir.join("notes.md"), "my notes").unwrap();
+        fs::write(ws_dir.join(".wspignore"), ".claude/\n").unwrap();
+
+        // No global wspignore
+        fs::write(data_dir.join("wspignore"), "").unwrap();
+
+        let meta = make_simple_metadata(&[]);
+        let problems = check_root_content(ws_dir, &meta).unwrap();
+        let ignore = load_wspignore(&data_dir, ws_dir);
+        let filtered = filter_ignored(problems, &ignore);
+
+        // .claude/settings.json should be filtered out, notes.md should remain
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].path, "notes.md");
+    }
+
+    #[test]
+    fn test_is_ignored_nested_exact() {
+        // Exact pattern matching nested paths (e.g. per-file ignore inside .claude/)
+        let patterns = vec![IgnorePattern::Exact(".claude/settings.local.json".into())];
+        assert!(is_ignored(".claude/settings.local.json", &patterns));
+        assert!(!is_ignored(".claude/settings.json", &patterns));
+        assert!(!is_ignored(".claude/other.json", &patterns));
+    }
+
+    #[test]
+    fn test_load_wspignore_merges_global_and_local() {
+        let data_tmp = tempfile::tempdir().unwrap();
+        let ws_tmp = tempfile::tempdir().unwrap();
+
+        fs::write(data_tmp.path().join("wspignore"), "# global\n.DS_Store\n").unwrap();
+        fs::write(ws_tmp.path().join(".wspignore"), "# local\nnotes.md\n").unwrap();
+
+        let patterns = load_wspignore(data_tmp.path(), ws_tmp.path());
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0], IgnorePattern::Exact(".DS_Store".into()));
+        assert_eq!(patterns[1], IgnorePattern::Exact("notes.md".into()));
+    }
+
+    #[test]
+    fn test_ensure_global_wspignore_creates_data_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("deep/nested/dir");
+        // data_dir doesn't exist yet
+        assert!(!nested.exists());
+
+        ensure_global_wspignore(&nested).unwrap();
+        assert!(nested.join("wspignore").exists());
     }
 
     /// Create a git repo in the given directory with one commit and an origin remote.

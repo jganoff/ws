@@ -12,7 +12,6 @@ Phases 1-4 have shipped (CRUD, `-w`/`-f` source flags, export, file import, grou
 
 - [ ] Phase 5: Format unification — `.wsp.yaml` gains URLs, becomes the template format
 - [ ] Phase 6: Agent context — workspace definition repos with CLAUDE.md + skills alongside `.wsp.yaml`
-- [ ] Template content preview — when importing/applying a template with sensitive content (agent_md, git_config, skills), show a summary on stderr before applying
 
 ### `wsp doctor`
 
@@ -42,6 +41,7 @@ Checking workspace my-feature...
 - [ ] Phase 4: P1 checks (mirror exists, origin remote exists, identity matches, orphaned dirs)
 - [ ] Phase 5: P2 checks (orphaned mirrors, default branch tracking, gc disk usage)
 - [ ] Phase 6: Detect interrupted operations via transaction journal (see below)
+- [ ] Detect stale global wspignore (missing defaults added after initial seed) and offer to add them via `--fix`
 
 ### Transaction Journal
 
@@ -226,16 +226,6 @@ Auto-generate VS Code multi-root workspace files when creating/modifying workspa
 - [ ] Detect VS Code presence or always generate (config toggle)
 - [ ] Generate `<workspace>.code-workspace` with all repo directories
 - [ ] Config key `language-integrations.vscode` (default true)
-
-### `.wspignore`
-
-**Complexity:** Small
-
-Suppress workspace root safety check warnings for specific paths. Two layers: global (`~/.local/share/wsp/wspignore`) and per-workspace (`.wspignore` at workspace root). Simple format: one path per line, `#` comments, trailing `/` for directory prefix match. No globs.
-
-- [ ] Per-workspace `.wspignore` file
-- [ ] Global `~/.local/share/wsp/wspignore` file
-- [ ] Integrate with `check_root_content()` in `src/workspace.rs`
 
 ## P4 — Ideas (Needs Design)
 

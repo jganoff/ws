@@ -51,7 +51,9 @@ pub fn cmd() -> Command {
             "Git status across workspace repos [read-only].\n\n\
              Shows each repo's branch, commits ahead/behind upstream, and number of \
              changed files. Detects wrong-branch checkouts and warns when HEAD differs \
-             from the workspace branch. Also reports unexpected files in the workspace root.",
+             from the workspace branch. Also reports unexpected files in the workspace root.\n\n\
+             Paths listed in `.wspignore` (at workspace root) or the global \
+             `~/.local/share/wsp/wspignore` are suppressed from root checks.",
         )
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
@@ -142,8 +144,12 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         });
     }
 
+    let ignore = workspace::load_wspignore(paths.data_dir(), &ws_dir);
     let root = match workspace::check_root_content(&ws_dir, &meta) {
-        Ok(items) => items,
+        Ok(items) => {
+            let filtered = workspace::filter_ignored(items, &ignore);
+            filtered.iter().map(|p| p.to_string()).collect()
+        }
         Err(e) => {
             eprintln!("  warning: root content check failed: {}", e);
             vec![]

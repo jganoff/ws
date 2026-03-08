@@ -140,6 +140,11 @@ impl Paths {
         })
     }
 
+    /// The data directory (parent of config.yaml).
+    pub fn data_dir(&self) -> &Path {
+        self.config_path.parent().unwrap_or(Path::new(""))
+    }
+
     /// Construct paths from explicit directories. Used in tests.
     #[cfg(test)]
     pub fn from_dirs(data_dir: &Path, workspaces_dir: &Path) -> Paths {

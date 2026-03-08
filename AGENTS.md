@@ -148,6 +148,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - **Test remote URLs**: `giturl::parse()` only handles SSH (`git@host:path`) and HTTPS URLs — not local filesystem paths. Tests that need identity validation from a remote URL must use `git@test.local:user/repo.git` style URLs, not the temp-dir paths used by `setup_test_env()` for upstream URLs.
 - **Default dispatch uses root-level ArgMatches**: `list::run` and `status::run` are called from the default dispatch path (`cli/mod.rs`, no subcommand) with root-level `ArgMatches` that lack subcommand-specific args. Use `try_get_one().ok().flatten()` (not `get_flag()`) to safely handle missing args without panicking.
 - **CLI changes require regeneration**: After adding/changing commands, flags, or output structs, run `just skill` to regenerate SKILL.md and manpages. `just ci` checks freshness and will fail if stale.
+- **Workspace root content checks**: `check_root_content()` returns `Vec<RootProblem>` (not strings). Helper functions (`check_agents_md`, `check_claude_md`, `check_claude_dir`, `check_go_work`) also return `RootProblem`/`Vec<RootProblem>`. The hardcoded skip list in `check_root_content` includes `.wsp.yaml`, `.wsp.yaml.lock`, `.wspignore`, and repo dirs. OS noise files (`.DS_Store` etc.) are handled by wspignore patterns, not hardcoded. When adding new wsp-managed root files, add them to the skip list in `check_root_content`.
 
 ## Releasing
 

@@ -1017,6 +1017,10 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
         println!("\nUse `wsp st -v` to see file details.");
     }
 
+    if !v.root.is_empty() {
+        eprintln!("\nhint: add paths to .wspignore to suppress");
+    }
+
     Ok(())
 }
 
