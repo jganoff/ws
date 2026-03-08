@@ -84,6 +84,35 @@ pub fn complete_workspace_repos() -> Vec<CompletionCandidate> {
     repos_to_candidates(meta.repos.keys().cloned().collect())
 }
 
+/// Complete repos in a named template (for `template repo rm`).
+pub fn complete_template_repos() -> Vec<CompletionCandidate> {
+    let Some(name) = template_name_from_args() else {
+        return Vec::new();
+    };
+    let Ok(paths) = Paths::resolve() else {
+        return Vec::new();
+    };
+    let Ok(tmpl) = template::load(&paths.templates_dir, &name) else {
+        return Vec::new();
+    };
+    let identities: Vec<String> = tmpl
+        .repos
+        .iter()
+        .filter_map(|r| giturl::parse(&r.url).ok().map(|p| p.identity()))
+        .collect();
+    repos_to_candidates(identities)
+}
+
+/// Complete valid template config key prefixes.
+/// Uses `git_config.` to match global `wsp config` naming; `git-config.` also accepted.
+pub fn complete_template_config_keys() -> Vec<CompletionCandidate> {
+    vec![
+        CompletionCandidate::new("sync-strategy"),
+        CompletionCandidate::new("language-integrations."),
+        CompletionCandidate::new("git_config."),
+    ]
+}
+
 pub fn complete_workspaces() -> Vec<CompletionCandidate> {
     let Ok(paths) = Paths::resolve() else {
         return Vec::new();
@@ -113,6 +142,14 @@ fn group_repos_from_args() -> Option<Vec<String>> {
     let paths = Paths::resolve().ok()?;
     let cfg = Config::load_from(&paths.config_path).ok()?;
     group::get(&cfg, group_name).ok()
+}
+
+/// Extract the template name from `["template", "repo"|"config"|"agent-md", "add"|"rm"|"set"|"get"|"unset", <name>]`.
+fn template_name_from_args() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let pos = args.iter().position(|a| a == "template")?;
+    // template <sub-noun> <verb> <name>
+    args.get(pos + 3).filter(|a| !a.starts_with('-')).cloned()
 }
 
 /// Find the `["group", "update"]` window in args and return the next

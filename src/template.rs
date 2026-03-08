@@ -432,6 +432,196 @@ pub fn auto_register(tmpl: &Template, cfg: &mut config::Config, paths: &Paths) -
 }
 
 // ---------------------------------------------------------------------------
+// Template mutation helpers
+// ---------------------------------------------------------------------------
+
+/// Valid key prefixes for template config. Global-only keys like `branch-prefix`,
+/// `workspaces-dir`, `gc.retention-days`, and `agent-md` are not valid here.
+const VALID_TEMPLATE_CONFIG_PREFIXES: &[&str] =
+    &["language-integrations.", "sync-strategy", "git-config."];
+
+/// Normalize a config key: convert underscores to hyphens for prefix matching.
+fn normalize_key(key: &str) -> String {
+    key.replace('_', "-")
+}
+
+/// Validate that a config key is valid for template config.
+fn validate_template_config_key(key: &str) -> Result<()> {
+    let normalized = normalize_key(key);
+    for prefix in VALID_TEMPLATE_CONFIG_PREFIXES {
+        if normalized == *prefix.trim_end_matches('.') || normalized.starts_with(prefix) {
+            return Ok(());
+        }
+    }
+    bail!(
+        "invalid template config key {:?}; valid key patterns: language-integrations.<name>, sync-strategy, git-config.<key>",
+        key
+    );
+}
+
+/// Add repos to a template. Idempotent: repos already present are skipped.
+/// Matches by identity (not just URL) so `git@` and `https://` for the same repo
+/// are treated as duplicates. Returns the list of skipped repo URLs.
+pub fn add_repos(template: &mut Template, urls: Vec<String>) -> Result<Vec<String>> {
+    let mut skipped = Vec::new();
+    let existing_identities: std::collections::HashSet<String> = template
+        .repos
+        .iter()
+        .filter_map(|r| giturl::parse(&r.url).ok().map(|p| p.identity()))
+        .collect();
+
+    for url in urls {
+        // Validate URL is parseable
+        let parsed = giturl::parse(&url)
+            .map_err(|e| anyhow::anyhow!("invalid repo URL {:?}: {}", url, e))?;
+
+        if existing_identities.contains(&parsed.identity()) {
+            skipped.push(url);
+        } else {
+            template.repos.push(TemplateRepo { url });
+        }
+    }
+    Ok(skipped)
+}
+
+/// Remove repos from a template. Matches by URL, identity, or shortname.
+/// Uses `giturl::resolve` for shortname matching — errors on ambiguous or not-found.
+pub fn remove_repos(template: &mut Template, urls_or_identities: Vec<String>) -> Result<()> {
+    // Resolve each input to a URL for unambiguous matching
+    let identities: Vec<String> = template
+        .repos
+        .iter()
+        .filter_map(|r| giturl::parse(&r.url).ok().map(|p| p.identity()))
+        .collect();
+
+    let mut urls_to_remove = std::collections::HashSet::new();
+    for input in &urls_or_identities {
+        // Try exact URL match first
+        if template.repos.iter().any(|r| r.url == *input) {
+            urls_to_remove.insert(input.clone());
+            continue;
+        }
+        // Resolve via identity/shortname using giturl::resolve (handles ambiguity)
+        let identity = giturl::resolve(input, &identities).map_err(|e| {
+            let current: Vec<&str> = template.repos.iter().map(|r| r.url.as_str()).collect();
+            anyhow::anyhow!("{} in template; current repos: {:?}", e, current)
+        })?;
+        // Find the URL for this identity
+        let url = template
+            .repos
+            .iter()
+            .find(|r| {
+                giturl::parse(&r.url).ok().map(|p| p.identity()).as_deref() == Some(&identity)
+            })
+            .map(|r| r.url.clone())
+            .unwrap(); // safe: resolve succeeded against identities from this list
+        urls_to_remove.insert(url);
+    }
+
+    template.repos.retain(|r| !urls_to_remove.contains(&r.url));
+    Ok(())
+}
+
+/// Set a template config value. Validates key prefix and value type.
+pub fn set_config(template: &mut Template, key: &str, value: &str) -> Result<()> {
+    let normalized = normalize_key(key);
+    validate_template_config_key(key)?;
+
+    let config = template.config.get_or_insert_with(TemplateConfig::default);
+
+    if normalized == "sync-strategy" {
+        match value {
+            "rebase" | "merge" => {}
+            _ => bail!("sync-strategy must be 'rebase' or 'merge'"),
+        }
+        config.sync_strategy = Some(value.to_string());
+    } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+        let enabled: bool = value.parse().map_err(|_| {
+            anyhow::anyhow!("value for language-integrations must be true or false")
+        })?;
+        let li = config
+            .language_integrations
+            .get_or_insert_with(std::collections::BTreeMap::new);
+        li.insert(lang.to_string(), enabled);
+    } else if let Some(git_key) = normalized.strip_prefix("git-config.") {
+        if git_key.is_empty() {
+            bail!("git-config key cannot be empty");
+        }
+        let gc = config
+            .git_config
+            .get_or_insert_with(std::collections::BTreeMap::new);
+        gc.insert(git_key.to_string(), value.to_string());
+    }
+
+    Ok(())
+}
+
+/// Get a template config value.
+pub fn get_config(template: &Template, key: &str) -> Result<Option<String>> {
+    let normalized = normalize_key(key);
+    validate_template_config_key(key)?;
+
+    let config = match &template.config {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    if normalized == "sync-strategy" {
+        Ok(config.sync_strategy.clone())
+    } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+        Ok(config
+            .language_integrations
+            .as_ref()
+            .and_then(|m| m.get(lang))
+            .map(|v| v.to_string()))
+    } else if let Some(git_key) = normalized.strip_prefix("git-config.") {
+        Ok(config
+            .git_config
+            .as_ref()
+            .and_then(|m| m.get(git_key))
+            .cloned())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Unset a template config value. Cleans up empty maps/Options.
+pub fn unset_config(template: &mut Template, key: &str) -> Result<()> {
+    let normalized = normalize_key(key);
+    validate_template_config_key(key)?;
+
+    let config = match &mut template.config {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    if normalized == "sync-strategy" {
+        config.sync_strategy = None;
+    } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+        if let Some(ref mut m) = config.language_integrations {
+            m.remove(lang);
+            if m.is_empty() {
+                config.language_integrations = None;
+            }
+        }
+    } else if let Some(git_key) = normalized.strip_prefix("git-config.")
+        && let Some(ref mut m) = config.git_config
+    {
+        m.remove(git_key);
+        if m.is_empty() {
+            config.git_config = None;
+        }
+    }
+
+    // Clean up empty config
+    if *config == TemplateConfig::default() {
+        template.config = None;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Group migration
 // ---------------------------------------------------------------------------
 
@@ -1181,6 +1371,293 @@ created: 2026-03-07T10:00:00Z
                 "case: {}",
                 tc.name
             );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Template mutation helper tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn add_repos_normal() {
+        let mut tmpl = sample_template();
+        let skipped = add_repos(&mut tmpl, vec!["git@github.com:acme/proto.git".into()]).unwrap();
+        assert!(skipped.is_empty());
+        assert_eq!(tmpl.repos.len(), 3);
+        assert_eq!(tmpl.repos[2].url, "git@github.com:acme/proto.git");
+    }
+
+    #[test]
+    fn add_repos_idempotent() {
+        let mut tmpl = sample_template();
+        let skipped = add_repos(
+            &mut tmpl,
+            vec!["git@github.com:acme/api-gateway.git".into()],
+        )
+        .unwrap();
+        assert_eq!(skipped, vec!["git@github.com:acme/api-gateway.git"]);
+        assert_eq!(tmpl.repos.len(), 2); // unchanged
+    }
+
+    #[test]
+    fn add_repos_invalid_url() {
+        let mut tmpl = sample_template();
+        let err = add_repos(&mut tmpl, vec!["not-a-url".into()]).unwrap_err();
+        assert!(err.to_string().contains("invalid repo URL"));
+    }
+
+    #[test]
+    fn remove_repos_by_url() {
+        let mut tmpl = sample_template();
+        remove_repos(
+            &mut tmpl,
+            vec!["git@github.com:acme/api-gateway.git".into()],
+        )
+        .unwrap();
+        assert_eq!(tmpl.repos.len(), 1);
+        assert_eq!(tmpl.repos[0].url, "git@github.com:acme/user-service.git");
+    }
+
+    #[test]
+    fn remove_repos_by_identity() {
+        let mut tmpl = sample_template();
+        remove_repos(&mut tmpl, vec!["github.com/acme/api-gateway".into()]).unwrap();
+        assert_eq!(tmpl.repos.len(), 1);
+    }
+
+    #[test]
+    fn remove_repos_by_shortname() {
+        let mut tmpl = sample_template();
+        remove_repos(&mut tmpl, vec!["api-gateway".into()]).unwrap();
+        assert_eq!(tmpl.repos.len(), 1);
+    }
+
+    #[test]
+    fn remove_repos_not_found() {
+        let mut tmpl = sample_template();
+        let err = remove_repos(&mut tmpl, vec!["nonexistent".into()]).unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn remove_repos_ambiguous_shortname() {
+        let mut tmpl = Template {
+            repos: vec![
+                TemplateRepo {
+                    url: "git@github.com:team-a/utils.git".into(),
+                },
+                TemplateRepo {
+                    url: "git@github.com:team-b/utils.git".into(),
+                },
+            ],
+            config: None,
+            agent_md: None,
+        };
+        let err = remove_repos(&mut tmpl, vec!["utils".into()]).unwrap_err();
+        assert!(err.to_string().contains("ambiguous"));
+    }
+
+    #[test]
+    fn remove_repos_non_github_shortname() {
+        let mut tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@gitlab.company.com:team/service.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        remove_repos(&mut tmpl, vec!["service".into()]).unwrap();
+        assert!(tmpl.repos.is_empty());
+    }
+
+    #[test]
+    fn set_config_sync_strategy() {
+        let mut tmpl = sample_template();
+        set_config(&mut tmpl, "sync-strategy", "merge").unwrap();
+        assert_eq!(
+            tmpl.config.as_ref().unwrap().sync_strategy.as_deref(),
+            Some("merge")
+        );
+    }
+
+    #[test]
+    fn set_config_sync_strategy_invalid() {
+        let mut tmpl = sample_template();
+        let err = set_config(&mut tmpl, "sync-strategy", "fast-forward").unwrap_err();
+        assert!(err.to_string().contains("rebase"));
+    }
+
+    #[test]
+    fn set_config_language_integration() {
+        let mut tmpl = sample_template();
+        set_config(&mut tmpl, "language-integrations.go", "true").unwrap();
+        assert_eq!(
+            tmpl.config
+                .as_ref()
+                .unwrap()
+                .language_integrations
+                .as_ref()
+                .unwrap()["go"],
+            true
+        );
+    }
+
+    #[test]
+    fn set_config_language_integration_invalid_value() {
+        let mut tmpl = sample_template();
+        let err = set_config(&mut tmpl, "language-integrations.go", "yes").unwrap_err();
+        assert!(err.to_string().contains("true or false"));
+    }
+
+    #[test]
+    fn set_config_git_config() {
+        let mut tmpl = sample_template();
+        set_config(&mut tmpl, "git-config.push.default", "simple").unwrap();
+        assert_eq!(
+            tmpl.config.as_ref().unwrap().git_config.as_ref().unwrap()["push.default"],
+            "simple"
+        );
+    }
+
+    #[test]
+    fn set_config_git_config_underscore_variant() {
+        let mut tmpl = sample_template();
+        // git_config. (underscore) matches global wsp config naming
+        set_config(&mut tmpl, "git_config.push.default", "simple").unwrap();
+        assert_eq!(
+            tmpl.config.as_ref().unwrap().git_config.as_ref().unwrap()["push.default"],
+            "simple"
+        );
+    }
+
+    #[test]
+    fn set_config_invalid_key() {
+        let mut tmpl = sample_template();
+        let err = set_config(&mut tmpl, "branch-prefix", "foo").unwrap_err();
+        assert!(err.to_string().contains("invalid template config key"));
+    }
+
+    #[test]
+    fn set_config_underscore_normalization() {
+        let mut tmpl = sample_template();
+        // Underscores in key are normalized to hyphens for matching
+        set_config(&mut tmpl, "sync_strategy", "merge").unwrap();
+        assert_eq!(
+            tmpl.config.as_ref().unwrap().sync_strategy.as_deref(),
+            Some("merge")
+        );
+    }
+
+    #[test]
+    fn get_config_present() {
+        let mut tmpl = sample_template();
+        set_config(&mut tmpl, "sync-strategy", "merge").unwrap();
+        let val = get_config(&tmpl, "sync-strategy").unwrap();
+        assert_eq!(val.as_deref(), Some("merge"));
+    }
+
+    #[test]
+    fn get_config_absent() {
+        let tmpl = sample_template();
+        let val = get_config(&tmpl, "sync-strategy").unwrap();
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn unset_config_present() {
+        let mut tmpl = sample_template();
+        set_config(&mut tmpl, "sync-strategy", "merge").unwrap();
+        unset_config(&mut tmpl, "sync-strategy").unwrap();
+        assert!(tmpl.config.is_none()); // cleaned up
+    }
+
+    #[test]
+    fn unset_config_absent() {
+        let mut tmpl = sample_template();
+        // No error when unsetting something not present
+        unset_config(&mut tmpl, "sync-strategy").unwrap();
+    }
+
+    #[test]
+    fn unset_config_map_cleanup() {
+        use std::collections::BTreeMap;
+
+        let mut tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: Some(TemplateConfig {
+                language_integrations: Some(BTreeMap::from([("go".into(), true)])),
+                sync_strategy: None,
+                git_config: None,
+            }),
+            agent_md: None,
+        };
+
+        unset_config(&mut tmpl, "language-integrations.go").unwrap();
+        // Config should be cleaned up entirely
+        assert!(tmpl.config.is_none());
+    }
+
+    #[test]
+    fn validate_template_config_key_cases() {
+        struct Case {
+            name: &'static str,
+            key: &'static str,
+            want_err: bool,
+        }
+
+        let cases = vec![
+            Case {
+                name: "sync-strategy",
+                key: "sync-strategy",
+                want_err: false,
+            },
+            Case {
+                name: "lang int go",
+                key: "language-integrations.go",
+                want_err: false,
+            },
+            Case {
+                name: "git config",
+                key: "git-config.push.default",
+                want_err: false,
+            },
+            Case {
+                name: "underscore variant",
+                key: "sync_strategy",
+                want_err: false,
+            },
+            Case {
+                name: "branch-prefix",
+                key: "branch-prefix",
+                want_err: true,
+            },
+            Case {
+                name: "workspaces-dir",
+                key: "workspaces-dir",
+                want_err: true,
+            },
+            Case {
+                name: "gc.retention-days",
+                key: "gc.retention-days",
+                want_err: true,
+            },
+            Case {
+                name: "agent-md",
+                key: "agent-md",
+                want_err: true,
+            },
+            Case {
+                name: "random key",
+                key: "foo-bar",
+                want_err: true,
+            },
+        ];
+
+        for tc in cases {
+            let result = super::validate_template_config_key(tc.key);
+            assert_eq!(result.is_err(), tc.want_err, "case: {}", tc.name);
         }
     }
 }

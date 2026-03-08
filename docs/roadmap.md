@@ -2,16 +2,21 @@
 
 Prioritized feature plan for wsp, organized by shipping priority.
 
+## P0 — Cleanup
+
+### Remove deprecated `-g`/`--group` flag and `wsp group` command
+
+**Target:** 0.10.0
+
+The `-g`/`--group` flag on `wsp new` and `wsp repo add`, along with the `wsp group` command, have been superseded by templates (`-t`/`--template` and `wsp template`). Remove the deprecated code paths in the 0.10.0 release.
+
+- [ ] Remove `-g`/`--group` flag from `src/cli/new.rs` and `src/cli/add.rs`
+- [ ] Remove `src/cli/group.rs` and `src/group.rs`
+- [ ] Remove group migration logic from `src/template.rs`
+- [ ] Remove `wsp setup group` backward-compat alias
+- [ ] Update docs and SKILL.md
+
 ## P1 — Adoption
-
-### Workspace Templates (remaining phases)
-
-**Design doc:** [`docs/features/workspace-templates.md`](features/workspace-templates.md)
-
-Phases 1-4 have shipped (CRUD, `-w`/`-f` source flags, export, file import, group migration, template config).
-
-- [ ] Phase 5: Format unification — `.wsp.yaml` gains URLs, becomes the template format
-- [ ] Phase 6: Agent context — workspace definition repos with CLAUDE.md + skills alongside `.wsp.yaml`
 
 ### `wsp doctor`
 

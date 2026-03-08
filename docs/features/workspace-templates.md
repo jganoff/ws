@@ -176,18 +176,4 @@ Any `.wsp.yaml` can be used as a template: `wsp new my-feature -t ./path/to/.wsp
 
 ## Implementation Phases
 
-Phases 1-4 have shipped.
-
-### Phase 5: Format unification
-
-- Add optional `url` field to `Metadata` repo entries
-- Populate URLs from registry during `wsp new`
-- Accept `.wsp.yaml` format in `-t` / `-f` (parse Metadata, extract repos + config)
-- Migrate stored templates to unified format
-- `wsp template export` writes a `.wsp.yaml` (already the case for the portable format)
-
-### Phase 6: Agent context in workspace definition repos
-
-- `wsp new -t ./path/` accepts a directory containing `.wsp.yaml` + CLAUDE.md + skills/
-- Copy agent files into new workspace during creation
-- Define interaction with auto-generated AGENTS.md sections
+All phases have shipped (0.8.0).

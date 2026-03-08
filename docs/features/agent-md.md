@@ -40,7 +40,7 @@ When working inside a repo in a wsp workspace, AI agents (Claude Code, Cursor, e
 | Repo | Role | Ref | Directory |
 |------|------|-----|-----------|
 | github.com/acme/api-gateway | active | - | api-gateway |
-| github.com/acme/proto | context | v1.0 | proto |
+| github.com/acme/proto | active | - | proto |
 
 ## Quick Reference
 
@@ -81,7 +81,7 @@ pub agent_md: Option<bool>,
 
 - `None` or `Some(true)` = enabled (default on)
 - `Some(false)` = disabled
-- Disable via: `wsp setup config set agent-md false`
+- Disable via: `wsp config set agent-md false`
 
 ## Architecture
 

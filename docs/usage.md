@@ -2,115 +2,179 @@
 
 Full command reference and configuration guide for `wsp`.
 
-## Setup
+## Registry
 
-### `wsp setup repo add <url>`
+### `wsp registry add <url>`
 
 Register a repository and create its bare mirror.
 
 ```
-$ wsp setup repo add git@github.com:acme/api-gateway.git
+$ wsp registry add git@github.com:acme/api-gateway.git
 Cloning git@github.com:acme/api-gateway.git...
 Registered github.com/acme/api-gateway
 ```
 
-### `wsp setup repo ls`
+### `wsp registry ls`
 
 List all registered repositories.
 
 ```
-$ wsp setup repo ls
+$ wsp registry ls
   github.com/acme/api-gateway [api-gateway]  (git@github.com:acme/api-gateway.git)
   github.com/acme/user-service [user-service]  (git@github.com:acme/user-service.git)
 ```
 
 Shows identity, shortname (in brackets), and URL.
 
-### `wsp setup repo rm <name>`
+### `wsp registry rm <name>`
 
 Remove a repository and delete its bare mirror. Accepts a shortname.
 
 ```
-$ wsp setup repo rm api-gateway
+$ wsp registry rm api-gateway
 Removing mirror for github.com/acme/api-gateway...
 Removed github.com/acme/api-gateway
 ```
 
-### Groups
+## Templates
 
-Save frequently-used sets of repos as groups.
+Templates are sharable workspace definitions — a named set of repos and
+optional settings. They replace the older "groups" feature.
 
-### `wsp setup group new <name> <repos...>`
+### `wsp template new <name> [repos...]`
 
-Create a named group.
-
-```
-$ wsp setup group new backend api-gateway user-service
-Created group "backend" with 2 repos
-```
-
-### `wsp setup group update <name> --add <repos...> --remove <repos...>`
-
-Add or remove repos from an existing group. At least one of `--add` or
-`--remove` is required. Errors if adding a repo already in the group, or
-removing one that isn't.
+Create a named template from repos or derive from an existing workspace.
 
 ```
-$ wsp setup group update backend --add api-gateway user-service
-Updated group "backend": added 2
-
-$ wsp setup group update backend --remove old-service
-Updated group "backend": removed 1
-
-$ wsp setup group update backend --add new-svc --remove old-svc
-Updated group "backend": added 1, removed 1
+$ wsp template new backend api-gateway user-service
+Created template "backend" with 2 repos
 ```
 
-### `wsp setup group ls`
-
-List all groups.
+Derive from a workspace:
 
 ```
-$ wsp setup group ls
+$ wsp template new backend -w add-billing
+Created template "backend" from workspace "add-billing"
+```
+
+### `wsp template ls`
+
+List all templates.
+
+```
+$ wsp template ls
   backend (2 repos)
   frontend (1 repos)
 ```
 
-### `wsp setup group show <name>`
+### `wsp template show <name>`
 
-Show the repos in a group.
+Show the repos and config in a template.
 
 ```
-$ wsp setup group show backend
-Group "backend":
+$ wsp template show backend
+Template "backend":
   github.com/acme/api-gateway
   github.com/acme/user-service
 ```
 
-### `wsp setup group rm <name>`
+### `wsp template repo add <name> <repos...>`
 
-Remove a group. Does not affect the repos themselves.
+Add repos to a template. Idempotent — repos already present are skipped with a
+warning.
 
 ```
-$ wsp setup group rm backend
-Deleted group "backend"
+$ wsp template repo add backend git@github.com:acme/proto.git
+Template "backend":
+  github.com/acme/api-gateway
+  github.com/acme/user-service
+  github.com/acme/proto
 ```
 
-### Config
+### `wsp template repo rm <name> <repos...>`
 
-### `wsp setup config get <key>`
+Remove repos from a template. Accepts URLs, identities, or shortnames.
+
+```
+$ wsp template repo rm backend proto
+Template "backend":
+  github.com/acme/api-gateway
+  github.com/acme/user-service
+```
+
+### `wsp template config set <name> <key> <value>`
+
+Set a template config override. Template config overrides global config when
+creating workspaces from the template.
+
+```
+$ wsp template config set backend sync-strategy merge
+template "backend": sync-strategy = merge
+```
+
+**Valid template config keys:**
+
+| Key pattern              | Value          |
+|--------------------------|----------------|
+| `sync-strategy`          | `rebase` or `merge` |
+| `language-integrations.<name>` | `true` or `false` |
+| `git_config.<key>`       | string         |
+
+Hyphens and underscores are interchangeable in key names (e.g., `git_config.` and
+`git-config.` are equivalent).
+
+### `wsp template config get <name> <key>`
+
+Get a template config value. Returns `(not set)` for absent keys.
+
+### `wsp template config unset <name> <key>`
+
+Remove a template config override.
+
+### `wsp template agent-md set <name> <path>`
+
+Set AGENTS.md content for a template from a file. Use `-` for stdin.
+
+```
+$ wsp template agent-md set backend ./project-rules.md
+template "backend": agent-md set
+
+$ echo "# Rules" | wsp template agent-md set backend -
+template "backend": agent-md set
+```
+
+### `wsp template agent-md unset <name>`
+
+Clear AGENTS.md content from a template.
+
+### `wsp template rm <name>`
+
+Remove a template. Does not affect workspaces created from it.
+
+### `wsp template export <name>`
+
+Export a template as a shareable `.wsp.yaml` file.
+
+```
+$ wsp template export backend
+Wrote backend.wsp.yaml
+```
+
+## Config
+
+### `wsp config get <key>`
 
 Get a config value.
 
-### `wsp setup config set <key> <value>`
+### `wsp config set <key> <value>`
 
 Set a config value.
 
-### `wsp setup config unset <key>`
+### `wsp config unset <key>`
 
 Unset a config value.
 
-### `wsp setup config ls`
+### `wsp config ls`
 
 List all config values.
 
@@ -121,56 +185,60 @@ List all config values.
 | `branch-prefix`  | Prefix prepended to workspace branch names (`prefix/name`)  |
 | `workspaces-dir` | Override the default workspaces directory (`~/dev/workspaces`) |
 | `language-integrations.go` | Auto-generate `go.work` when `go.mod` is detected (`true`/`false`) |
+| `agent-md`       | Auto-generate `AGENTS.md` in workspaces (`true`/`false`, default `true`) |
+| `gc.retention-days` | Days to keep removed workspaces before permanent deletion (default `7`) |
 
-### Shell integration
+## Shell integration
 
-### `wsp setup completion <shell>`
+### `wsp completion <shell>`
 
 Output shell integration script. Supports `zsh`, `bash`, and `fish`.
 
 ```bash
 # zsh (~/.zshrc)
-eval "$(wsp setup completion zsh)"
+eval "$(wsp completion zsh)"
 
 # bash (~/.bashrc)
-eval "$(wsp setup completion bash)"
+eval "$(wsp completion bash)"
 
 # fish (~/.config/fish/config.fish)
-wsp setup completion fish | source
+wsp completion fish | source
 ```
 
 This provides:
 
-- Tab completion for workspace names, repo shortnames, and group names
+- Tab completion for workspace names, repo shortnames, template names, and group names
 - Auto-cd into the workspace directory after `wsp new`
 - Auto-cd out of a workspace directory before `wsp rm` if you're inside it
 - All other subcommands pass through to the binary unchanged
 
 ## Workspaces
 
-### `wsp new <workspace> [repos...] [-g group]`
+### `wsp new <workspace> [repos...] [-t template]`
 
 Create a workspace. Each listed repo gets a local clone checked out to a branch
 matching the workspace name.
 
-| Flag          | Description                |
-|---------------|----------------------------|
-| `-g, --group` | Include repos from a group |
+| Flag             | Description                   |
+|------------------|-------------------------------|
+| `-t, --template` | Include repos from a template |
+| `-w, --workspace` | Derive repos from an existing workspace |
+| `-f, --file`     | Create from a `.wsp.yaml` file |
 
 ```
-$ wsp new add-billing -g backend web-app proto
+$ wsp new add-billing -t backend web-app proto
 Creating workspace "add-billing" with 4 repos...
 Workspace created: /Users/you/dev/workspaces/add-billing
 ```
 
-### `wsp repo add [repos...] [-g group]`
+### `wsp repo add [repos...] [-t template]`
 
 Add repos to the current workspace. Must be run from inside a workspace
 directory.
 
-| Flag          | Description                |
-|---------------|----------------------------|
-| `-g, --group` | Include repos from a group |
+| Flag             | Description                   |
+|------------------|-------------------------------|
+| `-t, --template` | Include repos from a template |
 
 ```
 $ cd ~/dev/workspaces/add-billing
@@ -182,6 +250,10 @@ Done.
 ### `wsp repo rm <repos...> [-f]`
 
 Remove repos from the current workspace.
+
+### `wsp repo ls`
+
+List repos in the current workspace.
 
 ### `wsp repo fetch [--all] [--prune]`
 
@@ -213,8 +285,7 @@ $ wsp st add-billing
 Workspace: add-billing  Branch: add-billing
 
 [api-gateway  ]  (add-billing)  3 ahead  2 files changed
-[user-service ]  (main       )  clean
-[proto        ]  (v1.0       )  clean
+[user-service ]  (add-billing)  clean
 ```
 
 ### `wsp diff [workspace] [-- args]`
@@ -222,20 +293,55 @@ Workspace: add-billing  Branch: add-billing
 Show `git diff` across all repos in a workspace. Extra arguments after `--` are
 passed through to `git diff`.
 
+### `wsp log [workspace] [-- args]`
+
+Show `git log` across all repos in a workspace. Extra arguments after `--` are
+passed through to `git log`.
+
+### `wsp sync [workspace] [--strategy merge]`
+
+Fetch and rebase (default) or merge all repos in a workspace.
+
+| Flag                | Description                         |
+|---------------------|-------------------------------------|
+| `--strategy merge`  | Use merge instead of rebase         |
+| `--abort`           | Abort an in-progress rebase/merge   |
+
 ### `wsp rm [workspace] [-f]`
 
-Remove a workspace and its clones. Blocks if any repo has uncommitted work or
-unmerged branches. Detects squash-merged branches automatically.
+Remove a workspace. Blocks if any repo has uncommitted work or unmerged
+branches. Detects squash-merged branches automatically.
 
-| Flag        | Description                      |
-|-------------|----------------------------------|
-| `-f, --force` | Force remove even with unmerged branches |
+Removed workspaces are recoverable via `wsp recover` (kept for 7 days by
+default). Use `--permanent` to skip deferred deletion.
+
+| Flag            | Description                              |
+|-----------------|------------------------------------------|
+| `-f, --force`   | Force remove even with unmerged branches |
+| `--permanent`   | Permanently delete (bypass recovery)     |
 
 ```
 $ wsp rm add-billing
 Removing workspace "add-billing"...
 Workspace "add-billing" removed.
 ```
+
+### `wsp recover [workspace]`
+
+List recoverable workspaces, or restore one by name.
+
+```
+$ wsp recover
+  add-billing  removed 2h ago  3 repos
+  old-feature  removed 3d ago  2 repos
+
+$ wsp recover add-billing
+Recovered workspace "add-billing"
+```
+
+### `wsp rename <old> <new>`
+
+Rename a workspace.
 
 ### `wsp exec <workspace> -- <command...>`
 
@@ -259,7 +365,7 @@ Change directory into a workspace. Requires shell integration.
 Set a global prefix so every workspace branch is created under your namespace:
 
 ```
-$ wsp setup config set branch-prefix myname
+$ wsp config set branch-prefix myname
 
 $ wsp new fix-billing api-gateway
 Creating workspace "fix-billing" (branch: myname/fix-billing) with 1 repos...
@@ -306,14 +412,16 @@ All `wsp` data is stored under `~/.local/share/wsp/`. Respects `XDG_DATA_HOME`.
 
 ```
 ~/.local/share/wsp/
-  config.yaml           registered repos, groups, settings
+  config.yaml           registered repos, templates, settings
+  templates/            saved workspace templates
   mirrors/              bare git clones
+  gc/                   deferred deletions (recoverable)
 ```
 
 ### Workspaces directory
 
 Workspaces are created under `~/dev/workspaces/` by default. Override with
-`wsp setup config set workspaces-dir /path/to/dir`.
+`wsp config set workspaces-dir /path/to/dir`.
 
 ### `.wsp.yaml` format
 
@@ -322,15 +430,18 @@ name: add-billing
 branch: add-billing
 repos:
   github.com/acme/api-gateway:
+    url: git@github.com:acme/api-gateway.git
   github.com/acme/user-service:
-    ref: main
-  github.com/acme/proto:
-    ref: v1.0
+    url: git@github.com:acme/user-service.git
+config:
+  language_integrations:
+    go: true
 created: 2025-06-15T11:00:00Z
 ```
 
-Active repos have no value (nil entry). Context repos have a `ref` field
-specifying the pinned branch or tag.
+The `url` field captures the URL used at creation time, making the file
+shareable as a template. Any `.wsp.yaml` can be used to create a new workspace
+via `wsp new -f path/to/.wsp.yaml`.
 
 ### `config.yaml` format
 
@@ -344,10 +455,4 @@ repos:
   github.com/acme/user-service:
     url: git@github.com:acme/user-service.git
     added: 2025-06-15T10:31:00Z
-
-groups:
-  backend:
-    repos:
-      - github.com/acme/api-gateway
-      - github.com/acme/user-service
 ```

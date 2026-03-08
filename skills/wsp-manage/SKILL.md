@@ -38,6 +38,9 @@ wsp template ls                                 # List all templates [read-only]
 wsp template show <name>                        # Show template contents [read-only]
 wsp template rm <name>                          # Remove a template (alias: remove)
 wsp template export <name> [--stdout]           # Export a template to a file or stdout [read-only]
+wsp template repo                               # Add or remove repos in a template
+wsp template config                             # Manage template config overrides
+wsp template agent-md                           # Manage template AGENTS.md content
 ```
 
 ### Workspaces
@@ -54,7 +57,7 @@ wsp cd <workspace>                              # Change directory into a worksp
 wsp rm [<workspace>] [-f] [--permanent]         # Remove a workspace (alias: remove)
 wsp recover [<workspace>]                       # List or restore recently removed workspaces [read-only without args]
 wsp rename <old> <new>                          # Rename a workspace, its directory, and git branches
-wsp repo add [<repos>]... [-g <group>]          # Add repos to current workspace
+wsp repo add [<repos>]... [-t <template>] [-g <group>] # Add repos to current workspace
 wsp repo rm <repos>... [-f]                     # Remove repo(s) from the current workspace (alias: remove)
 wsp repo fetch [--all] [--prune]                # Fetch updates for workspace repos
 wsp repo ls                                     # List repos in the current workspace [read-only] (alias: list)

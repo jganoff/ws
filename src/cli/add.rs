@@ -12,6 +12,7 @@ use crate::giturl;
 use crate::group;
 use crate::mirror;
 use crate::output::{MutationOutput, Output};
+use crate::template;
 use crate::workspace;
 
 use super::completers;
@@ -31,10 +32,18 @@ pub fn cmd() -> Command {
                 .add(ArgValueCandidates::new(completers::complete_repos)),
         )
         .arg(
+            Arg::new("template")
+                .short('t')
+                .long("template")
+                .help("Add repos from a template (name or file path)")
+                .add(ArgValueCandidates::new(completers::complete_templates)),
+        )
+        // TODO(0.10.0): Remove deprecated -g/--group flag
+        .arg(
             Arg::new("group")
                 .short('g')
                 .long("group")
-                .help("Add repos from a group")
+                .help("Add repos from a group (deprecated, use --template)")
                 .add(ArgValueCandidates::new(completers::complete_groups)),
         )
 }
@@ -44,19 +53,39 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .get_many::<String>("repos")
         .map(|v| v.collect())
         .unwrap_or_default();
+    let template_source = matches.get_one::<String>("template");
     let group_name = matches.get_one::<String>("group");
+
+    // TODO(0.10.0): Remove deprecated -g/--group handling
+    if group_name.is_some() {
+        eprintln!("warning: --group is deprecated, use --template instead");
+    }
 
     let cwd = std::env::current_dir()?;
     let ws_dir = workspace::detect(&cwd)?;
     gc::check_workspace(&ws_dir, /* read_only */ false)?;
 
-    let cfg = config::Config::load_from(&paths.config_path)
+    let mut cfg = config::Config::load_from(&paths.config_path)
         .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
 
     let identities: Vec<String> = cfg.repos.keys().cloned().collect();
 
     let mut repo_refs: BTreeMap<String, String> = BTreeMap::new();
 
+    // Add repos from template (-t)
+    if let Some(source) = template_source {
+        let tmpl = match template::classify_source(source) {
+            template::TemplateSource::FilePath(path) => template::load_from_file(&path)?,
+            template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
+        };
+        template::auto_register(&tmpl, &mut cfg, paths)?;
+        let tmpl_identities = tmpl.identities()?;
+        for id in tmpl_identities {
+            repo_refs.insert(id, String::new());
+        }
+    }
+
+    // TODO(0.10.0): Remove deprecated -g/--group handling
     if let Some(gn) = group_name {
         let group_repos = group::get(&cfg, gn)?;
         for id in group_repos {
@@ -88,7 +117,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     if repo_refs.is_empty() {
-        bail!("no repos specified (use repo args or --group)");
+        bail!("no repos specified (use repo args or --template)");
     }
 
     // Auto-register any unregistered repos (create mirror + add to config.yaml)

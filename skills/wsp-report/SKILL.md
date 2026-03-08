@@ -31,8 +31,8 @@ wsp --version
 uname -srm
 echo $SHELL
 wsp st --json 2>&1
-wsp setup config ls --json 2>&1
-wsp setup repo ls --json 2>&1
+wsp config ls --json 2>&1
+wsp registry ls --json 2>&1
 cat .wsp.yaml 2>/dev/null || echo "not in a workspace"
 ```
 
@@ -82,7 +82,7 @@ Body:
 <output of wsp st --json, if relevant>
 
 ## Configuration
-<output of wsp setup config ls --json>
+<output of wsp config ls --json>
 ```
 
 ### 6. File the issue

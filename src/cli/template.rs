@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read as _, Write};
 
 use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
@@ -8,7 +8,8 @@ use clap_complete::engine::ArgValueCandidates;
 use crate::config::{self, Paths};
 use crate::giturl;
 use crate::output::{
-    MutationOutput, Output, TemplateListEntry, TemplateListOutput, TemplateShowOutput,
+    ConfigGetOutput, MutationOutput, Output, TemplateListEntry, TemplateListOutput,
+    TemplateShowOutput,
 };
 use crate::template as tmpl;
 
@@ -29,6 +30,9 @@ pub fn cmd() -> Command {
         .subcommand(show_cmd())
         .subcommand(rm_cmd())
         .subcommand(export_cmd())
+        .subcommand(repo_cmd())
+        .subcommand(config_cmd())
+        .subcommand(agent_md_cmd())
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -45,6 +49,9 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Some(("show", m)) => run_show(m, paths),
         Some(("rm", m)) => run_rm(m, paths),
         Some(("export", m)) => run_export(m, paths),
+        Some(("repo", m)) => dispatch_repo(m, paths),
+        Some(("config", m)) => dispatch_config(m, paths),
+        Some(("agent-md", m)) => dispatch_agent_md(m, paths),
         _ => unreachable!(),
     }
 }
@@ -253,5 +260,335 @@ fn run_export(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             "Exported template to {}",
             dest.display()
         ))))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// template repo add/rm
+// ---------------------------------------------------------------------------
+
+fn repo_cmd() -> Command {
+    Command::new("repo")
+        .about("Add or remove repos in a template")
+        .long_about(
+            "Add or remove repos in an existing template.\n\n\
+             Mirrors `wsp repo add/rm` but operates on a stored template instead of \
+             a workspace. `repo add` is idempotent — repos already present are skipped \
+             with a warning.",
+        )
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("add")
+                .about("Add repos to a template")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                )
+                .arg(
+                    Arg::new("repos")
+                        .required(true)
+                        .num_args(1..)
+                        .help("Repo URLs or shortnames to add")
+                        .add(ArgValueCandidates::new(completers::complete_repos)),
+                ),
+        )
+        .subcommand(
+            Command::new("rm")
+                .visible_alias("remove")
+                .about("Remove repos from a template")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                )
+                .arg(
+                    Arg::new("repos")
+                        .required(true)
+                        .num_args(1..)
+                        .help("Repo URLs, identities, or shortnames to remove")
+                        .add(ArgValueCandidates::new(completers::complete_template_repos)),
+                ),
+        )
+}
+
+fn dispatch_repo(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    match matches.subcommand() {
+        Some(("add", m)) => run_repo_add(m, paths),
+        Some(("rm", m)) => run_repo_rm(m, paths),
+        _ => unreachable!(),
+    }
+}
+
+fn run_repo_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let repos: Vec<String> = matches
+        .get_many::<String>("repos")
+        .unwrap()
+        .cloned()
+        .collect();
+
+    let mut template = tmpl::load(&paths.templates_dir, name)?;
+    let skipped = tmpl::add_repos(&mut template, repos)?;
+
+    for url in &skipped {
+        eprintln!("warning: repo {:?} already in template, skipping", url);
+    }
+
+    tmpl::save(&paths.templates_dir, name, &template)?;
+
+    let show = template_show_output(name, &template);
+    Ok(Output::TemplateShow(show))
+}
+
+fn run_repo_rm(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let repos: Vec<String> = matches
+        .get_many::<String>("repos")
+        .unwrap()
+        .cloned()
+        .collect();
+
+    let mut template = tmpl::load(&paths.templates_dir, name)?;
+    tmpl::remove_repos(&mut template, repos)?;
+
+    if template.repos.is_empty() {
+        anyhow::bail!("cannot remove all repos from template — use `wsp template rm` instead");
+    }
+
+    tmpl::save(&paths.templates_dir, name, &template)?;
+
+    let show = template_show_output(name, &template);
+    Ok(Output::TemplateShow(show))
+}
+
+// ---------------------------------------------------------------------------
+// template config set/get/unset
+// ---------------------------------------------------------------------------
+
+fn config_cmd() -> Command {
+    Command::new("config")
+        .about("Manage template config overrides")
+        .long_about(
+            "Manage template-scoped config overrides.\n\n\
+             Template config overrides global config when a workspace is created from the \
+             template. Valid keys: language-integrations.<name>, sync-strategy, \
+             git-config.<key>.",
+        )
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("set")
+                .about("Set a template config override")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                )
+                .arg(Arg::new("key").required(true).add(ArgValueCandidates::new(
+                    completers::complete_template_config_keys,
+                )))
+                .arg(Arg::new("value").required(true)),
+        )
+        .subcommand(
+            Command::new("get")
+                .about("Get a template config value [read-only]")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                )
+                .arg(Arg::new("key").required(true).add(ArgValueCandidates::new(
+                    completers::complete_template_config_keys,
+                ))),
+        )
+        .subcommand(
+            Command::new("unset")
+                .about("Unset a template config override")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                )
+                .arg(Arg::new("key").required(true).add(ArgValueCandidates::new(
+                    completers::complete_template_config_keys,
+                ))),
+        )
+}
+
+fn dispatch_config(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    match matches.subcommand() {
+        Some(("set", m)) => run_config_set(m, paths),
+        Some(("get", m)) => run_config_get(m, paths),
+        Some(("unset", m)) => run_config_unset(m, paths),
+        _ => unreachable!(),
+    }
+}
+
+fn run_config_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let key = matches.get_one::<String>("key").unwrap();
+    let value = matches.get_one::<String>("value").unwrap();
+
+    let mut template = tmpl::load(&paths.templates_dir, name)?;
+    tmpl::set_config(&mut template, key, value)?;
+    tmpl::save(&paths.templates_dir, name, &template)?;
+
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "template {:?}: {} = {}",
+        name, key, value
+    ))))
+}
+
+fn run_config_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let key = matches.get_one::<String>("key").unwrap();
+
+    let template = tmpl::load(&paths.templates_dir, name)?;
+    let value = tmpl::get_config(&template, key)?;
+
+    Ok(Output::ConfigGet(ConfigGetOutput {
+        key: key.clone(),
+        value,
+    }))
+}
+
+fn run_config_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let key = matches.get_one::<String>("key").unwrap();
+
+    let mut template = tmpl::load(&paths.templates_dir, name)?;
+    tmpl::unset_config(&mut template, key)?;
+    tmpl::save(&paths.templates_dir, name, &template)?;
+
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "template {:?}: {} unset",
+        name, key
+    ))))
+}
+
+// ---------------------------------------------------------------------------
+// template agent-md set/unset
+// ---------------------------------------------------------------------------
+
+fn agent_md_cmd() -> Command {
+    Command::new("agent-md")
+        .about("Manage template AGENTS.md content")
+        .long_about(
+            "Manage template AGENTS.md content.\n\n\
+             Set custom AGENTS.md content that will be included in workspaces created from \
+             this template. Use `-` as the path to read from stdin.",
+        )
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("set")
+                .about("Set AGENTS.md content from a file (use - for stdin)")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                )
+                .arg(
+                    Arg::new("path")
+                        .required(true)
+                        .help("File path (or - for stdin)")
+                        .value_hint(clap::ValueHint::FilePath),
+                ),
+        )
+        .subcommand(
+            Command::new("unset")
+                .about("Clear AGENTS.md content from a template")
+                .arg(
+                    Arg::new("name")
+                        .required(true)
+                        .add(ArgValueCandidates::new(completers::complete_templates)),
+                ),
+        )
+}
+
+fn dispatch_agent_md(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    match matches.subcommand() {
+        Some(("set", m)) => run_agent_md_set(m, paths),
+        Some(("unset", m)) => run_agent_md_unset(m, paths),
+        _ => unreachable!(),
+    }
+}
+
+fn run_agent_md_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+    let path = matches.get_one::<String>("path").unwrap();
+
+    let content = if path == "-" {
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        buf
+    } else {
+        fs::read_to_string(path).map_err(|e| anyhow::anyhow!("reading {:?}: {}", path, e))?
+    };
+
+    if content.trim().is_empty() {
+        anyhow::bail!("agent-md content is empty — use `agent-md unset` to clear");
+    }
+
+    // Guard against accidentally loading huge files
+    const MAX_AGENT_MD_BYTES: usize = 1_048_576; // 1 MiB
+    if content.len() > MAX_AGENT_MD_BYTES {
+        anyhow::bail!(
+            "agent-md content is {} bytes, exceeds 1 MiB limit",
+            content.len()
+        );
+    }
+
+    // Validate no wsp markers
+    if content.contains(crate::agentmd::MARKER_BEGIN)
+        || content.contains(crate::agentmd::MARKER_END)
+    {
+        anyhow::bail!("agent_md content cannot contain wsp markers (<!-- wsp:begin/end -->)");
+    }
+
+    let mut template = tmpl::load(&paths.templates_dir, name)?;
+    template.agent_md = Some(content);
+    tmpl::save(&paths.templates_dir, name, &template)?;
+
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "template {:?}: agent-md set",
+        name
+    ))))
+}
+
+fn run_agent_md_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let name = matches.get_one::<String>("name").unwrap();
+
+    let mut template = tmpl::load(&paths.templates_dir, name)?;
+    template.agent_md = None;
+    tmpl::save(&paths.templates_dir, name, &template)?;
+
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "template {:?}: agent-md unset",
+        name
+    ))))
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn template_show_output(name: &str, template: &tmpl::Template) -> TemplateShowOutput {
+    let repos = template
+        .repos
+        .iter()
+        .map(|r| {
+            let identity = giturl::parse(&r.url)
+                .map(|p| p.identity())
+                .unwrap_or_default();
+            crate::output::TemplateShowRepo {
+                url: r.url.clone(),
+                identity,
+            }
+        })
+        .collect();
+
+    TemplateShowOutput {
+        name: name.to_string(),
+        repos,
     }
 }

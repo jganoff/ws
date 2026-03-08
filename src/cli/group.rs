@@ -11,6 +11,9 @@ use crate::template;
 
 use super::completers;
 
+// TODO(0.10.0): Remove entire group command module. Groups are fully migrated
+// to templates. The `wsp group` command and `-g`/`--group` flags on `wsp new`
+// and `wsp repo add` exist only for backward compatibility during the transition.
 pub fn cmd() -> Command {
     Command::new("group")
         .about("Manage repo groups (deprecated, use `wsp template`)")

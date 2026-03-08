@@ -53,6 +53,7 @@ pub fn cmd() -> Command {
                 .help("Create from a template file (.yaml)")
                 .value_hint(clap::ValueHint::FilePath),
         )
+        // TODO(0.10.0): Remove deprecated -g/--group flag
         .arg(
             Arg::new("group")
                 .short('g')
