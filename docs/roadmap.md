@@ -41,7 +41,7 @@ Checking workspace my-feature...
 - [ ] Phase 4: P1 checks (mirror exists, origin remote exists, identity matches, orphaned dirs)
 - [ ] Phase 5: P2 checks (orphaned mirrors, default branch tracking, gc disk usage)
 - [ ] Phase 6: Detect interrupted operations via transaction journal (see below)
-- [ ] Detect stale global wspignore (missing defaults added after initial seed) and offer to add them via `--fix`
+- [ ] wspignore diagnostics: show effective ignore patterns (global + per-workspace merged), detect stale global wspignore (missing defaults added after initial seed), offer to add them via `--fix`
 
 ### Transaction Journal
 

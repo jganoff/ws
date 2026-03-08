@@ -861,13 +861,8 @@ const DEFAULT_WSPIGNORE: &str = "\
 Thumbs.db
 desktop.ini
 
-# AI coding assistants
-.claude/
-.cursor/
-
-# IDE settings
-.vscode/
-.idea/
+# Claude Code local settings (not managed by wsp)
+.claude/settings.local.json
 ";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3892,7 +3887,7 @@ mod tests {
         assert!(path.exists());
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains(".DS_Store"));
-        assert!(content.contains(".claude/"));
+        assert!(content.contains(".claude/settings.local.json"));
 
         // Second call doesn't overwrite
         fs::write(&path, "custom content").unwrap();
