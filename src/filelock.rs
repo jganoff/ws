@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use fs2::FileExt;
 
 use crate::config::Config;
+use crate::template::{self, Template};
 use crate::workspace::{Metadata, load_metadata, save_metadata};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -139,6 +140,21 @@ where
     Ok(meta)
 }
 
+/// Acquire an exclusive lock on a template file, load it, call `f` to modify
+/// it, save it, then release the lock. Returns the modified template.
+pub fn with_template<F>(templates_dir: &Path, name: &str, f: F) -> Result<Template>
+where
+    F: FnOnce(&mut Template) -> Result<()>,
+{
+    template::validate_name(name)?;
+    let path = templates_dir.join(format!("{}.yaml", name));
+    let _lock = FileLock::acquire(&path, DEFAULT_TIMEOUT)?;
+    let mut tmpl = template::load(templates_dir, name)?;
+    f(&mut tmpl)?;
+    template::save(templates_dir, name, &tmpl)?;
+    Ok(tmpl)
+}
+
 /// Acquire an exclusive lock, load the metadata, and return a snapshot.
 /// Does not write back. Use this when you only need to read the current state
 /// under the lock (e.g., for phase 1 of a 3-phase lock pattern).
@@ -264,5 +280,34 @@ mod tests {
         // Verify persisted
         let loaded = load_metadata(ws_dir).unwrap();
         assert!(loaded.repos.contains_key("github.com/user/repo"));
+    }
+
+    #[test]
+    fn with_template_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        // Create initial template
+        let tmpl = Template {
+            repos: vec![template::TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        template::save(&dir, "test", &tmpl).unwrap();
+
+        // Modify via with_template
+        let result = with_template(&dir, "test", |t| {
+            t.agent_md = Some("# Rules".into());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(result.agent_md.as_deref(), Some("# Rules"));
+
+        // Verify persisted
+        let loaded = template::load(&dir, "test").unwrap();
+        assert_eq!(loaded.agent_md.as_deref(), Some("# Rules"));
     }
 }

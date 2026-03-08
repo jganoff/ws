@@ -6,6 +6,7 @@ use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::{self, Paths};
+use crate::filelock;
 use crate::giturl;
 use crate::output::{
     ConfigGetOutput, MutationOutput, Output, TemplateListEntry, TemplateListOutput,
@@ -328,14 +329,13 @@ fn run_repo_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .cloned()
         .collect();
 
-    let mut template = tmpl::load(&paths.templates_dir, name)?;
-    let skipped = tmpl::add_repos(&mut template, repos)?;
-
-    for url in &skipped {
-        eprintln!("warning: repo {:?} already in template, skipping", url);
-    }
-
-    tmpl::save(&paths.templates_dir, name, &template)?;
+    let template = filelock::with_template(&paths.templates_dir, name, |tmpl| {
+        let skipped = tmpl::add_repos(tmpl, repos)?;
+        for url in &skipped {
+            eprintln!("warning: repo {:?} already in template, skipping", url);
+        }
+        Ok(())
+    })?;
 
     let show = template_show_output(name, &template);
     Ok(Output::TemplateShow(show))
@@ -349,14 +349,13 @@ fn run_repo_rm(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .cloned()
         .collect();
 
-    let mut template = tmpl::load(&paths.templates_dir, name)?;
-    tmpl::remove_repos(&mut template, repos)?;
-
-    if template.repos.is_empty() {
-        anyhow::bail!("cannot remove all repos from template — use `wsp template rm` instead");
-    }
-
-    tmpl::save(&paths.templates_dir, name, &template)?;
+    let template = filelock::with_template(&paths.templates_dir, name, |tmpl| {
+        tmpl::remove_repos(tmpl, repos)?;
+        if tmpl.repos.is_empty() {
+            anyhow::bail!("cannot remove all repos from template — use `wsp template rm` instead");
+        }
+        Ok(())
+    })?;
 
     let show = template_show_output(name, &template);
     Ok(Output::TemplateShow(show))
@@ -426,12 +425,12 @@ fn dispatch_config(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
 fn run_config_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
-    let key = matches.get_one::<String>("key").unwrap();
-    let value = matches.get_one::<String>("value").unwrap();
+    let key = matches.get_one::<String>("key").unwrap().clone();
+    let value = matches.get_one::<String>("value").unwrap().clone();
 
-    let mut template = tmpl::load(&paths.templates_dir, name)?;
-    tmpl::set_config(&mut template, key, value)?;
-    tmpl::save(&paths.templates_dir, name, &template)?;
+    filelock::with_template(&paths.templates_dir, name, |tmpl| {
+        tmpl::set_config(tmpl, &key, &value)
+    })?;
 
     Ok(Output::Mutation(MutationOutput::new(format!(
         "template {:?}: {} = {}",
@@ -443,6 +442,7 @@ fn run_config_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
     let key = matches.get_one::<String>("key").unwrap();
 
+    // Read-only: no lock needed
     let template = tmpl::load(&paths.templates_dir, name)?;
     let value = tmpl::get_config(&template, key)?;
 
@@ -454,11 +454,11 @@ fn run_config_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
 fn run_config_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
-    let key = matches.get_one::<String>("key").unwrap();
+    let key = matches.get_one::<String>("key").unwrap().clone();
 
-    let mut template = tmpl::load(&paths.templates_dir, name)?;
-    tmpl::unset_config(&mut template, key)?;
-    tmpl::save(&paths.templates_dir, name, &template)?;
+    filelock::with_template(&paths.templates_dir, name, |tmpl| {
+        tmpl::unset_config(tmpl, &key)
+    })?;
 
     Ok(Output::Mutation(MutationOutput::new(format!(
         "template {:?}: {} unset",
@@ -517,6 +517,7 @@ fn run_agent_md_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
     let path = matches.get_one::<String>("path").unwrap();
 
+    // Read content before acquiring lock — don't hold lock during I/O
     let content = if path == "-" {
         let mut buf = String::new();
         std::io::stdin().read_to_string(&mut buf)?;
@@ -545,9 +546,10 @@ fn run_agent_md_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         anyhow::bail!("agent_md content cannot contain wsp markers (<!-- wsp:begin/end -->)");
     }
 
-    let mut template = tmpl::load(&paths.templates_dir, name)?;
-    template.agent_md = Some(content);
-    tmpl::save(&paths.templates_dir, name, &template)?;
+    filelock::with_template(&paths.templates_dir, name, |tmpl| {
+        tmpl.agent_md = Some(content);
+        Ok(())
+    })?;
 
     Ok(Output::Mutation(MutationOutput::new(format!(
         "template {:?}: agent-md set",
@@ -558,9 +560,10 @@ fn run_agent_md_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 fn run_agent_md_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
 
-    let mut template = tmpl::load(&paths.templates_dir, name)?;
-    template.agent_md = None;
-    tmpl::save(&paths.templates_dir, name, &template)?;
+    filelock::with_template(&paths.templates_dir, name, |tmpl| {
+        tmpl.agent_md = None;
+        Ok(())
+    })?;
 
     Ok(Output::Mutation(MutationOutput::new(format!(
         "template {:?}: agent-md unset",

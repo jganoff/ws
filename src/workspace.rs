@@ -1485,11 +1485,14 @@ pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<Renam
         );
     }
 
-    // Update metadata
-    let mut meta = meta;
-    meta.name = new_name.to_string();
-    meta.branch = new_branch.clone();
-    save_metadata(&old_dir, &meta)?;
+    // Update metadata under lock to prevent concurrent mutation data loss
+    let new_name_owned = new_name.to_string();
+    let new_branch_clone = new_branch.clone();
+    let meta = crate::filelock::with_metadata(&old_dir, |meta| {
+        meta.name = new_name_owned;
+        meta.branch = new_branch_clone;
+        Ok(())
+    })?;
 
     // Rename directory
     fs::rename(&old_dir, &new_dir)?;
