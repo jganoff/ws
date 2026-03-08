@@ -27,6 +27,8 @@ fn is_current_version(v: &u32) -> bool {
 pub struct WorkspaceRepoRef {
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub r#ref: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,7 +229,14 @@ fn create_inner(
 ) -> Result<()> {
     let mut repos: BTreeMap<String, Option<WorkspaceRepoRef>> = BTreeMap::new();
     for identity in repo_refs.keys() {
-        repos.insert(identity.clone(), None);
+        let url = upstream_urls.get(identity).cloned();
+        repos.insert(
+            identity.clone(),
+            Some(WorkspaceRepoRef {
+                r#ref: String::new(),
+                url,
+            }),
+        );
     }
 
     let identities: Vec<&str> = repo_refs.keys().map(|s| s.as_str()).collect();
@@ -1943,12 +1952,14 @@ mod tests {
                     "github.com/acme/user-service".into(),
                     Some(WorkspaceRepoRef {
                         r#ref: "main".into(),
+                        url: None,
                     }),
                 ),
                 (
                     "github.com/acme/proto".into(),
                     Some(WorkspaceRepoRef {
                         r#ref: "v1.0".into(),
+                        url: None,
                     }),
                 ),
             ]),

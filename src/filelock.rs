@@ -252,6 +252,7 @@ mod tests {
                 "github.com/user/repo".into(),
                 Some(WorkspaceRepoRef {
                     r#ref: "v1.0".into(),
+                    url: None,
                 }),
             );
             Ok(())

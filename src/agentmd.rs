@@ -192,6 +192,7 @@ mod tests {
                         id.to_string(),
                         Some(WorkspaceRepoRef {
                             r#ref: ref_str.to_string(),
+                            url: None,
                         }),
                     );
                 }

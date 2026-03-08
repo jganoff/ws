@@ -184,14 +184,49 @@ pub fn exists(templates_dir: &Path, name: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Load a template from a local file path.
+/// Accepts both the template format (`repos: [{url: ...}]`) and the
+/// .wsp.yaml metadata format (`repos: {identity: {url: ...}}`).
 pub fn load_from_file(path: &Path) -> Result<Template> {
     let data = fs::read_to_string(path).with_context(|| format!("reading template {:?}", path))?;
-    let t: Template =
-        serde_yaml_ng::from_str(&data).with_context(|| format!("parsing template {:?}", path))?;
-    if t.repos.is_empty() {
-        bail!("template {:?} has no repos", path);
+
+    // Try template format first
+    if let Ok(t) = serde_yaml_ng::from_str::<Template>(&data) {
+        if t.repos.is_empty() {
+            bail!("template {:?} has no repos", path);
+        }
+        return Ok(t);
     }
-    Ok(t)
+
+    // Try .wsp.yaml metadata format
+    if let Ok(meta) = serde_yaml_ng::from_str::<workspace::Metadata>(&data) {
+        return template_from_metadata(&meta);
+    }
+
+    bail!("could not parse {:?} as template or .wsp.yaml", path);
+}
+
+/// Convert a .wsp.yaml Metadata into a Template by extracting repo URLs.
+fn template_from_metadata(meta: &workspace::Metadata) -> Result<Template> {
+    let mut repos = Vec::new();
+    for (identity, repo_ref) in &meta.repos {
+        let url = repo_ref
+            .as_ref()
+            .and_then(|r| r.url.clone())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "repo {:?} in .wsp.yaml has no URL — cannot use as template",
+                    identity
+                )
+            })?;
+        repos.push(TemplateRepo { url });
+    }
+    if repos.is_empty() {
+        bail!("no repos in .wsp.yaml");
+    }
+    Ok(Template {
+        repos,
+        config: None, // TODO: extract config from metadata when workspace-level config exists
+    })
 }
 
 /// Serialize a template to YAML string.
@@ -204,6 +239,7 @@ pub fn to_yaml(template: &Template) -> Result<String> {
 // ---------------------------------------------------------------------------
 
 /// Create a template from an existing workspace's repo set.
+/// Uses URLs from .wsp.yaml if available, falls back to registry.
 pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
     let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
     let meta = workspace::load_metadata(&ws_dir)
@@ -211,13 +247,16 @@ pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
     let cfg = config::Config::load_from(&paths.config_path)?;
 
     let mut repos = Vec::new();
-    for identity in meta.repos.keys() {
-        let url = cfg
-            .upstream_url(identity)
-            .ok_or_else(|| anyhow::anyhow!("repo {:?} not in registry", identity))?;
-        repos.push(TemplateRepo {
-            url: url.to_string(),
-        });
+    for (identity, repo_ref) in &meta.repos {
+        // Prefer URL from .wsp.yaml, fall back to registry
+        let url = repo_ref
+            .as_ref()
+            .and_then(|r| r.url.clone())
+            .or_else(|| cfg.upstream_url(identity).map(|s| s.to_string()))
+            .ok_or_else(|| {
+                anyhow::anyhow!("repo {:?} has no URL in .wsp.yaml or registry", identity)
+            })?;
+        repos.push(TemplateRepo { url });
     }
 
     if repos.is_empty() {
@@ -582,6 +621,33 @@ mod tests {
     fn load_from_file_missing() {
         let result = load_from_file(Path::new("/nonexistent/template.yaml"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_from_file_accepts_wsp_yaml_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("workspace.wsp.yaml");
+        std::fs::write(
+            &path,
+            r#"
+name: my-feature
+branch: my-feature
+repos:
+  github.com/acme/api-gateway:
+    url: git@github.com:acme/api-gateway.git
+  github.com/acme/user-service:
+    url: git@github.com:acme/user-service.git
+created: 2026-03-07T10:00:00Z
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_from_file(&path).unwrap();
+        assert_eq!(loaded.repos.len(), 2);
+        // URLs are extracted from the metadata format
+        let urls: Vec<&str> = loaded.repos.iter().map(|r| r.url.as_str()).collect();
+        assert!(urls.contains(&"git@github.com:acme/api-gateway.git"));
+        assert!(urls.contains(&"git@github.com:acme/user-service.git"));
     }
 
     #[test]
