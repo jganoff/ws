@@ -132,36 +132,62 @@ Templates replace groups. Migration path:
 
 The `groups` key in `config.yaml` is preserved for backward compatibility during the transition but is read-only — all mutations go through templates.
 
+## Format Unification (.wsp.yaml as template)
+
+The original design had two formats: `.wsp.yaml` (workspace metadata with identities) and a separate template format (repo URLs + config). This creates friction — two schemas, conversion logic, and a separate `~/.local/share/wsp/templates/` directory.
+
+### Decision: `.wsp.yaml` IS the template
+
+`.wsp.yaml` gains an optional `url` field on each repo entry, making it self-contained and shareable:
+
+```yaml
+name: my-feature
+branch: jganoff/my-feature
+repos:
+  github.com/acme/api-gateway:
+    url: git@github.com:acme/api-gateway.git
+  github.com/acme/user-service:
+    url: git@github.com:acme/user-service.git
+config:
+  language_integrations:
+    go: true
+created: 2026-03-07T10:00:00Z
+```
+
+Any `.wsp.yaml` can be used as a template: `wsp new my-feature -t ./path/to/.wsp.yaml`. The `name` and `branch` fields are ignored (the new workspace gets its own). Only `repos` (with URLs) and `config` are used.
+
+### Implications
+
+- **No separate template format.** The `Template` struct and `~/.local/share/wsp/templates/` directory are retained as "saved workspace definitions" (named `.wsp.yaml` snapshots), but the underlying format converges.
+- **URLs are snapshots.** The URL in `.wsp.yaml` captures what was used at creation time. The registry remains the source of truth for mirrors. Stale URLs are flagged by `wsp doctor`, not auto-synced.
+- **Backward compatible.** The `url` field is optional (`#[serde(default)]`). Old `.wsp.yaml` files without URLs still work locally; they just aren't shareable as templates.
+- **Workspace definition repos.** A git repo containing a `.wsp.yaml` + CLAUDE.md + skills/ becomes a shareable workspace definition. Git is the distribution mechanism — no URL fetching needed.
+
+### Doctor checks for URL drift
+
+`wsp doctor` flags workspaces where `.wsp.yaml` URLs differ from registry URLs. `--fix` updates them. This is a diagnostic, not an automatic sync.
+
 ## Deferred Decisions
 
 - **Template composition.** Whether a template can include/extend another template. Adds complexity — defer until there's a clear need.
 - **Team bootstrap (`.wsp-team.yaml`).** A bundle of templates + global defaults for team onboarding. Templates are the building block; team bootstrap is a higher-level orchestration that imports multiple templates at once.
-- **Agent context in templates.** Templates currently capture repos and (future) settings, but not the workspace-level AI agent context: AGENTS.md content, CLAUDE.md project instructions, or installed skills. A template that includes these would make `wsp new -t` produce a fully configured workspace for both humans and AI agents — "one file gets a teammate fully set up" including agent instructions, not just repo lists. Design questions: should templates embed the content inline or reference external files? How does this interact with the auto-generated marked sections in AGENTS.md? Should skills be versioned or fetched at creation time?
-- **Repo-embedded templates.** A repo could ship a `.wsp-template.yaml` at its root, discovered automatically during `wsp registry add` or `wsp new`. This turns git itself into the distribution mechanism for workspace definitions — no need for a separate sharing/fetching layer. A repo like `api-gateway` could declare "I'm typically used with `user-service` and `proto`" and include agent context. Design questions: what triggers discovery (opt-in flag, auto-detect, prompt)? How does a repo-embedded template interact with stored templates? Does it auto-register the companion repos, or just suggest them? Should the embedded template live at a conventional path (`.wsp-template.yaml`) or be configurable?
+- **Agent context.** Workspace definition repos could include CLAUDE.md, AGENTS.md, and skills/ alongside `.wsp.yaml`. When creating a workspace from such a repo, wsp copies the agent files into the new workspace. Design questions: how does this interact with auto-generated AGENTS.md marked sections? Should skills be versioned or fetched at creation time?
+- **Repo-embedded workspace definitions.** A repo could ship a `.wsp.yaml` at its root declaring companion repos. Discovered during `wsp registry add` or `wsp new`. Design questions: what triggers discovery (opt-in, auto-detect, prompt)? Does it auto-register companions or just suggest them?
 
 ## Implementation Phases
 
-### Phase 1: Core template CRUD
+Phases 1-4 have shipped.
 
-- Template file schema and serde types
-- `wsp template new/ls/show/rm` (including `--from-workspace`)
-- `wsp new -t <name>` support
-- Auto-register unknown repos during `wsp new -t`
-- `created_from` field in `.wsp.yaml`
+### Phase 5: Format unification
 
-### Phase 2: Import / Export
+- Add optional `url` field to `Metadata` repo entries
+- Populate URLs from registry during `wsp new`
+- Accept `.wsp.yaml` format in `-t` / `--from` (parse Metadata, extract repos + config)
+- Migrate stored templates to unified format
+- `wsp template export` writes a `.wsp.yaml` (already the case for the portable format)
 
-- `wsp template export <name>`
-- `wsp template import <file|url>`
-- Mirror cloning for unknown repos during import
+### Phase 6: Agent context in workspace definition repos
 
-### Phase 3: Group migration
-
-- Auto-migrate existing groups to templates
-- Deprecation warning on `-g`
-- Update docs and SKILL.md
-
-### Phase 4: Settings
-
-- Wire template settings into workspace creation (language integrations, sync strategy)
-- Settings precedence logic
+- `wsp new -t ./path/` accepts a directory containing `.wsp.yaml` + CLAUDE.md + skills/
+- Copy agent files into new workspace during creation
+- Define interaction with auto-generated AGENTS.md sections
