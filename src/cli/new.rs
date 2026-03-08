@@ -114,11 +114,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
         };
 
-        // Warn about agent instructions from external template files
-        if is_file && tmpl.agent_md.is_some() {
-            eprintln!(
-                "warning: template contains AGENTS.md content that will be applied to the workspace"
-            );
+        // Show what an external file includes before applying
+        if is_file {
+            tmpl.print_customizations();
         }
 
         // Auto-register unknown repos from template
@@ -137,11 +135,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let path = std::path::Path::new(file_path);
         let tmpl = template::load_from_file(path)?;
 
-        if tmpl.agent_md.is_some() {
-            eprintln!(
-                "warning: template file contains AGENTS.md content that will be applied to the workspace"
-            );
-        }
+        tmpl.print_customizations();
 
         template::auto_register(&tmpl, &mut cfg, paths)?;
 

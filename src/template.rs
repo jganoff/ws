@@ -21,7 +21,7 @@ pub struct Template {
     pub agent_md: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TemplateConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language_integrations: Option<std::collections::BTreeMap<String, bool>>,
@@ -63,6 +63,52 @@ impl Template {
             }
         }
         effective
+    }
+
+    /// Returns true if the template includes any customizations beyond repos
+    /// (config overrides, git config, agent instructions).
+    pub fn has_customizations(&self) -> bool {
+        self.agent_md.is_some()
+            || self
+                .config
+                .as_ref()
+                .is_some_and(|c| c != &TemplateConfig::default())
+    }
+
+    /// Print a summary of template customizations to stderr.
+    /// Called before applying a template so users can see what it includes.
+    pub fn print_customizations(&self) {
+        if !self.has_customizations() {
+            return;
+        }
+
+        eprintln!("Template includes:");
+
+        if let Some(ref settings) = self.config {
+            if let Some(ref strategy) = settings.sync_strategy {
+                eprintln!("  sync-strategy: {}", strategy);
+            }
+            if let Some(ref li) = settings.language_integrations {
+                for (name, enabled) in li {
+                    eprintln!("  language-integrations.{}: {}", name, enabled);
+                }
+            }
+            if let Some(ref gc) = settings.git_config {
+                for (key, value) in gc {
+                    eprintln!("  git_config.{}: {}", key, value);
+                }
+            }
+        }
+
+        if let Some(ref content) = self.agent_md {
+            let preview: String = content.lines().take(3).collect::<Vec<_>>().join("\n");
+            let truncated = if content.lines().count() > 3 {
+                format!("{}...", preview)
+            } else {
+                preview
+            };
+            eprintln!("  AGENTS.md content: {}", truncated);
+        }
     }
 
     /// Derive identities from repo URLs using giturl::parse.
@@ -1061,5 +1107,80 @@ created: 2026-03-07T10:00:00Z
         let gc = parsed.config.unwrap().git_config.unwrap();
         assert_eq!(gc["push.default"], "simple");
         assert_eq!(gc["rerere.enabled"], "false");
+    }
+
+    #[test]
+    fn has_customizations_cases() {
+        use std::collections::BTreeMap;
+
+        struct Case {
+            name: &'static str,
+            tmpl: Template,
+            expected: bool,
+        }
+
+        let cases = vec![
+            Case {
+                name: "repos only",
+                tmpl: sample_template(),
+                expected: false,
+            },
+            Case {
+                name: "with agent_md",
+                tmpl: Template {
+                    repos: vec![],
+                    config: None,
+                    agent_md: Some("# Rules".into()),
+                },
+                expected: true,
+            },
+            Case {
+                name: "with git_config",
+                tmpl: Template {
+                    repos: vec![],
+                    config: Some(TemplateConfig {
+                        language_integrations: None,
+                        sync_strategy: None,
+                        git_config: Some(BTreeMap::from([(
+                            "push.default".into(),
+                            "simple".into(),
+                        )])),
+                    }),
+                    agent_md: None,
+                },
+                expected: true,
+            },
+            Case {
+                name: "with sync_strategy",
+                tmpl: Template {
+                    repos: vec![],
+                    config: Some(TemplateConfig {
+                        language_integrations: None,
+                        sync_strategy: Some("merge".into()),
+                        git_config: None,
+                    }),
+                    agent_md: None,
+                },
+                expected: true,
+            },
+            Case {
+                name: "empty config",
+                tmpl: Template {
+                    repos: vec![],
+                    config: Some(TemplateConfig::default()),
+                    agent_md: None,
+                },
+                expected: false,
+            },
+        ];
+
+        for tc in cases {
+            assert_eq!(
+                tc.tmpl.has_customizations(),
+                tc.expected,
+                "case: {}",
+                tc.name
+            );
+        }
     }
 }

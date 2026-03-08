@@ -158,6 +158,8 @@ fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     };
 
+    template.print_customizations();
+
     let repo_count = template.repos.len();
     tmpl::save(&paths.templates_dir, name, &template)?;
 
@@ -229,14 +231,8 @@ fn run_export(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     // Report what's being exported
     if !to_stdout {
-        eprintln!("Exporting template {:?}:", name);
-        eprintln!("  {} repos", t.repos.len());
-        if t.config.is_some() {
-            eprintln!("  config overrides included");
-        }
-        if t.agent_md.is_some() {
-            eprintln!("  AGENTS.md user content included");
-        }
+        eprintln!("Exporting template {:?} ({} repos):", name, t.repos.len());
+        t.print_customizations();
         eprintln!("  note: custom skills (.claude/skills/) are not included in exports");
     }
 
