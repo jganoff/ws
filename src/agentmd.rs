@@ -43,6 +43,12 @@ fn build_marked_section(metadata: &Metadata) -> String {
     s.push_str(MARKER_BEGIN);
     s.push('\n');
     s.push_str("## Workspace Context\n\n");
+    s.push_str(
+        "**Multi-repo workspace.** Do not assume the workspace root is a git repo. \
+         Each directory listed below is its own independent repository with its own \
+         history, build system, and dependencies. When spawning sub-agents, pass the \
+         full absolute path to the specific repo directory they need.\n\n",
+    );
     s.push_str("| Property | Value |\n");
     s.push_str("|----------|-------|\n");
     s.push_str(&format!("| Workspace | {} |\n", metadata.name));
@@ -420,6 +426,9 @@ mod tests {
                 name: "empty repos — valid table with header only",
                 meta: make_metadata("empty", "empty", &[]),
                 want_contains: vec![
+                    "**Multi-repo workspace.**",
+                    "Do not assume the workspace root is a git repo",
+                    "When spawning sub-agents, pass the full absolute path",
                     "| Repo | Directory |",
                     "## Workspace Boundary",
                     "Only read and edit files within this workspace directory",
