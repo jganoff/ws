@@ -51,10 +51,10 @@ wsp template rm dash                      # delete template
 
 ```
 wsp template new dash                             # interactive or from flags
-wsp template new dash --from-workspace billing    # derive from an existing workspace
+wsp template new dash -w billing                  # derive from an existing workspace
 ```
 
-When `--from-workspace` is given, the template is populated from the workspace's current repo set (with URLs looked up from the registry) and applicable settings.
+When `-w`/`--workspace` is given, the template is populated from the workspace's current repo set (with URLs looked up from the registry) and applicable settings.
 
 ### Import / Export
 
@@ -182,7 +182,7 @@ Phases 1-4 have shipped.
 
 - Add optional `url` field to `Metadata` repo entries
 - Populate URLs from registry during `wsp new`
-- Accept `.wsp.yaml` format in `-t` / `--from` (parse Metadata, extract repos + config)
+- Accept `.wsp.yaml` format in `-t` / `-f` (parse Metadata, extract repos + config)
 - Migrate stored templates to unified format
 - `wsp template export` writes a `.wsp.yaml` (already the case for the portable format)
 

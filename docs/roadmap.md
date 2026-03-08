@@ -8,7 +8,7 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 **Design doc:** [`docs/features/workspace-templates.md`](features/workspace-templates.md)
 
-Phases 1-4 have shipped (CRUD, polymorphic `--from`, export, file import, group migration, template config).
+Phases 1-4 have shipped (CRUD, `-w`/`-f` source flags, export, file import, group migration, template config).
 
 - [ ] Phase 5: Format unification — `.wsp.yaml` gains URLs, becomes the template format
 - [ ] Phase 6: Agent context — workspace definition repos with CLAUDE.md + skills alongside `.wsp.yaml`

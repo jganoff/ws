@@ -134,7 +134,7 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - `build.rs` embeds `git describe` into `WSP_VERSION_STRING` for dev/release differentiation
 - Clap `visible_alias`/`alias` dispatches under the primary command name — only match the primary name in dispatch arms (e.g., `Some(("ls", m))` not `Some(("ls", m)) | Some(("list", m))`)
 - Commands that don't modify workspace/config/repo state get `[read-only]` in their `.about()` text. This propagates to `--help` and SKILL.md automatically via clap introspection. Add it when creating new read-only commands.
-- **Shell completions are mandatory**: Every flag and positional arg that accepts a known set of values (workspace names, template names, repo identities, group names) must have an `ArgValueCandidates` completer. Completers live in `src/cli/completers.rs`. File-path arguments get completions for the known-name portion (e.g., workspace names for `--from`); the shell handles file-path fallback natively.
+- **Shell completions are mandatory**: Every flag and positional arg that accepts a known set of values (workspace names, template names, repo identities, group names) must have an `ArgValueCandidates` completer. Completers live in `src/cli/completers.rs`. File-path arguments (e.g., `-f`/`--file`) use `value_hint(FilePath)` for shell-native path completion.
 - **Roadmap hygiene**: When a feature ships, remove its section from `docs/roadmap.md` entirely — don't mark checkboxes as done. Commit roadmap removals in the same commit as the feature code, not separately.
 
 ## Gotchas
@@ -146,6 +146,8 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - **Adding commands or output structs**: The `codegen` feature gates SKILL.md generation. When adding a new command, it appears in SKILL.md automatically via clap introspection. When adding a new output struct, add a `#[cfg(feature = "codegen")] sample()` method in `src/output.rs` and wire it in `src/cli/skill.rs`. Run `just skill` to regenerate. `just ci` will fail if SKILL.md is stale. Every new command should have both `.about()` (short, shown by `-h`) and `.long_about()` (conceptual description of what it does and why, shown by `--help`). Keep `long_about` focused on mental model and behavior — don't repeat flag details.
 - **Adding skills**: New skills in `skills/` need a corresponding `include_str!` constant in `src/agentmd.rs` and must be wired into `install_skill()` to be installed into workspaces.
 - **Test remote URLs**: `giturl::parse()` only handles SSH (`git@host:path`) and HTTPS URLs — not local filesystem paths. Tests that need identity validation from a remote URL must use `git@test.local:user/repo.git` style URLs, not the temp-dir paths used by `setup_test_env()` for upstream URLs.
+- **Default dispatch uses root-level ArgMatches**: `list::run` and `status::run` are called from the default dispatch path (`cli/mod.rs`, no subcommand) with root-level `ArgMatches` that lack subcommand-specific args. Use `try_get_one().ok().flatten()` (not `get_flag()`) to safely handle missing args without panicking.
+- **CLI changes require regeneration**: After adding/changing commands, flags, or output structs, run `just skill` and `just man` to regenerate SKILL.md and manpages. `just ci` checks freshness and will fail if stale.
 
 ## Releasing
 

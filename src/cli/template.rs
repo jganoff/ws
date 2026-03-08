@@ -59,14 +59,22 @@ fn new_cmd() -> Command {
                 .help("Repo URLs for the template"),
         )
         .arg(
-            Arg::new("from")
-                .long("from")
-                .help("Create from a workspace name or template file path")
+            Arg::new("from-workspace")
+                .short('w')
+                .long("workspace")
+                .help("Create from an existing workspace")
                 .add(ArgValueCandidates::new(completers::complete_workspaces)),
+        )
+        .arg(
+            Arg::new("file")
+                .short('f')
+                .long("file")
+                .help("Create from a template file (.yaml)")
+                .value_hint(clap::ValueHint::FilePath),
         )
         .group(
             clap::ArgGroup::new("source")
-                .args(["repos", "from"])
+                .args(["repos", "from-workspace", "file"])
                 .required(true),
         )
 }
@@ -116,19 +124,19 @@ fn export_cmd() -> Command {
 
 fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
-    let from = matches.get_one::<String>("from");
+    let from_workspace = matches.get_one::<String>("from-workspace");
+    let from_file = matches.get_one::<String>("file");
 
     if tmpl::exists(&paths.templates_dir, name) {
         anyhow::bail!("template {:?} already exists", name);
     }
 
-    let template = if let Some(source) = from {
-        match tmpl::classify_source(source) {
-            tmpl::TemplateSource::FilePath(path) => tmpl::load_from_file(&path)?,
-            tmpl::TemplateSource::Name(ws_name) => tmpl::from_workspace(paths, &ws_name)?,
-        }
+    let template = if let Some(ws_name) = from_workspace {
+        tmpl::from_workspace(paths, ws_name)?
+    } else if let Some(file_path) = from_file {
+        tmpl::load_from_file(std::path::Path::new(file_path))?
     } else {
-        // Safe to unwrap: clap ArgGroup ensures either repos or --from is present
+        // Safe to unwrap: clap ArgGroup ensures repos, --workspace, or --file is present
         let repo_urls: Vec<String> = matches
             .get_many::<String>("repos")
             .unwrap()

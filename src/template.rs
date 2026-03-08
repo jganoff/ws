@@ -270,6 +270,7 @@ pub fn to_yaml(template: &Template) -> Result<String> {
 /// Create a template from an existing workspace's repo set.
 /// Uses URLs from .wsp.yaml if available, falls back to registry.
 pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
+    workspace::validate_name(ws_name)?;
     let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
     let meta = workspace::load_metadata(&ws_dir)
         .with_context(|| format!("loading workspace {:?}", ws_name))?;

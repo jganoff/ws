@@ -33,7 +33,7 @@ wsp group update <name> [--add <add>]... [--remove <remove>]... # Add or remove 
 ### Templates (shareable workspace definitions)
 
 ```bash
-wsp template new <name> [<repos>]... [--from <from>] # Create a new template
+wsp template new <name> [<repos>]... [-w <from-workspace>] [-f <file>] # Create a new template
 wsp template ls                                 # List all templates [read-only] (alias: list)
 wsp template show <name>                        # Show template contents [read-only]
 wsp template rm <name>                          # Remove a template (alias: remove)
@@ -43,8 +43,8 @@ wsp template export <name> [--stdout]           # Export a template to a file or
 ### Workspaces
 
 ```bash
-wsp new <workspace> [<repos>]... [-t <template>] [-g <group>] [--no-fetch] [-d <description>] # Create a new workspace
-wsp ls                                          # List active workspaces [read-only] (alias: list)
+wsp new <workspace> [<repos>]... [-t <template>] [-w <from-workspace>] [-f <file>] [-g <group>] [--no-fetch] [-d <description>] # Create a new workspace
+wsp ls [-t] [-U] [-r]                           # List active workspaces [read-only] (alias: list)
 wsp st [<workspace>] [-v]                       # Git status across workspace repos [read-only] (alias: status)
 wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
 wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo [read-only]

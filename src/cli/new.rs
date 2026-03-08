@@ -40,11 +40,30 @@ pub fn cmd() -> Command {
                 .add(ArgValueCandidates::new(completers::complete_templates)),
         )
         .arg(
+            Arg::new("from-workspace")
+                .short('w')
+                .long("workspace")
+                .help("Clone repos from an existing workspace")
+                .add(ArgValueCandidates::new(completers::complete_workspaces)),
+        )
+        .arg(
+            Arg::new("file")
+                .short('f')
+                .long("file")
+                .help("Create from a template file (.yaml)")
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
             Arg::new("group")
                 .short('g')
                 .long("group")
                 .help("Add repos from a group (deprecated, use --template)")
                 .add(ArgValueCandidates::new(completers::complete_groups)),
+        )
+        .group(
+            clap::ArgGroup::new("source")
+                .args(["template", "from-workspace", "file", "group"])
+                .required(false),
         )
         .arg(
             Arg::new("no-fetch")
@@ -67,6 +86,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .map(|v| v.collect())
         .unwrap_or_default();
     let template_source = matches.get_one::<String>("template");
+    let from_workspace = matches.get_one::<String>("from-workspace");
+    let from_file = matches.get_one::<String>("file");
     let group_name = matches.get_one::<String>("group");
     let no_fetch = matches.get_flag("no-fetch");
     let description = matches.get_one::<String>("description");
@@ -82,7 +103,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let mut created_from: Option<String> = None;
     let mut loaded_template: Option<template::Template> = None;
 
-    // Add repos from template (name or file path)
+    // Add repos from template (name or file path for backward compat)
     if let Some(source) = template_source {
         let is_file = matches!(
             template::classify_source(source),
@@ -107,7 +128,42 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         for id in identities {
             repo_refs.insert(id, String::new());
         }
-        created_from = Some(source.clone());
+        created_from = Some(format!("template:{}", source));
+        loaded_template = Some(tmpl);
+    }
+
+    // Add repos from file (-f)
+    if let Some(file_path) = from_file {
+        let path = std::path::Path::new(file_path);
+        let tmpl = template::load_from_file(path)?;
+
+        if tmpl.agent_md.is_some() {
+            eprintln!(
+                "warning: template file contains AGENTS.md content that will be applied to the workspace"
+            );
+        }
+
+        template::auto_register(&tmpl, &mut cfg, paths)?;
+
+        let identities = tmpl.identities()?;
+        for id in identities {
+            repo_refs.insert(id, String::new());
+        }
+        created_from = Some(format!("file:{}", file_path));
+        loaded_template = Some(tmpl);
+    }
+
+    // Add repos from existing workspace (-w)
+    if let Some(source_ws) = from_workspace {
+        let tmpl = template::from_workspace(paths, source_ws)?;
+
+        template::auto_register(&tmpl, &mut cfg, paths)?;
+
+        let identities = tmpl.identities()?;
+        for id in identities {
+            repo_refs.insert(id, String::new());
+        }
+        created_from = Some(format!("workspace:{}", source_ws));
         loaded_template = Some(tmpl);
     }
 
@@ -137,7 +193,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     if repo_refs.is_empty() {
-        bail!("no repos specified (use repo args, --template, or --group)");
+        bail!("no repos specified (use repo args, -t, -w, or -f)");
     }
 
     // Validate early before expensive I/O
