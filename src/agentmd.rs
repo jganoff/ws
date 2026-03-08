@@ -60,6 +60,16 @@ fn build_marked_section(metadata: &Metadata) -> String {
         s.push_str(&format!("| {} | {} |\n", identity, dir));
     }
 
+    s.push_str("\n## Workspace Boundary\n\n");
+    s.push_str(
+        "All repositories listed above are cloned in this workspace directory.\n\
+         When working on code in this workspace:\n\
+         - **Only read and edit files within this workspace directory.**\n\
+         - Do not search for, read, or modify other copies of these repos\n\
+         \x20 (other workspaces, mirrors, or clones elsewhere on disk).\n\
+         - The workspace directory is the single source of truth for all repos.\n",
+    );
+
     s.push_str("\n## Quick Reference\n\n");
     s.push_str("```bash\n");
     s.push_str("wsp st                  # status across all repos\n");
@@ -411,6 +421,8 @@ mod tests {
                 meta: make_metadata("empty", "empty", &[]),
                 want_contains: vec![
                     "| Repo | Directory |",
+                    "## Workspace Boundary",
+                    "Only read and edit files within this workspace directory",
                     "## Quick Reference",
                     "## Troubleshooting",
                     "/wsp-report",
