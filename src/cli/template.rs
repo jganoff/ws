@@ -140,6 +140,7 @@ fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 .map(|url| tmpl::TemplateRepo { url })
                 .collect(),
             config: None,
+            agent_md: None,
         }
     };
 
@@ -211,6 +212,29 @@ fn run_export(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let to_stdout = matches.get_flag("stdout");
 
     let t = tmpl::load(&paths.templates_dir, name)?;
+
+    // Report what's being exported
+    if !to_stdout {
+        eprintln!("Exporting template {:?}:", name);
+        eprintln!("  {} repos", t.repos.len());
+        if t.config.is_some() {
+            eprintln!("  config overrides included");
+        }
+        if t.agent_md.is_some() {
+            eprintln!("  AGENTS.md user content included");
+        }
+        // Check for skills that can't be exported
+        let skills_dir = paths
+            .templates_dir
+            .parent()
+            .unwrap_or(paths.templates_dir.as_ref());
+        let ws_skills = std::path::Path::new(".claude/skills");
+        if ws_skills.exists() {
+            eprintln!("  warning: custom skills in .claude/skills/ are not included in the export");
+        }
+        let _ = skills_dir; // suppress unused
+    }
+
     let yaml = tmpl::to_yaml(&t)?;
 
     if to_stdout {

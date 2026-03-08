@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 
 use crate::workspace::Metadata;
 
-pub(crate) const MARKER_BEGIN: &str = "<!-- wsp:begin -->";
-pub(crate) const MARKER_END: &str = "<!-- wsp:end -->";
+pub const MARKER_BEGIN: &str = "<!-- wsp:begin -->";
+pub const MARKER_END: &str = "<!-- wsp:end -->";
 const SKILL_CONTENT: &str = include_str!("../skills/wsp-manage/SKILL.md");
 const REPORT_SKILL_CONTENT: &str = include_str!("../skills/wsp-report/SKILL.md");
 
@@ -79,6 +79,55 @@ fn build_marked_section(metadata: &Metadata) -> String {
     s.push('\n');
 
     s
+}
+
+/// Extract user-written content from AGENTS.md (everything outside the wsp markers).
+/// Returns None if there's no meaningful user content.
+pub fn extract_user_content(agents_md: &str) -> Option<String> {
+    let begin = agents_md.find(MARKER_BEGIN);
+    let end = agents_md.find(MARKER_END);
+
+    let user_part = match (begin, end) {
+        (Some(b), Some(e)) if b < e => {
+            let before = agents_md[..b].trim();
+            let after_end = e + MARKER_END.len();
+            let after = agents_md[after_end..].trim();
+            let mut parts = Vec::new();
+            if !before.is_empty() {
+                parts.push(before);
+            }
+            if !after.is_empty() {
+                parts.push(after);
+            }
+            if parts.is_empty() {
+                return None;
+            }
+            parts.join("\n\n")
+        }
+        _ => {
+            // No markers — the whole file is user content
+            let trimmed = agents_md.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            trimmed.to_string()
+        }
+    };
+
+    // Filter out the default placeholder comment
+    let filtered = user_part
+        .replace(
+            "<!-- Add your project-specific notes for AI agents here -->",
+            "",
+        )
+        .trim()
+        .to_string();
+
+    if filtered.is_empty() {
+        None
+    } else {
+        Some(filtered)
+    }
 }
 
 fn build_initial_file(metadata: &Metadata, section: &str) -> String {

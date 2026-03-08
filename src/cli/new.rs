@@ -211,6 +211,17 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Ok(meta) => crate::lang::run_integrations(&ws_dir, meta, &effective_cfg),
         Err(e) => eprintln!("warning: skipping language integrations: {}", e),
     }
+    // Seed AGENTS.md with template's agent_md content before auto-generation.
+    // agentmd::update() will append the marked section, preserving this content.
+    if let Some(ref tmpl) = loaded_template
+        && let Some(ref content) = tmpl.agent_md
+    {
+        let agents_path = ws_dir.join("AGENTS.md");
+        if let Err(e) = std::fs::write(&agents_path, format!("{}\n\n", content)) {
+            eprintln!("warning: could not write template agent content: {}", e);
+        }
+    }
+
     if cfg.agent_md.unwrap_or(true)
         && let Ok(meta) = &meta_result
         && let Err(e) = crate::agentmd::update(&ws_dir, meta)

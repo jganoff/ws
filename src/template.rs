@@ -17,6 +17,8 @@ pub struct Template {
     pub repos: Vec<TemplateRepo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<TemplateConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_md: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -225,7 +227,8 @@ fn template_from_metadata(meta: &workspace::Metadata) -> Result<Template> {
     }
     Ok(Template {
         repos,
-        config: None, // TODO: extract config from metadata when workspace-level config exists
+        config: None,
+        agent_md: None,
     })
 }
 
@@ -263,9 +266,21 @@ pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
         bail!("workspace {:?} has no repos", ws_name);
     }
 
+    // Extract user-written AGENTS.md content if present
+    let agent_md = {
+        let agents_path = ws_dir.join("AGENTS.md");
+        if agents_path.exists() {
+            let content = fs::read_to_string(&agents_path).ok().unwrap_or_default();
+            crate::agentmd::extract_user_content(&content)
+        } else {
+            None
+        }
+    };
+
     Ok(Template {
         repos,
         config: None,
+        agent_md,
     })
 }
 
@@ -370,6 +385,7 @@ pub fn migrate_group(
         &Template {
             repos,
             config: None,
+            agent_md: None,
         },
     )?;
     Ok(true)
@@ -408,6 +424,7 @@ mod tests {
                 },
             ],
             config: None,
+            agent_md: None,
         }
     }
 
@@ -761,6 +778,7 @@ created: 2026-03-07T10:00:00Z
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
                 sync_strategy: Some("merge".into()),
             }),
+            agent_md: None,
         };
 
         let effective = tmpl.apply_config(&cfg);
@@ -784,6 +802,7 @@ created: 2026-03-07T10:00:00Z
         let tmpl = Template {
             repos: vec![],
             config: None,
+            agent_md: None,
         };
 
         let effective = tmpl.apply_config(&cfg);
@@ -806,6 +825,7 @@ created: 2026-03-07T10:00:00Z
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
                 sync_strategy: Some("merge".into()),
             }),
+            agent_md: None,
         };
 
         let yaml = to_yaml(&tmpl).unwrap();
@@ -814,5 +834,118 @@ created: 2026-03-07T10:00:00Z
         let s = parsed.config.unwrap();
         assert_eq!(s.sync_strategy.as_deref(), Some("merge"));
         assert_eq!(s.language_integrations.as_ref().unwrap()["go"], true);
+    }
+
+    #[test]
+    fn agent_md_round_trip_yaml() {
+        let tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: None,
+            agent_md: Some("# Project Rules\n\nAlways use table-driven tests.".into()),
+        };
+
+        let yaml = to_yaml(&tmpl).unwrap();
+        let parsed: Template = serde_yaml_ng::from_str(&yaml).unwrap();
+
+        assert_eq!(
+            parsed.agent_md.as_deref(),
+            Some("# Project Rules\n\nAlways use table-driven tests.")
+        );
+    }
+
+    #[test]
+    fn agent_md_none_omitted_from_yaml() {
+        let tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+
+        let yaml = to_yaml(&tmpl).unwrap();
+        assert!(!yaml.contains("agent_md"));
+    }
+
+    #[test]
+    fn extract_user_content_cases() {
+        use crate::agentmd::{MARKER_BEGIN, MARKER_END};
+
+        struct Case {
+            name: &'static str,
+            input: String,
+            want: Option<&'static str>,
+        }
+
+        let cases = vec![
+            Case {
+                name: "user content before markers",
+                input: format!(
+                    "# My Project\n\nCustom rules here.\n\n{}\ngenerated\n{}\n",
+                    MARKER_BEGIN, MARKER_END
+                ),
+                want: Some("# My Project\n\nCustom rules here."),
+            },
+            Case {
+                name: "only markers, no user content",
+                input: format!("{}\ngenerated\n{}\n", MARKER_BEGIN, MARKER_END),
+                want: None,
+            },
+            Case {
+                name: "default placeholder only",
+                input: format!(
+                    "# Workspace: test\n\n<!-- Add your project-specific notes for AI agents here -->\n\n{}\ngenerated\n{}\n",
+                    MARKER_BEGIN, MARKER_END
+                ),
+                want: Some("# Workspace: test"),
+            },
+            Case {
+                name: "no markers at all",
+                input: "# Custom content\n\nSome notes.".into(),
+                want: Some("# Custom content\n\nSome notes."),
+            },
+            Case {
+                name: "empty file",
+                input: "".into(),
+                want: None,
+            },
+            Case {
+                name: "user content before and after markers",
+                input: format!(
+                    "# Header\n\n{}\ngenerated\n{}\n\n# Footer\n",
+                    MARKER_BEGIN, MARKER_END
+                ),
+                want: Some("# Header\n\n# Footer"),
+            },
+        ];
+
+        for tc in cases {
+            let got = crate::agentmd::extract_user_content(&tc.input);
+            assert_eq!(got.as_deref(), tc.want, "case: {}", tc.name);
+        }
+    }
+
+    #[test]
+    fn agent_md_full_round_trip_through_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        // Create a template with agent_md
+        let tmpl = Template {
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: None,
+            agent_md: Some("# Project Rules\n\nAlways use table-driven tests.".into()),
+        };
+
+        // Save and reload
+        save(&dir, "with-agent", &tmpl).unwrap();
+        let loaded = load(&dir, "with-agent").unwrap();
+
+        assert_eq!(loaded.agent_md, tmpl.agent_md);
+        assert_eq!(loaded.repos.len(), 1);
     }
 }
