@@ -213,7 +213,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
     // Seed AGENTS.md with template's agent_md content before auto-generation.
     // agentmd::update() will append the marked section, preserving this content.
-    if let Some(ref tmpl) = loaded_template
+    // Only seed if agent_md generation is enabled — otherwise we'd create a
+    // half-baked AGENTS.md with no markers, no symlink, and no skills.
+    if cfg.agent_md.unwrap_or(true)
+        && let Some(ref tmpl) = loaded_template
         && let Some(ref content) = tmpl.agent_md
     {
         let agents_path = ws_dir.join("AGENTS.md");

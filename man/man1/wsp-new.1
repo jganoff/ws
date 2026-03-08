@@ -1,0 +1,31 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH wsp-new 1  "new " 
+.SH NAME
+new \- Create a new workspace
+.SH SYNOPSIS
+\fBnew\fR [\fB\-t\fR|\fB\-\-template\fR] [\fB\-g\fR|\fB\-\-group\fR] [\fB\-\-no\-fetch\fR] [\fB\-d\fR|\fB\-\-description\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIworkspace\fR> [\fIrepos\fR] 
+.SH DESCRIPTION
+Create a new workspace
+.SH OPTIONS
+.TP
+\fB\-t\fR, \fB\-\-template\fR
+Create from a template (name or file path)
+.TP
+\fB\-g\fR, \fB\-\-group\fR
+Add repos from a group (deprecated, use \-\-template)
+.TP
+\fB\-\-no\-fetch\fR
+Skip fetching mirrors before cloning
+.TP
+\fB\-d\fR, \fB\-\-description\fR
+Purpose of the workspace
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIworkspace\fR>
+
+.TP
+[\fIrepos\fR]
+

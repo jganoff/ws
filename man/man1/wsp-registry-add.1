@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH wsp-registry-add 1  "add " 
+.SH NAME
+add \- Register and bare\-clone a repository
+.SH SYNOPSIS
+\fBadd\fR [\fB\-\-from\fR] [\fB\-\-pattern\fR] [\fB\-\-all\fR] [\fB\-\-https\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIurl\fR] 
+.SH DESCRIPTION
+Register and bare\-clone a repository
+.SH OPTIONS
+.TP
+\fB\-\-from\fR
+Import repos from a GitHub org/user (e.g. github.com/acme)
+.TP
+\fB\-\-pattern\fR
+Glob pattern(s) to filter repo names, comma\-separated
+.TP
+\fB\-\-all\fR
+Import all repos (required if \-\-pattern not given)
+.TP
+\fB\-\-https\fR
+Use HTTPS URLs instead of SSH
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIurl\fR]
+

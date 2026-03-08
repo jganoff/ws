@@ -1,0 +1,29 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH wsp-sync 1  "sync " 
+.SH NAME
+sync \- Fetch and rebase/merge all workspace repos
+.SH SYNOPSIS
+\fBsync\fR [\fB\-\-strategy\fR] [\fB\-\-dry\-run\fR] [\fB\-\-abort\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIworkspace\fR] 
+.SH DESCRIPTION
+Fetch and rebase/merge all workspace repos
+.SH OPTIONS
+.TP
+\fB\-\-strategy\fR
+Sync strategy: rebase (default) or merge
+.br
+
+.br
+[\fIpossible values: \fRrebase, merge]
+.TP
+\fB\-\-dry\-run\fR
+Preview actions without executing
+.TP
+\fB\-\-abort\fR
+Abort in\-progress rebase/merge across all repos
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIworkspace\fR]
+

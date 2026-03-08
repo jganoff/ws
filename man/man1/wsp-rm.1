@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH wsp-rm 1  "rm " 
+.SH NAME
+rm \- Remove a workspace
+.SH SYNOPSIS
+\fBrm\fR [\fB\-f\fR|\fB\-\-force\fR] [\fB\-\-permanent\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIworkspace\fR] 
+.SH DESCRIPTION
+Remove a workspace
+.SH OPTIONS
+.TP
+\fB\-f\fR, \fB\-\-force\fR
+Remove even if repos have pending changes, unmerged branches, or workspace root has user content
+.TP
+\fB\-\-permanent\fR
+Permanently delete instead of deferring for gc
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIworkspace\fR]
+

@@ -14,6 +14,11 @@ check:
 skill: (build-bin "codegen")
     cargo run --release --features codegen -- generate > skills/wsp-manage/SKILL.md
 
+# generate manpages from CLI introspection
+man: (build-bin "codegen")
+    rm -f man/man1/*.1
+    cargo run --release --features codegen -- generate-man man/man1
+
 # build a release binary, optionally with extra features
 [private]
 build-bin features="":
@@ -34,6 +39,8 @@ audit:
 ci: check audit build test
     @echo "Checking SKILL.md freshness..."
     @cargo run --release --features codegen -- generate | diff -q - skills/wsp-manage/SKILL.md || (echo "SKILL.md is stale. Run 'just skill' to regenerate." && exit 1)
+    @echo "Checking manpage freshness..."
+    @tmp=$$(mktemp -d) && cargo run --release --features codegen -- generate-man "$$tmp" && diff -rq "$$tmp" man/man1 || (echo "Manpages are stale. Run 'just man' to regenerate." && rm -rf "$$tmp" && exit 1) && rm -rf "$$tmp"
 
 # auto-fix formatting and lint where possible
 fix:

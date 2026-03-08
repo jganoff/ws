@@ -11,6 +11,7 @@ pub mod fetch;
 pub mod group;
 pub mod list;
 pub mod log;
+pub mod man;
 pub mod new;
 pub mod recover;
 pub mod registry;
@@ -110,6 +111,7 @@ pub fn build_cli() -> Command {
     #[cfg(feature = "codegen")]
     {
         cli = cli.subcommand(skill::generate_cmd().hide(true));
+        cli = cli.subcommand(man::generate_man_cmd().hide(true));
     }
 
     // Build categorized help from the command definitions, then set
@@ -188,6 +190,8 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         // --- Dev-only codegen ---
         #[cfg(feature = "codegen")]
         Some(("generate", m)) => skill::run_generate(m, paths),
+        #[cfg(feature = "codegen")]
+        Some(("generate-man", m)) => man::run_generate_man(m, paths),
 
         // --- No subcommand: default behavior ---
         None => {

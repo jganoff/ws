@@ -192,19 +192,26 @@ pub fn load_from_file(path: &Path) -> Result<Template> {
     let data = fs::read_to_string(path).with_context(|| format!("reading template {:?}", path))?;
 
     // Try template format first
-    if let Ok(t) = serde_yaml_ng::from_str::<Template>(&data) {
-        if t.repos.is_empty() {
-            bail!("template {:?} has no repos", path);
+    let tmpl_err = match serde_yaml_ng::from_str::<Template>(&data) {
+        Ok(t) => {
+            if t.repos.is_empty() {
+                bail!("template {:?} has no repos", path);
+            }
+            return Ok(t);
         }
-        return Ok(t);
-    }
+        Err(e) => e,
+    };
 
     // Try .wsp.yaml metadata format
-    if let Ok(meta) = serde_yaml_ng::from_str::<workspace::Metadata>(&data) {
-        return template_from_metadata(&meta);
+    match serde_yaml_ng::from_str::<workspace::Metadata>(&data) {
+        Ok(meta) => template_from_metadata(&meta),
+        Err(meta_err) => bail!(
+            "could not parse {:?}:\n  as template: {}\n  as .wsp.yaml: {}",
+            path,
+            tmpl_err,
+            meta_err
+        ),
     }
-
-    bail!("could not parse {:?} as template or .wsp.yaml", path);
 }
 
 /// Convert a .wsp.yaml Metadata into a Template by extracting repo URLs.

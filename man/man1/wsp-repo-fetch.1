@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH wsp-repo-fetch 1  "fetch " 
+.SH NAME
+fetch \- Fetch updates for workspace repos
+.SH SYNOPSIS
+\fBfetch\fR [\fB\-\-all\fR] [\fB\-\-prune\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Fetch updates for workspace repos
+.SH OPTIONS
+.TP
+\fB\-\-all\fR
+Fetch all registered repos (not just current workspace)
+.TP
+\fB\-\-prune\fR
+Prune deleted remote branches
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

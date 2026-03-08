@@ -223,16 +223,7 @@ fn run_export(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         if t.agent_md.is_some() {
             eprintln!("  AGENTS.md user content included");
         }
-        // Check for skills that can't be exported
-        let skills_dir = paths
-            .templates_dir
-            .parent()
-            .unwrap_or(paths.templates_dir.as_ref());
-        let ws_skills = std::path::Path::new(".claude/skills");
-        if ws_skills.exists() {
-            eprintln!("  warning: custom skills in .claude/skills/ are not included in the export");
-        }
-        let _ = skills_dir; // suppress unused
+        eprintln!("  note: custom skills (.claude/skills/) are not included in exports");
     }
 
     let yaml = tmpl::to_yaml(&t)?;
