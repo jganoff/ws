@@ -2,6 +2,84 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-03-08
+
+### Features
+
+- *(workspace)* Adopt existing git directories in `wsp repo add`
+- *(agentmd)* Add troubleshooting section and wsp-report skill
+- *(gc)* Deferred deletion for wsp rm with recovery
+- Add wsp rename command
+- *(cli)* Categorized help output with command grouping
+- *(new)* Show elapsed time after workspace creation
+- *(st)* Enrich status with agent context
+- *(sync)* Add --abort to abort in-progress rebase/merge
+- *(workspace)* Add descriptions and age/staleness signals
+- *(st)* Show workspace age in status header
+- *(template)* Add workspace templates phase 1
+- *(template)* Polymorphic --from and export (phase 2)
+- *(template)* Migrate groups to templates (phase 3)
+- *(template)* Wire template settings into workspace creation (phase 4)
+- *(template)* Unify .wsp.yaml as template format (phase 5)
+- *(template)* Inline agent_md content in templates (phase 6)
+- *(ls)* Add sorting options to wsp ls
+- *(new)* Add -w/--workspace and -f/--file flags for wsp new
+
+### Bug Fixes
+
+- *(workspace)* Fast-forward local default branch after clone
+- *(cli)* Normalize verb naming across setup subcommands
+- *(mirror)* Keep refs/heads in sync to prevent dirty index on wsp new
+- *(status)* Add wsp-report skill to managed paths in check_claude_dir
+- *(shell)* Cd out of deleted workspace on wsp rm with flags
+- *(status)* Detect wrong-branch in wsp st and wsp rm
+- *(workspace)* Skip .wsp.yaml.lock in root content check
+- *(new)* Validate workspace name before fetching mirrors
+- *(st)* Show 'wsp st -v' instead of '-v' in file details hint
+- *(template)* Add shell completion for --from flag
+- *(template)* Auto-migrate groups on template commands too
+- *(template)* Address code review findings
+- *(template)* Reject marker injection and warn on external agent_md
+- *(ci)* Fix shell variable escaping in manpage freshness check
+- *(gc)* Warn when running commands inside GC'd workspaces
+
+### Refactor
+
+- *(skill)* Install all skills from single SKILLS array
+- *(cli)* Drop hidden delete alias for group rm
+- *(gc)* Move gc dir to ~/.local/share/wsp/gc/
+- *(cli)* Flatten setup into top-level nouns
+- *(cli)* Group help by workflow stage
+- Remove context repos
+- *(workspace)* Remove last_used tracking, simplify to created-only age
+- *(template)* Rename settings to config for consistency
+
+### Documentation
+
+- Add CLI restructure design, rename definitions to templates
+- Add "don't duplicate unix" tenet, move staleness to P1
+- *(roadmap)* Add git config defaults for workspace clones
+- Remove skill subcommand from CLI restructure plan
+- Add safety tenets for data-loss prevention
+- *(roadmap)* Remove completed items, consolidate gc into doctor
+- Regenerate SKILL.md for describe command
+- Add completions convention and metadata gotcha to AGENTS.md
+- *(templates)* Add agent context and repo-embedded template roadmap items
+- Update roadmap for phase 3 shipped
+- *(templates)* Unify .wsp.yaml as the template format
+- Add WorkspaceRepoRef field gotcha to AGENTS.md
+- *(justfile)* Add comment about shell variable escaping
+- *(cli)* Add long_about descriptions to all commands
+
+### Testing
+
+- *(sync)* Add tests for behind_count, in_progress_op, abort, exit_code
+
+### Miscellaneous
+
+- Remove repo-adopt design doc (feature is implemented)
+- Regenerate SKILL.md and manpages for template commands
+
 ## [0.7.0] - 2026-03-06
 
 ### Features
