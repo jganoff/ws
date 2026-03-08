@@ -59,6 +59,39 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Load gc metadata from a workspace directory, if present.
+/// Returns `Some(GcEntry)` when the workspace has been garbage-collected.
+pub fn load_entry(ws_dir: &Path) -> Option<GcEntry> {
+    let meta_path = ws_dir.join(GC_META_FILE);
+    let data = fs::read_to_string(&meta_path).ok()?;
+    serde_yaml_ng::from_str(&data).ok()
+}
+
+/// Check whether a workspace directory is gc'd and handle accordingly.
+///
+/// - `read_only = true`: prints a warning to stderr, returns `Ok(())`
+/// - `read_only = false`: returns an error (blocks mutating commands)
+pub fn check_workspace(ws_dir: &Path, read_only: bool) -> Result<()> {
+    if let Some(entry) = load_entry(ws_dir) {
+        let date = entry.trashed_at.format("%Y-%m-%d %H:%M UTC");
+        if read_only {
+            eprintln!(
+                "warning: this workspace was removed on {}. Use `wsp recover {}` to restore it.",
+                date, entry.name
+            );
+            Ok(())
+        } else {
+            anyhow::bail!(
+                "this workspace was removed on {}. Use `wsp recover {}` to restore it.",
+                date,
+                entry.name
+            );
+        }
+    } else {
+        Ok(())
+    }
+}
+
 /// Move a workspace directory to the gc area for deferred deletion.
 ///
 /// Writes metadata inside the workspace dir first, then moves the whole
@@ -400,6 +433,86 @@ mod tests {
         // restore should bring it back
         restore(&paths, "soft-del").unwrap();
         assert!(paths.workspaces_dir.join("soft-del").exists());
+    }
+
+    #[test]
+    fn test_load_entry_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "gc-test");
+
+        move_to_gc(&paths, "gc-test", "test/gc-test").unwrap();
+
+        // Find the gc'd directory
+        let gc_dirs: Vec<_> = fs::read_dir(&paths.gc_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        assert_eq!(gc_dirs.len(), 1);
+
+        let entry = load_entry(&gc_dirs[0].path());
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.name, "gc-test");
+        assert_eq!(entry.branch, "test/gc-test");
+    }
+
+    #[test]
+    fn test_load_entry_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "normal-ws");
+
+        let ws_dir = paths.workspaces_dir.join("normal-ws");
+        assert!(load_entry(&ws_dir).is_none());
+    }
+
+    #[test]
+    fn test_check_workspace_read_only_warns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "warn-test");
+        move_to_gc(&paths, "warn-test", "test/warn-test").unwrap();
+
+        let gc_dirs: Vec<_> = fs::read_dir(&paths.gc_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+
+        // Read-only check should succeed (warn only)
+        assert!(check_workspace(&gc_dirs[0].path(), true).is_ok());
+    }
+
+    #[test]
+    fn test_check_workspace_mutating_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "block-test");
+        move_to_gc(&paths, "block-test", "test/block-test").unwrap();
+
+        let gc_dirs: Vec<_> = fs::read_dir(&paths.gc_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+
+        // Mutating check should fail
+        let err = check_workspace(&gc_dirs[0].path(), false).unwrap_err();
+        assert!(err.to_string().contains("was removed on"));
+        assert!(err.to_string().contains("wsp recover"));
+    }
+
+    #[test]
+    fn test_check_workspace_normal_passes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "normal");
+
+        let ws_dir = paths.workspaces_dir.join("normal");
+        assert!(check_workspace(&ws_dir, true).is_ok());
+        assert!(check_workspace(&ws_dir, false).is_ok());
     }
 
     /// Backdate all gc entries by the given number of days.

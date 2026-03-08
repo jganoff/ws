@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use clap::{ArgMatches, Command};
 
 use crate::config::{self, Paths};
+use crate::gc;
 use crate::git;
 use crate::giturl;
 use crate::mirror;
@@ -42,6 +43,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let cwd = std::env::current_dir()?;
         match workspace::detect(&cwd) {
             Ok(ws_dir) => {
+                gc::check_workspace(&ws_dir, /* read_only */ false)?;
                 let meta = workspace::load_metadata(&ws_dir)?;
                 Some((ws_dir, meta))
             }

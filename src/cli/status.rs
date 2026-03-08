@@ -5,6 +5,7 @@ use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::Paths;
+use crate::gc;
 use crate::git;
 use crate::output::{self, Output, RepoStatusEntry, StatusOutput};
 use crate::workspace;
@@ -70,6 +71,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             let cwd = std::env::current_dir()?;
             workspace::detect(&cwd)?
         };
+
+    gc::check_workspace(&ws_dir, /* read_only */ true)?;
 
     let verbose = matches
         .try_get_one::<bool>("verbose")

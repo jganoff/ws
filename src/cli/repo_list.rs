@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{ArgMatches, Command};
 
 use crate::config::Paths;
+use crate::gc;
 use crate::giturl;
 use crate::output::{Output, WorkspaceRepoListEntry, WorkspaceRepoListOutput};
 use crate::workspace;
@@ -19,6 +20,8 @@ pub fn cmd() -> Command {
 pub fn run(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     let cwd = std::env::current_dir()?;
     let ws_dir = workspace::detect(&cwd)?;
+
+    gc::check_workspace(&ws_dir, /* read_only */ true)?;
 
     let meta = workspace::load_metadata(&ws_dir)
         .map_err(|e| anyhow::anyhow!("reading workspace: {}", e))?;

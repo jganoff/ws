@@ -7,6 +7,7 @@ use clap_complete::engine::ArgValueCandidates;
 
 use super::completers;
 use crate::config::Paths;
+use crate::gc;
 use crate::git;
 use crate::output::{LogCommit, LogOutput, Output, RepoLogEntry};
 use crate::workspace;
@@ -42,6 +43,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let cwd = std::env::current_dir()?;
         workspace::detect(&cwd)?
     };
+
+    gc::check_workspace(&ws_dir, /* read_only */ true)?;
 
     let meta = workspace::load_metadata(&ws_dir)
         .map_err(|e| anyhow::anyhow!("reading workspace: {}", e))?;
