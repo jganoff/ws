@@ -30,10 +30,20 @@ wsp group rm <name>                             # Remove a group (alias: remove)
 wsp group update <name> [--add <add>]... [--remove <remove>]... # Add or remove repos from a group
 ```
 
+### Templates (shareable workspace definitions)
+
+```bash
+wsp template new <name> [<repos>]... [--from <from>] # Create a new template
+wsp template ls                                 # List all templates [read-only] (alias: list)
+wsp template show <name>                        # Show template contents [read-only]
+wsp template rm <name>                          # Remove a template (alias: remove)
+wsp template export <name> [--stdout]           # Export a template to a file or stdout [read-only]
+```
+
 ### Workspaces
 
 ```bash
-wsp new <workspace> [<repos>]... [-g <group>] [--no-fetch] [-d <description>] # Create a new workspace
+wsp new <workspace> [<repos>]... [-t <template>] [-g <group>] [--no-fetch] [-d <description>] # Create a new workspace
 wsp ls                                          # List active workspaces [read-only] (alias: list)
 wsp st [<workspace>] [-v]                       # Git status across workspace repos [read-only] (alias: status)
 wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
@@ -85,7 +95,8 @@ wsp config unset <key>                          # Unset a config value
       "path": "~/dev/workspaces/my-feature",
       "description": "migrating billing to stripe v3",
       "created": "2026-03-01T10:00:00+00:00",
-      "last_used": "2026-03-06T15:30:00+00:00"
+      "last_used": "2026-03-06T15:30:00+00:00",
+      "created_from": "backend"
     }
   ]
 }
@@ -246,6 +257,35 @@ wsp config unset <key>                          # Unset a config value
     "api-gateway",
     "user-service",
     "shared-lib"
+  ]
+}
+```
+
+### `wsp template ls --json`
+```json
+{
+  "templates": [
+    {
+      "name": "backend",
+      "repo_count": 3
+    }
+  ]
+}
+```
+
+### `wsp template show <name> --json`
+```json
+{
+  "name": "backend",
+  "repos": [
+    {
+      "url": "git@github.com:acme/api-gateway.git",
+      "identity": "github.com/acme/api-gateway"
+    },
+    {
+      "url": "git@github.com:acme/user-service.git",
+      "identity": "github.com/acme/user-service"
+    }
   ]
 }
 ```
