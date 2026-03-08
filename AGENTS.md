@@ -100,7 +100,7 @@ The gc dir lives alongside mirrors in the XDG data directory (`~/.local/share/ws
 
 `src/filelock.rs` provides advisory `flock`-based locking via `fs2` to prevent concurrent `wsp` processes from losing writes. Key conventions:
 
-- **Use `with_config()` / `with_metadata()`** for all read-modify-write operations on `config.yaml` and `.wsp.yaml`. Never call `load_from` → modify → `save_to` directly outside of tests.
+- **Use `with_config()` / `with_metadata()` / `with_template()`** for all read-modify-write operations on `config.yaml`, `.wsp.yaml`, and template YAML files. Never call `load` → modify → `save` directly outside of tests. When adding a new mutation command, always use the appropriate `filelock::with_*` helper.
 - **Keep locks short**: Do not hold a lock during network I/O (git clone, git fetch). Use the 3-phase pattern: snapshot under lock → slow I/O without lock → update under lock with re-check.
 - **Lock files are not deleted**: The `Drop` impl intentionally leaves `.lock` files on disk to avoid a race where concurrent acquirers end up on different inodes. This is standard `flock` practice.
 - Read-only operations (`run_list`, `run_get`, `run_show`) do not need locking.
