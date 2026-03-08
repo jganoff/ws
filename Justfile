@@ -36,6 +36,8 @@ audit:
     cargo audit
 
 # full CI pipeline (mirrors .github/workflows/ci.yml)
+# NOTE: just passes recipe lines to sh directly — use $var not $$var.
+# $$ is only needed inside `backtick` expressions.
 ci: check audit build test
     @echo "Checking SKILL.md freshness..."
     @cargo run --release --features codegen -- generate | diff -q - skills/wsp-manage/SKILL.md || (echo "SKILL.md is stale. Run 'just skill' to regenerate." && exit 1)
