@@ -11,6 +11,12 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("rename")
         .about("Rename a workspace, its directory, and git branches")
+        .long_about(
+            "Rename a workspace, its directory, and git branches.\n\n\
+             Atomically renames the workspace directory, updates .wsp.yaml metadata, and \
+             renames the workspace branch in every repo clone. Remote tracking branches \
+             are not affected — push the renamed branch manually if needed.",
+        )
         .arg(
             Arg::new("old")
                 .required(true)

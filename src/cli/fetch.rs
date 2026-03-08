@@ -13,6 +13,12 @@ use crate::workspace;
 pub fn cmd() -> Command {
     Command::new("fetch")
         .about("Fetch updates for workspace repos")
+        .long_about(
+            "Fetch updates for workspace repos.\n\n\
+             Fetches from upstream into the bare mirror, then propagates to each clone via \
+             local path-based fetch. This two-layer fetch means upstream is only contacted \
+             once per repo, regardless of how many workspaces share it.",
+        )
         .arg(
             clap::Arg::new("all")
                 .long("all")

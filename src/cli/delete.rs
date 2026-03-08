@@ -12,6 +12,14 @@ pub fn cmd() -> Command {
     Command::new("rm")
         .visible_alias("remove")
         .about("Remove a workspace")
+        .long_about(
+            "Remove a workspace.\n\n\
+             Fetches from upstream, checks whether the workspace branch has been merged \
+             (regular, squash, or rebase merge), and removes the workspace if safe. \
+             Unmerged or pushed-but-unmerged branches block removal unless --force is used.\n\n\
+             By default, workspaces are moved to a gc directory and can be recovered with \
+             `wsp recover`. Use --permanent to skip gc and delete immediately.",
+        )
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("force")

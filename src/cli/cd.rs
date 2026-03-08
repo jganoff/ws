@@ -11,6 +11,12 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("cd")
         .about("Change directory into a workspace")
+        .long_about(
+            "Change directory into a workspace.\n\n\
+             Requires shell integration to be active (see `wsp completion`). Without it, \
+             prints the workspace path instead. Also propagates mirror refs to clones so \
+             remote tracking branches stay current.",
+        )
         .arg(
             Arg::new("workspace")
                 .required(true)

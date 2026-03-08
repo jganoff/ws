@@ -14,6 +14,12 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("exec")
         .about("Run a command in each repo of a workspace")
+        .long_about(
+            "Run a command in each repo of a workspace.\n\n\
+             Executes the given command sequentially in each repo directory. The command and \
+             its arguments follow `--` (e.g., `wsp exec my-ws -- make test`). Exit codes \
+             are collected per repo and reported in the output.",
+        )
         .arg(
             Arg::new("workspace")
                 .required(true)

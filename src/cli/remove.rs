@@ -13,6 +13,12 @@ pub fn cmd() -> Command {
     Command::new("rm")
         .visible_alias("remove")
         .about("Remove repo(s) from the current workspace")
+        .long_about(
+            "Remove repo(s) from the current workspace.\n\n\
+             Runs the same safety checks as `wsp rm` (pending changes, branch merge status) \
+             on each repo before removal. The repo's directory is deleted but the mirror is \
+             kept. Use --force to skip safety checks.",
+        )
         .arg(
             Arg::new("repos")
                 .required(true)

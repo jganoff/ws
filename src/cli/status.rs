@@ -46,6 +46,12 @@ pub fn cmd() -> Command {
     Command::new("st")
         .visible_alias("status")
         .about("Git status across workspace repos [read-only]")
+        .long_about(
+            "Git status across workspace repos [read-only].\n\n\
+             Shows each repo's branch, commits ahead/behind upstream, and number of \
+             changed files. Detects wrong-branch checkouts and warns when HEAD differs \
+             from the workspace branch. Also reports unexpected files in the workspace root.",
+        )
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("verbose")

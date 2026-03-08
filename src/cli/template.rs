@@ -17,6 +17,12 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("template")
         .about("Manage workspace templates")
+        .long_about(
+            "Manage workspace templates.\n\n\
+             Templates define reusable workspace configurations: a set of repos, optional \
+             config overrides, and optional AGENTS.md content for AI coding assistants. \
+             Create workspaces from templates with `wsp new -t <name>`.",
+        )
         .subcommand_required(true)
         .subcommand(new_cmd())
         .subcommand(list_cmd())

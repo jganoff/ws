@@ -12,7 +12,6 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
-clap_mangen = { version = "0.2", optional = true }
 ctrlc = "3"
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +23,7 @@ fs2 = "0.4"
 url = "2"
 
 [features]
-codegen = ["clap_mangen"]
+codegen = []
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -10,6 +10,12 @@ use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, Mutation
 pub fn cmd() -> Command {
     Command::new("config")
         .about("Manage wsp settings")
+        .long_about(
+            "Manage wsp settings.\n\n\
+             Settings are stored in ~/.local/share/wsp/config.yaml. Keys include \
+             branch-prefix, workspaces-dir, gc.retention-days, and language integration \
+             toggles. Use `wsp config ls` to see all current values.",
+        )
         .subcommand_required(true)
         .subcommand(list_cmd())
         .subcommand(get_cmd())

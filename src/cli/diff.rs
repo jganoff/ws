@@ -12,6 +12,11 @@ use crate::workspace;
 pub fn cmd() -> Command {
     Command::new("diff")
         .about("Show git diff across workspace repos [read-only]")
+        .long_about(
+            "Show git diff across workspace repos [read-only].\n\n\
+             Runs `git diff` in each repo and aggregates the output. Extra arguments after \
+             `--` are forwarded to git diff (e.g., `wsp diff -- --staged`).",
+        )
         .arg(Arg::new("workspace"))
         .arg(
             Arg::new("args")

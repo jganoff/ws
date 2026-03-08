@@ -12,6 +12,11 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("describe")
         .about("Set or update a workspace description")
+        .long_about(
+            "Set or update a workspace description.\n\n\
+             Stores a short purpose string in the workspace metadata. The description \
+             appears in `wsp ls` output to help identify workspaces at a glance.",
+        )
         .arg(
             Arg::new("workspace")
                 .required(true)

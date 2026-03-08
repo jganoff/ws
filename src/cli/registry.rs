@@ -9,6 +9,12 @@ use super::repo;
 pub fn cmd() -> Command {
     Command::new("registry")
         .about("Manage the global repo registry")
+        .long_about(
+            "Manage the global repo registry.\n\n\
+             The registry tracks known repositories and their upstream URLs. Repos must be \
+             registered before they can be added to workspaces. Registration also creates a \
+             local bare mirror used to speed up cloning and fetching.",
+        )
         .subcommand_required(true)
         .subcommand(repo::add_cmd())
         .subcommand(repo::list_cmd())

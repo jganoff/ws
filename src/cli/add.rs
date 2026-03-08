@@ -18,6 +18,12 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("add")
         .about("Add repos to current workspace")
+        .long_about(
+            "Add repos to current workspace.\n\n\
+             Clones the specified repos into the workspace directory, checking out the \
+             workspace branch. Repos must be registered in the global registry first, or \
+             specified as full git URLs to auto-register.",
+        )
         .arg(
             Arg::new("repos")
                 .num_args(0..)

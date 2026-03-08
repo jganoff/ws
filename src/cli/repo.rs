@@ -16,6 +16,11 @@ use super::completers;
 pub fn add_cmd() -> Command {
     Command::new("add")
         .about("Register and bare-clone a repository")
+        .long_about(
+            "Register and bare-clone a repository.\n\n\
+             Adds a repo to the global registry and creates a bare mirror clone. Supports \
+             individual URLs or bulk import from a GitHub org/user with --from.",
+        )
         .arg(Arg::new("url").required_unless_present("from"))
         .arg(
             Arg::new("from")

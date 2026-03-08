@@ -14,6 +14,12 @@ use crate::workspace;
 pub fn cmd() -> Command {
     Command::new("log")
         .about("Show commits ahead of upstream per workspace repo [read-only]")
+        .long_about(
+            "Show commits ahead of upstream per workspace repo [read-only].\n\n\
+             Lists unpushed commits on the workspace branch for each repo. Use --oneline \
+             for a flat chronological view across all repos. Extra arguments after `--` are \
+             forwarded to git log.",
+        )
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("oneline")

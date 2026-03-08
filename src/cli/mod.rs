@@ -11,7 +11,6 @@ pub mod fetch;
 pub mod group;
 pub mod list;
 pub mod log;
-pub mod man;
 pub mod new;
 pub mod recover;
 pub mod registry;
@@ -49,6 +48,11 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
 pub fn build_cli() -> Command {
     let repo_ws = Command::new("repo")
         .about("Manage repos in the current workspace")
+        .long_about(
+            "Manage repos in the current workspace.\n\n\
+             Add, remove, list, and fetch repos within the current workspace. Must be run \
+             from inside a workspace directory.",
+        )
         .subcommand_required(true)
         .subcommand(add::cmd())
         .subcommand(remove::cmd())
@@ -76,6 +80,15 @@ pub fn build_cli() -> Command {
     #[allow(unused_mut)]
     let mut cli = Command::new("wsp")
         .about("Multi-repo workspace manager")
+        .long_about(
+            "Multi-repo workspace manager.\n\n\
+             wsp creates workspaces that span multiple git repositories, sharing a single \
+             branch name across repos. Each repo is cloned from a local bare mirror, so \
+             bootstrapping is fast and works offline once mirrors are populated.\n\n\
+             Workspaces live in ~/dev/workspaces/<name>/ with a .wsp.yaml metadata file. \
+             Inside a workspace, each repo is a normal git clone — no wsp-specific remotes \
+             or config leak into .git/.",
+        )
         .version(env!("WSP_VERSION_STRING"))
         .arg(
             Arg::new("json")
@@ -111,7 +124,6 @@ pub fn build_cli() -> Command {
     #[cfg(feature = "codegen")]
     {
         cli = cli.subcommand(skill::generate_cmd().hide(true));
-        cli = cli.subcommand(man::generate_man_cmd().hide(true));
     }
 
     // Build categorized help from the command definitions, then set
@@ -190,9 +202,6 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         // --- Dev-only codegen ---
         #[cfg(feature = "codegen")]
         Some(("generate", m)) => skill::run_generate(m, paths),
-        #[cfg(feature = "codegen")]
-        Some(("generate-man", m)) => man::run_generate_man(m, paths),
-
         // --- No subcommand: default behavior ---
         None => {
             let cwd = std::env::current_dir()?;

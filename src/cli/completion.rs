@@ -9,6 +9,11 @@ use crate::output::Output;
 pub fn cmd() -> Command {
     Command::new("completion")
         .about("Output shell integration (completions + wrapper function) [read-only]")
+        .long_about(
+            "Output shell integration (completions + wrapper function) [read-only].\n\n\
+             Prints a shell script that provides tab completion and the `wsp cd` wrapper \
+             function. Add `eval \"$(wsp completion zsh)\"` to your shell rc file.",
+        )
         .arg(
             Arg::new("shell")
                 .required(true)

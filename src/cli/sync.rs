@@ -17,6 +17,14 @@ use crate::workspace::{self, RepoInfo};
 pub fn cmd() -> Command {
     Command::new("sync")
         .about("Fetch and rebase/merge all workspace repos")
+        .long_about(
+            "Fetch and rebase/merge all workspace repos.\n\n\
+             Fetches upstream changes through the mirror layer, then rebases (default) or \
+             merges each repo's workspace branch onto its upstream tracking branch. If a \
+             conflict occurs, the operation pauses — resolve it with git, then re-run sync \
+             to continue with the remaining repos. Use --abort to cancel in-progress \
+             operations across all repos.",
+        )
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("strategy")

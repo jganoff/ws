@@ -20,6 +20,12 @@ use super::completers;
 pub fn cmd() -> Command {
     Command::new("new")
         .about("Create a new workspace")
+        .long_about(
+            "Create a new workspace.\n\n\
+             Sets up a directory with local clones of the specified repos, all sharing a \
+             single feature branch. Clones are bootstrapped from local bare mirrors, so \
+             creation is fast and works offline once mirrors exist.",
+        )
         .arg(Arg::new("workspace").required(true))
         .arg(
             Arg::new("repos")

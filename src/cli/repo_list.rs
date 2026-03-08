@@ -10,6 +10,10 @@ pub fn cmd() -> Command {
     Command::new("ls")
         .visible_alias("list")
         .about("List repos in the current workspace [read-only]")
+        .long_about(
+            "List repos in the current workspace [read-only].\n\n\
+             Shows each repo's identity, directory name, and role within the workspace.",
+        )
 }
 
 pub fn run(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {

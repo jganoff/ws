@@ -9,6 +9,12 @@ pub fn cmd() -> Command {
     Command::new("ls")
         .visible_alias("list")
         .about("List active workspaces [read-only]")
+        .long_about(
+            "List active workspaces [read-only].\n\n\
+             Shows all workspaces under the workspaces directory, with their branch, repo \
+             count, and description. Supports sorting by name (default), last-used time, \
+             or creation date.",
+        )
 }
 
 pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
