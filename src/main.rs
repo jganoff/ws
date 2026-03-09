@@ -3,6 +3,7 @@
 mod agentmd;
 mod cli;
 mod config;
+mod discovery;
 mod filelock;
 mod gc;
 mod git;

@@ -6,6 +6,7 @@ use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::{self, Paths, RepoEntry};
+use crate::discovery;
 use crate::filelock;
 use crate::gc;
 use crate::giturl;
@@ -45,6 +46,12 @@ pub fn cmd() -> Command {
                 .long("group")
                 .help("Add repos from a group (deprecated, use --template)")
                 .add(ArgValueCandidates::new(completers::complete_groups)),
+        )
+        .arg(
+            Arg::new("no-discover")
+                .long("no-discover")
+                .action(clap::ArgAction::SetTrue)
+                .help("Skip template discovery in added repos"),
         )
 }
 
@@ -192,6 +199,28 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         && let Err(e) = crate::agentmd::update(&ws_dir, meta)
     {
         eprintln!("warning: AGENTS.md generation failed: {}", e);
+    }
+
+    // Template discovery: scan newly added repos for .wsp.yaml files
+    if !matches.get_flag("no-discover") {
+        let mut all_discovered = Vec::new();
+        for id in &new_ids {
+            if let Ok(ref meta) = meta_result {
+                for info in meta.repo_infos(&ws_dir) {
+                    if info.identity == *id && info.error.is_none() {
+                        let discovered = discovery::scan_repo_dir(
+                            &info.clone_dir,
+                            &info.identity,
+                            &paths.templates_dir,
+                        );
+                        all_discovered.extend(discovered);
+                    }
+                }
+            }
+        }
+        if let Err(e) = discovery::prompt_and_import(&all_discovered, &paths.templates_dir) {
+            eprintln!("warning: template discovery failed: {}", e);
+        }
     }
 
     Ok(Output::Mutation(MutationOutput::new("Done.")))

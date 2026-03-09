@@ -531,6 +531,30 @@ pub fn changed_files(dir: &Path) -> Result<Vec<String>> {
     }
 }
 
+/// List top-level file names in a tree-ish (e.g., HEAD) of a bare repo.
+pub fn ls_tree_names(git_dir: &Path, rev: &str) -> Result<Vec<String>> {
+    let out = run(Some(git_dir), &["ls-tree", "--name-only", rev])?;
+    if out.is_empty() {
+        Ok(vec![])
+    } else {
+        Ok(out.lines().map(|l| l.to_string()).collect())
+    }
+}
+
+/// Extract file content from a bare repo at a given revision and path.
+pub fn show_file(git_dir: &Path, rev: &str, path: &str) -> Result<Vec<u8>> {
+    let spec = format!("{}:{}", rev, path);
+    let mut cmd = Command::new("git");
+    cmd.args(["show", &spec]);
+    cmd.current_dir(git_dir);
+    let output = cmd.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        bail!("git show {} (in {}): {}", spec, git_dir.display(), stderr);
+    }
+    Ok(output.stdout)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,7 @@ use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::{self, Paths, RepoEntry};
+use crate::discovery;
 use crate::filelock;
 use crate::giturl;
 use crate::mirror;
@@ -48,6 +49,12 @@ pub fn add_cmd() -> Command {
                 .action(clap::ArgAction::SetTrue)
                 .help("Use HTTPS URLs instead of SSH")
                 .requires("from"),
+        )
+        .arg(
+            Arg::new("no-discover")
+                .long("no-discover")
+                .action(clap::ArgAction::SetTrue)
+                .help("Skip template discovery in cloned repos"),
         )
 }
 
@@ -116,6 +123,16 @@ pub fn run_add(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let _ = mirror::remove(&paths.mirrors_dir, &parsed);
     }
     result?;
+
+    // Template discovery: scan the bare mirror for .wsp.yaml files
+    let no_discover = matches.get_flag("no-discover");
+    if !no_discover {
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+        let discovered = discovery::scan_bare_mirror(&mirror_dir, &identity, &paths.templates_dir);
+        if let Err(e) = discovery::prompt_and_import(&discovered, &paths.templates_dir) {
+            eprintln!("warning: template discovery failed: {}", e);
+        }
+    }
 
     Ok(Output::Mutation(MutationOutput::new(format!(
         "Registered {}",
@@ -235,6 +252,23 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             }
             Ok(())
         })?;
+    }
+
+    // Template discovery: scan newly registered bare mirrors for .wsp.yaml files
+    let no_discover = matches.get_flag("no-discover");
+    if !no_discover && !registered.is_empty() {
+        let mut all_discovered = Vec::new();
+        for identity in &registered {
+            if let Ok(parsed) = giturl::Parsed::from_identity(identity) {
+                let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+                let discovered =
+                    discovery::scan_bare_mirror(&mirror_dir, identity, &paths.templates_dir);
+                all_discovered.extend(discovered);
+            }
+        }
+        if let Err(e) = discovery::prompt_and_import(&all_discovered, &paths.templates_dir) {
+            eprintln!("warning: template discovery failed: {}", e);
+        }
     }
 
     Ok(Output::Import(ImportOutput {

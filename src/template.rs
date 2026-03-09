@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{self, Paths, RepoEntry};
@@ -14,6 +14,12 @@ use crate::workspace;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Template {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wsp_version: Option<String>,
     pub repos: Vec<TemplateRepo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<TemplateConfig>,
@@ -148,7 +154,12 @@ pub fn classify_source(source: &str) -> TemplateSource {
 // ---------------------------------------------------------------------------
 
 /// Validate a template name for safe use as a filesystem component.
-/// Same rules as workspace::validate_name — no path separators, traversal, or special prefixes.
+///
+/// Rejects: empty, null bytes, path separators (`/`, `\`), `..` traversal,
+/// leading `-` or `.`, and `.source` suffix (reserved for import sidecar files).
+///
+/// Called at the storage layer (`save`, `load`, `delete`, `save_source`, etc.)
+/// and at the discovery boundary (`scan_repo_dir`, `scan_bare_mirror`).
 pub fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("template name cannot be empty");
@@ -167,6 +178,12 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
     if name.starts_with('.') {
         bail!("template name {:?} cannot start with a dot", name);
+    }
+    if name.ends_with(".source") {
+        bail!(
+            "template name {:?} is reserved (conflicts with import metadata)",
+            name
+        );
     }
     Ok(())
 }
@@ -207,7 +224,11 @@ pub fn delete(templates_dir: &Path, name: &str) -> Result<()> {
     let path = template_path(templates_dir, name);
     // Use remove_file directly to avoid TOCTOU race with exists() check
     match fs::remove_file(&path) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            // Clean up sidecar source metadata if present
+            let _ = delete_source(templates_dir, name);
+            Ok(())
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             bail!("template {:?} not found", name)
         }
@@ -226,6 +247,10 @@ pub fn list(templates_dir: &Path) -> Result<Vec<String>> {
         if path.extension().is_some_and(|e| e == "yaml")
             && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
         {
+            // Skip sidecar source metadata files (e.g., dash.source.yaml)
+            if stem.ends_with(".source") {
+                continue;
+            }
             names.push(stem.to_string());
         }
     }
@@ -308,6 +333,9 @@ fn template_from_metadata(meta: &workspace::Metadata) -> Result<Template> {
         bail!("no repos in .wsp.yaml");
     }
     Ok(Template {
+        name: None,
+        description: None,
+        wsp_version: None,
         repos,
         config: None,
         agent_md: None,
@@ -317,6 +345,76 @@ fn template_from_metadata(meta: &workspace::Metadata) -> Result<Template> {
 /// Serialize a template to YAML string.
 pub fn to_yaml(template: &Template) -> Result<String> {
     serde_yaml_ng::to_string(template).context("serializing template")
+}
+
+// ---------------------------------------------------------------------------
+// Import source tracking (sidecar metadata)
+// ---------------------------------------------------------------------------
+
+/// Tracks where an imported template came from, stored as a sidecar file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportSource {
+    pub source_path: String,
+    pub imported_at: DateTime<Utc>,
+}
+
+fn source_path(templates_dir: &Path, name: &str) -> PathBuf {
+    templates_dir.join(format!("{}.source.yaml", name))
+}
+
+pub fn save_source(templates_dir: &Path, name: &str, source: &ImportSource) -> Result<()> {
+    validate_name(name)?;
+    fs::create_dir_all(templates_dir)?;
+    let path = source_path(templates_dir, name);
+    let data = serde_yaml_ng::to_string(source)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(templates_dir)
+        .context("creating temp file for source metadata")?;
+    tmp.write_all(data.as_bytes())
+        .context("writing source metadata")?;
+    tmp.persist(&path)
+        .context("renaming temp file to source metadata")?;
+    Ok(())
+}
+
+pub fn load_source(templates_dir: &Path, name: &str) -> Result<Option<ImportSource>> {
+    validate_name(name)?;
+    let path = source_path(templates_dir, name);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read_to_string(&path)
+        .with_context(|| format!("reading source metadata for {:?}", name))?;
+    let source: ImportSource = serde_yaml_ng::from_str(&data).context("parsing source metadata")?;
+    Ok(Some(source))
+}
+
+pub fn delete_source(templates_dir: &Path, name: &str) -> Result<()> {
+    validate_name(name)?;
+    let path = source_path(templates_dir, name);
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("removing source metadata for {:?}", name)),
+    }
+}
+
+/// Derive a template name from a file path, in order of preference:
+/// 1. `name` field inside the YAML
+/// 2. Filename stem (e.g., `dash.wsp.yaml` → `dash`)
+pub fn derive_name_from_file(path: &Path, template: &Template) -> String {
+    if let Some(ref name) = template.name {
+        return name.clone();
+    }
+    // Strip .wsp.yaml or .yaml suffix
+    let filename = path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("template");
+    filename
+        .strip_suffix(".wsp.yaml")
+        .or_else(|| filename.strip_suffix(".yaml"))
+        .unwrap_or(filename)
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +459,9 @@ pub fn from_workspace(paths: &Paths, ws_name: &str) -> Result<Template> {
     };
 
     Ok(Template {
+        name: None,
+        description: None,
+        wsp_version: None,
         repos,
         config: None,
         agent_md,
@@ -656,6 +757,9 @@ pub fn migrate_group(
         templates_dir,
         group_name,
         &Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos,
             config: None,
             agent_md: None,
@@ -688,6 +792,9 @@ mod tests {
 
     fn sample_template() -> Template {
         Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![
                 TemplateRepo {
                     url: "git@github.com:acme/api-gateway.git".into(),
@@ -838,6 +945,16 @@ mod tests {
                 input: "foo\0bar",
                 want_err: true,
             },
+            Case {
+                name: "source suffix reserved",
+                input: "foo.source",
+                want_err: true,
+            },
+            Case {
+                name: "source in middle is ok",
+                input: "source-code",
+                want_err: false,
+            },
         ];
 
         for tc in cases {
@@ -961,7 +1078,6 @@ created: 2026-03-07T10:00:00Z
 
     fn sample_config() -> config::Config {
         use chrono::Utc;
-        use std::collections::BTreeMap;
         let mut cfg = config::Config::default();
         cfg.repos.insert(
             "github.com/acme/api-gateway".into(),
@@ -1046,6 +1162,9 @@ created: 2026-03-07T10:00:00Z
         cfg.language_integrations = Some(li);
 
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![],
             config: Some(TemplateConfig {
                 language_integrations: Some(BTreeMap::from([("go".into(), true)])),
@@ -1074,6 +1193,9 @@ created: 2026-03-07T10:00:00Z
         cfg.language_integrations = Some(li);
 
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![],
             config: None,
             agent_md: None,
@@ -1092,6 +1214,9 @@ created: 2026-03-07T10:00:00Z
         use std::collections::BTreeMap;
 
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
@@ -1114,6 +1239,9 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn agent_md_round_trip_yaml() {
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
@@ -1133,6 +1261,9 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn agent_md_none_omitted_from_yaml() {
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
@@ -1209,6 +1340,9 @@ created: 2026-03-07T10:00:00Z
 
         // Create a template with agent_md
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
@@ -1254,6 +1388,9 @@ created: 2026-03-07T10:00:00Z
         cfg.git_config = Some(gc);
 
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![],
             config: Some(TemplateConfig {
                 language_integrations: None,
@@ -1278,6 +1415,9 @@ created: 2026-03-07T10:00:00Z
         use std::collections::BTreeMap;
 
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
@@ -1318,6 +1458,9 @@ created: 2026-03-07T10:00:00Z
             Case {
                 name: "with agent_md",
                 tmpl: Template {
+                    name: None,
+                    description: None,
+                    wsp_version: None,
                     repos: vec![],
                     config: None,
                     agent_md: Some("# Rules".into()),
@@ -1327,6 +1470,9 @@ created: 2026-03-07T10:00:00Z
             Case {
                 name: "with git_config",
                 tmpl: Template {
+                    name: None,
+                    description: None,
+                    wsp_version: None,
                     repos: vec![],
                     config: Some(TemplateConfig {
                         language_integrations: None,
@@ -1343,6 +1489,9 @@ created: 2026-03-07T10:00:00Z
             Case {
                 name: "with sync_strategy",
                 tmpl: Template {
+                    name: None,
+                    description: None,
+                    wsp_version: None,
                     repos: vec![],
                     config: Some(TemplateConfig {
                         language_integrations: None,
@@ -1356,6 +1505,9 @@ created: 2026-03-07T10:00:00Z
             Case {
                 name: "empty config",
                 tmpl: Template {
+                    name: None,
+                    description: None,
+                    wsp_version: None,
                     repos: vec![],
                     config: Some(TemplateConfig::default()),
                     agent_md: None,
@@ -1442,6 +1594,9 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn remove_repos_ambiguous_shortname() {
         let mut tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![
                 TemplateRepo {
                     url: "git@github.com:team-a/utils.git".into(),
@@ -1460,6 +1615,9 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn remove_repos_non_github_shortname() {
         let mut tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@gitlab.company.com:team/service.git".into(),
             }],
@@ -1583,6 +1741,9 @@ created: 2026-03-07T10:00:00Z
         use std::collections::BTreeMap;
 
         let mut tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
@@ -1659,5 +1820,159 @@ created: 2026-03-07T10:00:00Z
             let result = super::validate_template_config_key(tc.key);
             assert_eq!(result.is_err(), tc.want_err, "case: {}", tc.name);
         }
+    }
+
+    #[test]
+    fn new_fields_backward_compat() {
+        // Old format without name/description/wsp_version should load fine
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("old.yaml"),
+            "repos:\n  - url: git@github.com:acme/api.git\n",
+        )
+        .unwrap();
+
+        let t = load(&dir, "old").unwrap();
+        assert!(t.name.is_none());
+        assert!(t.description.is_none());
+        assert!(t.wsp_version.is_none());
+        assert_eq!(t.repos.len(), 1);
+    }
+
+    #[test]
+    fn new_fields_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        let t = Template {
+            name: Some("dash".into()),
+            description: Some("Data science stack".into()),
+            wsp_version: Some("0.8.0".into()),
+            repos: vec![TemplateRepo {
+                url: "git@github.com:acme/api.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        save(&dir, "dash", &t).unwrap();
+
+        let loaded = load(&dir, "dash").unwrap();
+        assert_eq!(loaded.name.as_deref(), Some("dash"));
+        assert_eq!(loaded.description.as_deref(), Some("Data science stack"));
+        assert_eq!(loaded.wsp_version.as_deref(), Some("0.8.0"));
+    }
+
+    #[test]
+    fn new_fields_omitted_when_none() {
+        let t = sample_template();
+        let yaml = to_yaml(&t).unwrap();
+        assert!(!yaml.contains("name:"));
+        assert!(!yaml.contains("description:"));
+        assert!(!yaml.contains("wsp_version:"));
+    }
+
+    #[test]
+    fn source_sidecar_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        let source = ImportSource {
+            source_path: "/path/to/dash.wsp.yaml".into(),
+            imported_at: chrono::Utc::now(),
+        };
+        save_source(&dir, "dash", &source).unwrap();
+
+        let loaded = load_source(&dir, "dash").unwrap().unwrap();
+        assert_eq!(loaded.source_path, "/path/to/dash.wsp.yaml");
+    }
+
+    #[test]
+    fn source_sidecar_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_source(tmp.path(), "nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn delete_cleans_up_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        save(&dir, "dash", &sample_template()).unwrap();
+        save_source(
+            &dir,
+            "dash",
+            &ImportSource {
+                source_path: "/path/to/dash.wsp.yaml".into(),
+                imported_at: chrono::Utc::now(),
+            },
+        )
+        .unwrap();
+
+        assert!(exists(&dir, "dash"));
+        assert!(source_path(&dir, "dash").exists());
+
+        delete(&dir, "dash").unwrap();
+        assert!(!exists(&dir, "dash"));
+        assert!(!source_path(&dir, "dash").exists());
+    }
+
+    #[test]
+    fn list_excludes_source_sidecars() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        save(&dir, "dash", &sample_template()).unwrap();
+        save_source(
+            &dir,
+            "dash",
+            &ImportSource {
+                source_path: "/path/to/dash.wsp.yaml".into(),
+                imported_at: chrono::Utc::now(),
+            },
+        )
+        .unwrap();
+
+        let names = list(&dir).unwrap();
+        assert_eq!(names, vec!["dash"]);
+        // Verify the source file exists on disk but isn't listed
+        assert!(source_path(&dir, "dash").exists());
+    }
+
+    #[test]
+    fn derive_name_precedence() {
+        // name field takes priority
+        let t = Template {
+            name: Some("from-yaml".into()),
+            description: None,
+            wsp_version: None,
+            repos: vec![],
+            config: None,
+            agent_md: None,
+        };
+        assert_eq!(
+            derive_name_from_file(Path::new("dash.wsp.yaml"), &t),
+            "from-yaml"
+        );
+
+        // Fallback to filename stem
+        let t2 = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
+            repos: vec![],
+            config: None,
+            agent_md: None,
+        };
+        assert_eq!(
+            derive_name_from_file(Path::new("dash.wsp.yaml"), &t2),
+            "dash"
+        );
+        assert_eq!(
+            derive_name_from_file(Path::new("backend.yaml"), &t2),
+            "backend"
+        );
     }
 }

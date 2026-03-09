@@ -27,6 +27,7 @@ pub fn cmd() -> Command {
         )
         .subcommand_required(true)
         .subcommand(new_cmd())
+        .subcommand(import_cmd())
         .subcommand(list_cmd())
         .subcommand(show_cmd())
         .subcommand(rm_cmd())
@@ -46,6 +47,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     match matches.subcommand() {
         Some(("new", m)) => run_new(m, paths),
+        Some(("import", m)) => run_import(m, paths),
         Some(("ls", m)) => run_list(m, paths),
         Some(("show", m)) => run_show(m, paths),
         Some(("rm", m)) => run_rm(m, paths),
@@ -80,11 +82,110 @@ fn new_cmd() -> Command {
                 .help("Create from a template file (.yaml)")
                 .value_hint(clap::ValueHint::FilePath),
         )
+        .arg(
+            Arg::new("description")
+                .short('d')
+                .long("description")
+                .help("Human-readable description of the template"),
+        )
         .group(
             clap::ArgGroup::new("source")
                 .args(["repos", "from-workspace", "file"])
                 .required(true),
         )
+}
+
+fn import_cmd() -> Command {
+    Command::new("import")
+        .about("Import a template from a .wsp.yaml file")
+        .long_about(
+            "Import a template from a .wsp.yaml file.\n\n\
+             Saves the template to the local template store so it can be used with \
+             `wsp new -t <name>`. The template name is derived from --name, the file's \
+             `name` field, or the filename stem, in that order.",
+        )
+        .arg(
+            Arg::new("file")
+                .required(true)
+                .help("Path to a .wsp.yaml or template file")
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            Arg::new("name")
+                .long("name")
+                .help("Override the template name"),
+        )
+        .arg(
+            Arg::new("update")
+                .long("update")
+                .action(clap::ArgAction::SetTrue)
+                .help("Re-import (overwrite if source path matches)"),
+        )
+        .arg(
+            Arg::new("force")
+                .long("force")
+                .action(clap::ArgAction::SetTrue)
+                .help("Overwrite existing template regardless of source"),
+        )
+}
+
+fn run_import(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let file_arg = matches.get_one::<String>("file").unwrap();
+    let name_override = matches.get_one::<String>("name");
+    let update = matches.get_flag("update");
+    let force = matches.get_flag("force");
+
+    let file_path = std::path::Path::new(file_arg)
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("cannot resolve path {:?}: {}", file_arg, e))?;
+
+    let template = tmpl::load_from_file(&file_path)?;
+
+    // Derive name: --name flag > YAML name field > filename stem
+    let name = if let Some(n) = name_override {
+        n.clone()
+    } else {
+        tmpl::derive_name_from_file(&file_path, &template)
+    };
+    tmpl::validate_name(&name)?;
+
+    let source_str = file_path.to_string_lossy().to_string();
+
+    // Check for conflicts
+    if tmpl::exists(&paths.templates_dir, &name) && !update && !force {
+        anyhow::bail!(
+            "template {:?} already exists (use --update to replace, or --name for a different name)",
+            name
+        );
+    }
+
+    if update
+        && !force
+        && tmpl::exists(&paths.templates_dir, &name)
+        && let Ok(Some(existing_source)) = tmpl::load_source(&paths.templates_dir, &name)
+        && existing_source.source_path != source_str
+    {
+        anyhow::bail!(
+            "template {:?} was imported from a different source (use --force to overwrite)",
+            name
+        );
+    }
+
+    tmpl::save(&paths.templates_dir, &name, &template)?;
+    tmpl::save_source(
+        &paths.templates_dir,
+        &name,
+        &tmpl::ImportSource {
+            source_path: source_str,
+            imported_at: chrono::Utc::now(),
+        },
+    )?;
+
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Imported template {:?} ({} repos)",
+        name,
+        template.repos.len()
+    ))))
 }
 
 fn list_cmd() -> Command {
@@ -134,12 +235,13 @@ fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
     let from_workspace = matches.get_one::<String>("from-workspace");
     let from_file = matches.get_one::<String>("file");
+    let description = matches.get_one::<String>("description").cloned();
 
     if tmpl::exists(&paths.templates_dir, name) {
         anyhow::bail!("template {:?} already exists", name);
     }
 
-    let template = if let Some(ws_name) = from_workspace {
+    let mut template = if let Some(ws_name) = from_workspace {
         tmpl::from_workspace(paths, ws_name)?
     } else if let Some(file_path) = from_file {
         tmpl::load_from_file(std::path::Path::new(file_path))?
@@ -157,6 +259,9 @@ fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
 
         tmpl::Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: repo_urls
                 .into_iter()
                 .map(|url| tmpl::TemplateRepo { url })
@@ -165,6 +270,10 @@ fn run_new(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             agent_md: None,
         }
     };
+
+    if description.is_some() {
+        template.description = description;
+    }
 
     template.print_customizations();
 
@@ -235,7 +344,12 @@ fn run_export(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let name = matches.get_one::<String>("name").unwrap();
     let to_stdout = matches.get_flag("stdout");
 
-    let t = tmpl::load(&paths.templates_dir, name)?;
+    let mut t = tmpl::load(&paths.templates_dir, name)?;
+
+    // Populate name field in exported file so importers get a default name
+    if t.name.is_none() {
+        t.name = Some(name.clone());
+    }
 
     // Report what's being exported
     if !to_stdout {

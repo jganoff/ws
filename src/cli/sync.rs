@@ -8,6 +8,7 @@ use clap_complete::engine::ArgValueCandidates;
 
 use super::completers;
 use crate::config::{self, Paths};
+use crate::discovery;
 use crate::gc;
 use crate::git::{self, SyncAction};
 use crate::giturl;
@@ -46,6 +47,12 @@ pub fn cmd() -> Command {
                 .long("abort")
                 .action(ArgAction::SetTrue)
                 .help("Abort in-progress rebase/merge across all repos"),
+        )
+        .arg(
+            Arg::new("no-discover")
+                .long("no-discover")
+                .action(ArgAction::SetTrue)
+                .help("Skip template discovery after sync"),
         )
 }
 
@@ -241,6 +248,22 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     });
                 }
             }
+        }
+    }
+
+    // Template discovery: scan repos after sync for new/changed .wsp.yaml files
+    if !dry_run && !matches.get_flag("no-discover") {
+        let mut all_discovered = Vec::new();
+        for info in &repo_infos {
+            if info.error.is_some() {
+                continue;
+            }
+            let discovered =
+                discovery::scan_repo_dir(&info.clone_dir, &info.identity, &paths.templates_dir);
+            all_discovered.extend(discovered);
+        }
+        if let Err(e) = discovery::prompt_and_import(&all_discovered, &paths.templates_dir) {
+            eprintln!("warning: template discovery failed: {}", e);
         }
     }
 

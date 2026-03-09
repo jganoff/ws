@@ -7,6 +7,7 @@ use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::{self, Paths};
+use crate::discovery;
 use crate::git;
 use crate::giturl;
 use crate::group;
@@ -78,6 +79,12 @@ pub fn cmd() -> Command {
                 .long("description")
                 .help("Purpose of the workspace"),
         )
+        .arg(
+            Arg::new("no-discover")
+                .long("no-discover")
+                .action(clap::ArgAction::SetTrue)
+                .help("Skip template discovery in cloned repos"),
+        )
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
@@ -106,11 +113,14 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     // Add repos from template (name or file path for backward compat)
     if let Some(source) = template_source {
-        let is_file = matches!(
-            template::classify_source(source),
-            template::TemplateSource::FilePath(_)
-        );
-        let tmpl = match template::classify_source(source) {
+        let classification = template::classify_source(source);
+        let is_file = matches!(&classification, template::TemplateSource::FilePath(_));
+        if is_file {
+            eprintln!(
+                "warning: passing file paths to -t is deprecated; use `wsp template import <file>` first, then -t <name>"
+            );
+        }
+        let tmpl = match classification {
             template::TemplateSource::FilePath(path) => template::load_from_file(&path)?,
             template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
         };
@@ -304,6 +314,24 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         && let Err(e) = crate::agentmd::update(&ws_dir, meta)
     {
         eprintln!("warning: AGENTS.md generation failed: {}", e);
+    }
+
+    // Template discovery: scan cloned repos for .wsp.yaml files
+    let no_discover = matches.get_flag("no-discover");
+    if !no_discover && let Ok(ref meta) = meta_result {
+        let repo_infos = meta.repo_infos(&ws_dir);
+        let mut all_discovered = Vec::new();
+        for info in &repo_infos {
+            if info.error.is_some() {
+                continue;
+            }
+            let discovered =
+                discovery::scan_repo_dir(&info.clone_dir, &info.identity, &paths.templates_dir);
+            all_discovered.extend(discovered);
+        }
+        if let Err(e) = discovery::prompt_and_import(&all_discovered, &paths.templates_dir) {
+            eprintln!("warning: template discovery failed: {}", e);
+        }
     }
 
     let duration_ms = start.elapsed().as_millis() as u64;

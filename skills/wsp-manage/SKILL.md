@@ -15,7 +15,7 @@ Use `wsp` to manage workspaces that span multiple git repositories. Each workspa
 ### Registry (global repo registry)
 
 ```bash
-wsp registry add [<url>] [--from <from>] [--pattern <pattern>] [--all] [--https] # Register and bare-clone a repository
+wsp registry add [<url>] [--from <from>] [--pattern <pattern>] [--all] [--https] [--no-discover] # Register and bare-clone a repository
 wsp registry ls                                 # List registered repositories [read-only] (alias: list)
 wsp registry rm <name>                          # Remove a repository and its mirror (alias: remove)
 ```
@@ -33,7 +33,8 @@ wsp group update <name> [--add <add>]... [--remove <remove>]... # Add or remove 
 ### Templates (shareable workspace definitions)
 
 ```bash
-wsp template new <name> [<repos>]... [-w <from-workspace>] [-f <file>] # Create a new template
+wsp template new <name> [<repos>]... [-w <from-workspace>] [-f <file>] [-d <description>] # Create a new template
+wsp template import <file> [--name <name>] [--update] [--force] # Import a template from a .wsp.yaml file
 wsp template ls                                 # List all templates [read-only] (alias: list)
 wsp template show <name>                        # Show template contents [read-only]
 wsp template rm <name>                          # Remove a template (alias: remove)
@@ -46,18 +47,18 @@ wsp template agent-md                           # Manage template AGENTS.md cont
 ### Workspaces
 
 ```bash
-wsp new <workspace> [<repos>]... [-t <template>] [-w <from-workspace>] [-f <file>] [-g <group>] [--no-fetch] [-d <description>] # Create a new workspace
+wsp new <workspace> [<repos>]... [-t <template>] [-w <from-workspace>] [-f <file>] [-g <group>] [--no-fetch] [-d <description>] [--no-discover] # Create a new workspace
 wsp ls [-t] [-U] [-r]                           # List active workspaces [read-only] (alias: list)
 wsp st [<workspace>] [-v]                       # Git status across workspace repos [read-only] (alias: status)
 wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
 wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo [read-only]
-wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] [--abort] # Fetch and rebase/merge all workspace repos
+wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] [--abort] [--no-discover] # Fetch and rebase/merge all workspace repos
 wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
 wsp cd <workspace>                              # Change directory into a workspace
 wsp rm [<workspace>] [-f] [--permanent]         # Remove a workspace (alias: remove)
 wsp recover [<workspace>]                       # List or restore recently removed workspaces [read-only without args]
 wsp rename <old> <new>                          # Rename a workspace, its directory, and git branches
-wsp repo add [<repos>]... [-t <template>] [-g <group>] # Add repos to current workspace
+wsp repo add [<repos>]... [-t <template>] [-g <group>] [--no-discover] # Add repos to current workspace
 wsp repo rm <repos>... [-f]                     # Remove repo(s) from the current workspace (alias: remove)
 wsp repo fetch [--all] [--prune]                # Fetch updates for workspace repos
 wsp repo ls                                     # List repos in the current workspace [read-only] (alias: list)

@@ -289,6 +289,9 @@ mod tests {
 
         // Create initial template
         let tmpl = Template {
+            name: None,
+            description: None,
+            wsp_version: None,
             repos: vec![template::TemplateRepo {
                 url: "git@github.com:acme/api.git".into(),
             }],
