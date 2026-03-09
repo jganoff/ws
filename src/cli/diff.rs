@@ -3,12 +3,15 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
+use clap_complete::engine::ArgValueCandidates;
 
 use crate::config::Paths;
 use crate::gc;
 use crate::git;
 use crate::output::{DiffOutput, Output, RepoDiffEntry};
 use crate::workspace;
+
+use super::completers;
 
 pub fn cmd() -> Command {
     Command::new("diff")
@@ -18,7 +21,7 @@ pub fn cmd() -> Command {
              Runs `git diff` in each repo and aggregates the output. Extra arguments after \
              `--` are forwarded to git diff (e.g., `wsp diff -- --staged`).",
         )
-        .arg(Arg::new("workspace"))
+        .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("args")
                 .num_args(1..)

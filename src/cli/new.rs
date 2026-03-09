@@ -239,7 +239,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                         let progress = &progress;
                         s.spawn(move || {
                             let result = git::fetch(mirror_dir, true);
-                            let _lock = progress.lock().unwrap();
+                            let _lock = progress.lock().unwrap_or_else(|e| e.into_inner());
                             match &result {
                                 Ok(()) => eprintln!("  ok    {}", id),
                                 Err(e) => eprintln!("  FAIL  {} ({})", id, e),

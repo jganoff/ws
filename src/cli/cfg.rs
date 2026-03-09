@@ -103,7 +103,7 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             .as_ref()
             .and_then(|m| m.get(name.as_str()))
             .copied()
-            .unwrap_or(true);
+            .unwrap_or(false);
         entries.push(ConfigListEntry {
             key: format!("language-integrations.{}", name),
             value: enabled.to_string(),
@@ -145,7 +145,7 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 .as_ref()
                 .and_then(|m| m.get(lang))
                 .copied()
-                .unwrap_or(true);
+                .unwrap_or(false);
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
                 value: Some(enabled.to_string()),
@@ -315,7 +315,7 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Ok(())
             })?;
-            format!("language-integrations.{} unset (default: true)", lang)
+            format!("language-integrations.{} unset (default: false)", lang)
         }
         k if k.starts_with("git_config.") => {
             let git_key = k["git_config.".len()..].to_string();

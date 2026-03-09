@@ -1,10 +1,11 @@
-use std::io::{BufRead, IsTerminal};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use crate::git;
 use crate::template;
+use crate::util::read_stdin_line;
 
 /// Describes a template file found in a repo directory or bare mirror.
 #[derive(Debug, Clone)]
@@ -349,13 +350,6 @@ fn do_import(dt: &DiscoveredTemplate, templates_dir: &Path) -> Result<()> {
 
     eprintln!("  imported template {:?}", dt.name);
     Ok(())
-}
-
-fn read_stdin_line() -> String {
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    let _ = stdin.lock().read_line(&mut line);
-    line
 }
 
 #[cfg(test)]

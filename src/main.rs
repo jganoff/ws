@@ -13,6 +13,7 @@ mod lang;
 mod mirror;
 mod output;
 mod template;
+mod util;
 mod workspace;
 
 #[cfg(test)]

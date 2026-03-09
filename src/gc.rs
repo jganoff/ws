@@ -48,9 +48,13 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     fs::create_dir_all(dest)?;
     for item in fs::read_dir(src)? {
         let item = item?;
+        let ft = item.file_type()?;
         let src_path = item.path();
         let dest_path = dest.join(item.file_name());
-        if src_path.is_dir() {
+        if ft.is_symlink() {
+            let target = fs::read_link(&src_path)?;
+            std::os::unix::fs::symlink(&target, &dest_path)?;
+        } else if ft.is_dir() {
             copy_dir_recursive(&src_path, &dest_path)?;
         } else {
             fs::copy(&src_path, &dest_path)?;
@@ -513,6 +517,40 @@ mod tests {
         let ws_dir = paths.workspaces_dir.join("normal");
         assert!(check_workspace(&ws_dir, true).is_ok());
         assert!(check_workspace(&ws_dir, false).is_ok());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_preserves_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dest = tmp.path().join("dest");
+        fs::create_dir_all(&src).unwrap();
+
+        // Regular file
+        fs::write(src.join("file.txt"), "hello").unwrap();
+
+        // Relative symlink
+        std::os::unix::fs::symlink("file.txt", src.join("link.txt")).unwrap();
+
+        // Subdirectory with a file
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("sub/nested.txt"), "nested").unwrap();
+
+        copy_dir_recursive(&src, &dest).unwrap();
+
+        // Regular file copied
+        assert_eq!(fs::read_to_string(dest.join("file.txt")).unwrap(), "hello");
+
+        // Symlink preserved (not resolved to regular file)
+        let link_meta = dest.join("link.txt").symlink_metadata().unwrap();
+        assert!(link_meta.file_type().is_symlink());
+        assert_eq!(fs::read_link(dest.join("link.txt")).unwrap().to_str().unwrap(), "file.txt");
+
+        // Subdirectory recursed
+        assert_eq!(
+            fs::read_to_string(dest.join("sub/nested.txt")).unwrap(),
+            "nested"
+        );
     }
 
     /// Backdate all gc entries by the given number of days.

@@ -102,7 +102,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 let shortnames = &shortnames;
                 s.spawn(move || {
                     let result = git::fetch(mirror_dir, prune);
-                    let _lock = progress.lock().unwrap();
+                    let _lock = progress.lock().unwrap_or_else(|e| e.into_inner());
                     let name = shortnames.get(id).map(|s| s.as_str()).unwrap_or(id);
                     match &result {
                         Ok(()) => eprintln!("  ok    {}", name),
@@ -116,7 +116,13 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         repos
             .iter()
             .zip(handles)
-            .map(|((id, _), h)| (id.clone(), h.join().unwrap()))
+            .map(|((id, _), h)| {
+                (
+                    id.clone(),
+                    h.join()
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("thread panicked"))),
+                )
+            })
             .collect()
     });
 
