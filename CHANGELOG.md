@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-03-09
+
+### Features
+
+- Add YAML size cap, git-ref validation, and CreateInnerOpts refactor
+- *(help)* Add `wsp help` command with concept guides
+
+### Bug Fixes
+
+- Tech debt and security cleanup across codebase
+- *(fetch)* Preserve panic message in thread join error
+
 ## [0.9.0] - 2026-03-09
 
 ### Features
