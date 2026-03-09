@@ -53,7 +53,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         let dest_path = dest.join(item.file_name());
         if ft.is_symlink() {
             let target = fs::read_link(&src_path)?;
+            #[cfg(unix)]
             std::os::unix::fs::symlink(&target, &dest_path)?;
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_file(&target, &dest_path)?;
         } else if ft.is_dir() {
             copy_dir_recursive(&src_path, &dest_path)?;
         } else {
@@ -520,6 +523,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_copy_dir_recursive_preserves_symlinks() {
         let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("src");

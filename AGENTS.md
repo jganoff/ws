@@ -110,6 +110,7 @@ The gc dir lives alongside mirrors in the XDG data directory (`~/.local/share/ws
 - **Shell completion scripts** (`src/cli/completion.rs`): User-configurable values (paths, config) embedded in generated shell code must be escaped for the target shell. Single quotes in POSIX shells have no escape mechanism — use `'` → `'\''`. In fish, use `'` → `\'`. Always test with shell metacharacters (`'`, `$`, `` ` ``, newlines) in paths.
 - **Path traversal**: `giturl::validate_component()` guards identity parsing. Any new code that builds filesystem paths from user input must go through similar validation.
 - `#![deny(unsafe_code)]` is enforced at the crate root.
+- **Platform-specific code**: wsp ships on macOS, Linux, and Windows. Never use `std::os::unix` or `std::os::windows` without `#[cfg(unix)]` / `#[cfg(windows)]` guards. See `src/agentmd.rs:218` for the pattern. `just check-cross` type-checks against Windows and Linux targets to catch this locally.
 
 ## Naming
 

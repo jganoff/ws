@@ -31,8 +31,14 @@ test:
 audit:
     cargo audit
 
+# type-check against Windows and Linux to catch platform-specific errors
+check-cross:
+    rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu 2>/dev/null || true
+    cargo check --target x86_64-pc-windows-msvc
+    cargo check --target x86_64-unknown-linux-gnu
+
 # full CI pipeline (mirrors .github/workflows/ci.yml)
-ci: check audit build test
+ci: check check-cross audit build test
     @echo "Checking SKILL.md freshness..."
     @cargo run --release --features codegen -- generate | diff -q - skills/wsp-manage/SKILL.md || (echo "SKILL.md is stale. Run 'just skill' to regenerate." && exit 1)
 
