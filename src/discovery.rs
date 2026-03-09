@@ -358,36 +358,6 @@ fn read_stdin_line() -> String {
     line
 }
 
-// ---------------------------------------------------------------------------
-// JSON output support
-// ---------------------------------------------------------------------------
-
-use serde::Serialize;
-
-#[allow(dead_code)]
-#[derive(Serialize, Clone)]
-pub struct DiscoveredTemplateOutput {
-    pub name: String,
-    pub file_path: String,
-    pub repo_identity: String,
-    pub status: String,
-}
-
-impl From<&DiscoveredTemplate> for DiscoveredTemplateOutput {
-    fn from(dt: &DiscoveredTemplate) -> Self {
-        DiscoveredTemplateOutput {
-            name: dt.name.clone(),
-            file_path: dt.file_path.to_string_lossy().to_string(),
-            repo_identity: dt.repo_identity.clone(),
-            status: match dt.status {
-                DiscoveryStatus::New => "new".to_string(),
-                DiscoveryStatus::Changed => "changed".to_string(),
-                DiscoveryStatus::AlreadyImported => "already_imported".to_string(),
-            },
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
