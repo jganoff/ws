@@ -5,43 +5,44 @@ across multiple repositories, all on the same branch.
 
 ## Quick start
 
-```
+```bash
 brew install jganoff/tap/wsp
 
-wsp registry add git@github.com:acme/api-gateway.git
-wsp registry add git@github.com:acme/user-service.git
+# register repos once (creates local mirrors so future clones are instant)
+wsp registry add https://github.com/docker/compose.git
+wsp registry add https://github.com/docker/buildx.git
 
-wsp new add-billing api-gateway user-service
+# create a workspace
+wsp new fix-build compose buildx
 ```
 
-That's it. You now have `~/dev/workspaces/add-billing/` with both repos cloned
-on the `add-billing` branch. **Inside each repo, it's just git** — commit, push,
-open PRs exactly as you normally would.
-
-`registry add` is a one-time setup per repo — it creates a local mirror so
-future clones are instant.
+That's it. You now have `~/dev/workspaces/fix-build/` with both repos cloned
+on the `fix-build` branch. Jump in with `wsp cd fix-build`.
 
 ## Working in a workspace
 
-```
-wsp cd add-billing                    # jump into the workspace
+```bash
 wsp st                                # status across all repos
 wsp diff                              # diff across all repos
 wsp sync                              # fetch and rebase all repos
-wsp exec add-billing -- make test     # run a command in every repo
-wsp rm add-billing                    # clean up when done
+wsp exec fix-build -- go test ./...   # run a command in every repo
+wsp rm fix-build                      # clean up when done
 ```
 
 Status at a glance:
 
 ```
 $ wsp st
-Workspace: add-billing  Branch: add-billing
+Workspace: fix-build  Branch: fix-build
 
-Repository    Branch        Status
-api-gateway   add-billing   1 ahead, 2 files changed
-user-service  add-billing   clean
+Repository  Branch     Status
+buildx      fix-build  1 ahead, 2 files changed
+compose     fix-build  clean
 ```
+
+When you're ready to ship, it's just git — `git push` and open a PR like you
+normally would. Or ask your agent to do it: "submit a PR for my changes" works
+out of the box since each repo is a standard git clone.
 
 `wsp rm` is safe — it blocks if any repo has uncommitted work or unmerged
 branches (including squash-merged PRs). Removed workspaces are recoverable
@@ -49,7 +50,7 @@ via `wsp recover`.
 
 ## Shell integration
 
-For tab completion and auto-cd after `wsp new`, add to your shell rc:
+Tab completion and auto-cd after `wsp new`:
 
 ```bash
 # zsh
@@ -66,25 +67,25 @@ wsp completion fish | source
 
 Save a set of repos so you don't have to remember them every time:
 
-```
-wsp template new backend api-gateway user-service
-wsp new fix-billing -t backend
+```bash
+wsp template new docker-dev compose buildx
+wsp new my-feature -t docker-dev
 ```
 
-Share templates across machines:
+Share templates by checking them into a repo or passing the file around:
 
-```
-wsp template export backend          # writes backend.wsp.yaml
-wsp template new backend -f backend.wsp.yaml   # import on another machine
+```bash
+wsp template export docker-dev       # writes docker-dev.wsp.yaml
+wsp template import docker-dev.wsp.yaml   # import on another machine
 ```
 
 ## Configuration
 
 Prepend your name to all workspace branches:
 
-```
+```bash
 wsp config set branch-prefix myname
-# wsp new fix-billing → creates branch myname/fix-billing
+# wsp new fix-build → creates branch myname/fix-build
 ```
 
 ## Commands
@@ -116,7 +117,7 @@ wsp config set branch-prefix myname
 |---------|-------------|
 | `wsp repo add/rm/ls/fetch` | Manage repos in current workspace |
 | `wsp registry add/ls/rm` | Manage registered repositories |
-| `wsp template new/ls/show/rm/export` | Manage workspace templates |
+| `wsp template new/import/ls/show/rm/export` | Manage workspace templates |
 | `wsp config ls/get/set/unset` | Manage settings |
 
 All commands support `--json` for scripting and AI agents.
@@ -127,15 +128,15 @@ See [docs/usage.md](docs/usage.md) for the full reference.
 ```
 ~/.local/share/wsp/
   mirrors/
-    github.com/acme/
-      api-gateway.git/       bare mirror (one network clone)
-      user-service.git/      bare mirror
+    github.com/docker/
+      compose.git/           bare mirror (one network clone)
+      buildx.git/            bare mirror
 
 ~/dev/workspaces/
-  add-billing/
+  fix-build/
     .wsp.yaml                workspace metadata
-    api-gateway/             local clone (branch: add-billing)
-    user-service/            local clone (branch: add-billing)
+    compose/                 local clone (branch: fix-build)
+    buildx/                  local clone (branch: fix-build)
 ```
 
 Each repo is registered once as a bare mirror. Workspaces are directories of
