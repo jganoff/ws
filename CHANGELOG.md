@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2026-03-09
+
+### Bug Fixes
+
+- Gate unix symlink code with cfg and add cross-compile CI check
+
 ## [0.9.1] - 2026-03-09
 
 ### Features
