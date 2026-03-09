@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-03-09
+
+### Features
+
+- *(config)* Add git config defaults for workspace clones
+- *(workspace)* Add .wspignore for suppressing root content warnings
+- *(template)* Show customizations when importing external templates
+- *(agentmd)* Add workspace boundary directive to generated AGENTS.md
+- *(template)* Add mutation subcommands for repos, config, and agent-md
+- *(agentmd)* Add multi-repo guidance preamble to generated AGENTS.md
+- *(template)* Add sharing via repo-checked-in files
+
+### Bug Fixes
+
+- *(workspace)* Narrow default wspignore to only .claude/settings.local.json
+- *(filelock)* Add advisory locking for template and rename mutations
+
+### Documentation
+
+- Update file locking convention to include with_template()
+- Streamline README for scannability
+- Update README with Docker examples and copy-pasteable quickstart
+
+### Miscellaneous
+
+- *(discovery)* Remove unused DiscoveredTemplateOutput scaffolding
+
 ## [0.8.0] - 2026-03-08
 
 ### Features
