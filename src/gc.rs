@@ -67,7 +67,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
 /// Returns `Some(GcEntry)` when the workspace has been garbage-collected.
 pub fn load_entry(ws_dir: &Path) -> Option<GcEntry> {
     let meta_path = ws_dir.join(GC_META_FILE);
-    let data = fs::read_to_string(&meta_path).ok()?;
+    let data = crate::util::read_yaml_file(&meta_path).ok()?;
     serde_yaml_ng::from_str(&data).ok()
 }
 
@@ -136,7 +136,7 @@ pub fn list(gc_dir: &Path) -> Result<Vec<GcEntry>> {
             continue;
         }
         let meta_path = path.join(GC_META_FILE);
-        if let Ok(data) = fs::read_to_string(&meta_path)
+        if let Ok(data) = crate::util::read_yaml_file(&meta_path)
             && let Ok(entry) = serde_yaml_ng::from_str::<GcEntry>(&data)
         {
             entries.push(entry);
@@ -196,7 +196,7 @@ pub fn purge(gc_dir: &Path, retention_days: u32) -> Result<u32> {
         }
 
         let meta_path = path.join(GC_META_FILE);
-        let data = match fs::read_to_string(&meta_path) {
+        let data = match crate::util::read_yaml_file(&meta_path) {
             Ok(d) => d,
             Err(_) => continue,
         };
@@ -260,7 +260,7 @@ fn find_entries(gc_dir: &Path, name: &str) -> Result<Vec<(String, GcEntry)>> {
         }
 
         let meta_path = path.join(GC_META_FILE);
-        let data = match fs::read_to_string(&meta_path) {
+        let data = match crate::util::read_yaml_file(&meta_path) {
             Ok(d) => d,
             Err(_) => continue,
         };

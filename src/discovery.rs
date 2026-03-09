@@ -155,7 +155,7 @@ fn determine_status(templates_dir: &Path, name: &str, file_path: &Path) -> Disco
     }
 
     // Compare content
-    let file_content = match std::fs::read_to_string(file_path) {
+    let file_content = match crate::util::read_yaml_file(file_path) {
         Ok(c) => c,
         Err(_) => return DiscoveryStatus::Changed,
     };

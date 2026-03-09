@@ -116,7 +116,7 @@ pub fn validate_name(name: &str) -> Result<()> {
 }
 
 pub fn load_metadata(ws_dir: &Path) -> Result<Metadata> {
-    let data = fs::read_to_string(ws_dir.join(METADATA_FILE))?;
+    let data = crate::util::read_yaml_file(&ws_dir.join(METADATA_FILE))?;
     let m: Metadata = serde_yaml_ng::from_str(&data)?;
     if m.version > CURRENT_METADATA_VERSION {
         eprintln!(
@@ -186,6 +186,13 @@ pub fn create(
 ) -> Result<()> {
     validate_name(name)?;
 
+    let branch = match branch_prefix.filter(|p| !p.is_empty()) {
+        Some(prefix) => format!("{}/{}", prefix, name),
+        None => name.to_string(),
+    };
+
+    git::validate_branch_name(&branch)?;
+
     let ws_dir = dir(&paths.workspaces_dir, name);
     if ws_dir.exists() {
         bail!("workspace {:?} already exists", name);
@@ -193,21 +200,16 @@ pub fn create(
 
     fs::create_dir_all(&ws_dir)?;
 
-    let branch = match branch_prefix.filter(|p| !p.is_empty()) {
-        Some(prefix) => format!("{}/{}", prefix, name),
-        None => name.to_string(),
-    };
-
-    match create_inner(
-        &paths.mirrors_dir,
-        &branch,
-        &ws_dir,
+    match create_inner(&CreateInnerOpts {
+        mirrors_dir: &paths.mirrors_dir,
+        branch: &branch,
+        ws_dir: &ws_dir,
         name,
         repo_refs,
         upstream_urls,
         description,
         created_from,
-    ) {
+    }) {
         Ok(()) => Ok(()),
         Err(e) => {
             // Clean up workspace dir on failure (best-effort)
@@ -217,20 +219,21 @@ pub fn create(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn create_inner(
-    mirrors_dir: &Path,
-    branch: &str,
-    ws_dir: &Path,
-    name: &str,
-    repo_refs: &BTreeMap<String, String>,
-    upstream_urls: &BTreeMap<String, String>,
-    description: Option<&str>,
-    created_from: Option<&str>,
-) -> Result<()> {
+struct CreateInnerOpts<'a> {
+    mirrors_dir: &'a Path,
+    branch: &'a str,
+    ws_dir: &'a Path,
+    name: &'a str,
+    repo_refs: &'a BTreeMap<String, String>,
+    upstream_urls: &'a BTreeMap<String, String>,
+    description: Option<&'a str>,
+    created_from: Option<&'a str>,
+}
+
+fn create_inner(opts: &CreateInnerOpts) -> Result<()> {
     let mut repos: BTreeMap<String, Option<WorkspaceRepoRef>> = BTreeMap::new();
-    for identity in repo_refs.keys() {
-        let url = upstream_urls.get(identity).cloned();
+    for identity in opts.repo_refs.keys() {
+        let url = opts.upstream_urls.get(identity).cloned();
         repos.insert(
             identity.clone(),
             Some(WorkspaceRepoRef {
@@ -240,32 +243,40 @@ fn create_inner(
         );
     }
 
-    let identities: Vec<&str> = repo_refs.keys().map(|s| s.as_str()).collect();
+    let identities: Vec<&str> = opts.repo_refs.keys().map(|s| s.as_str()).collect();
     let dirs = compute_dir_names(&identities)?;
 
     let meta = Metadata {
         version: CURRENT_METADATA_VERSION,
-        name: name.to_string(),
-        branch: branch.to_string(),
+        name: opts.name.to_string(),
+        branch: opts.branch.to_string(),
         repos,
         created: Utc::now(),
-        description: description.map(|s| s.to_string()),
+        description: opts.description.map(|s| s.to_string()),
         last_used: None,
-        created_from: created_from.map(|s| s.to_string()),
+        created_from: opts.created_from.map(|s| s.to_string()),
         dirs: dirs.clone(),
     };
 
-    for identity in repo_refs.keys() {
+    for identity in opts.repo_refs.keys() {
         let dn = meta.dir_name(identity)?;
-        let upstream = upstream_urls
+        let upstream = opts
+            .upstream_urls
             .get(identity)
             .map(|s| s.as_str())
             .unwrap_or("");
-        clone_from_mirror(mirrors_dir, ws_dir, identity, &dn, branch, upstream)
-            .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
+        clone_from_mirror(
+            opts.mirrors_dir,
+            opts.ws_dir,
+            identity,
+            &dn,
+            opts.branch,
+            upstream,
+        )
+        .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
     }
 
-    save_metadata(ws_dir, &meta)?;
+    save_metadata(opts.ws_dir, &meta)?;
     Ok(())
 }
 
@@ -1420,6 +1431,8 @@ pub fn rename(paths: &Paths, old_name: &str, new_name: &str) -> Result<Vec<Renam
         // Branch was manually set or doesn't match the name pattern — just use new_name
         new_name.to_string()
     };
+
+    git::validate_branch_name(&new_branch)?;
 
     let old_branch = meta.branch.clone();
     let mut results = Vec::new();

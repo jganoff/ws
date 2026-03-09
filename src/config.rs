@@ -61,7 +61,7 @@ impl Config {
             return Ok(Config::default());
         }
 
-        let data = fs::read_to_string(path)?;
+        let data = crate::util::read_yaml_file(path)?;
         let cfg: Config = serde_yaml_ng::from_str(&data)?;
         if cfg.version > CURRENT_CONFIG_VERSION {
             eprintln!(

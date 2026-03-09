@@ -15,6 +15,19 @@ fn path_str(p: &Path) -> Result<&str> {
     p.to_str().context("path contains non-UTF8 characters")
 }
 
+/// Validate that a string is a valid git branch name.
+/// Uses `git check-ref-format` with the `--branch` flag so bare names
+/// (without `refs/heads/` prefix) are accepted.
+pub fn validate_branch_name(name: &str) -> Result<()> {
+    let output = Command::new("git")
+        .args(["check-ref-format", "--branch", name])
+        .output()?;
+    if !output.status.success() {
+        bail!("{:?} is not a valid git branch name", name);
+    }
+    Ok(())
+}
+
 pub fn run(dir: Option<&Path>, args: &[&str]) -> Result<String> {
     run_with_env(dir, args, &[])
 }
@@ -1086,5 +1099,29 @@ mod tests {
         // Abort and verify clean state
         abort_in_progress(&clone, &op.unwrap()).unwrap();
         assert!(in_progress_op(&clone).is_none());
+    }
+
+    #[test]
+    fn test_validate_branch_name() {
+        let cases = vec![
+            ("simple", "my-feature", true),
+            ("with slash", "user/feature", true),
+            ("dotted", "fix.bug", true),
+            ("bare dot", ".", false),
+            ("double dot", "..", false),
+            ("leading dot", ".hidden", false),
+            ("space", "bad name", false),
+            ("tilde", "bad~name", false),
+            ("caret", "bad^name", false),
+            ("colon", "bad:name", false),
+            ("at-brace", "bad@{name", false),
+            ("double dot mid", "bad..name", false),
+            ("trailing dot-lock", "bad.lock", false),
+            ("trailing slash", "bad/", false),
+        ];
+        for (label, name, want_ok) in cases {
+            let result = validate_branch_name(name);
+            assert_eq!(result.is_ok(), want_ok, "{}: {:?}", label, result);
+        }
     }
 }
