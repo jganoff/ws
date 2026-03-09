@@ -544,7 +544,13 @@ mod tests {
         // Symlink preserved (not resolved to regular file)
         let link_meta = dest.join("link.txt").symlink_metadata().unwrap();
         assert!(link_meta.file_type().is_symlink());
-        assert_eq!(fs::read_link(dest.join("link.txt")).unwrap().to_str().unwrap(), "file.txt");
+        assert_eq!(
+            fs::read_link(dest.join("link.txt"))
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "file.txt"
+        );
 
         // Subdirectory recursed
         assert_eq!(

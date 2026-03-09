@@ -119,8 +119,14 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             .map(|((id, _), h)| {
                 (
                     id.clone(),
-                    h.join()
-                        .unwrap_or_else(|_| Err(anyhow::anyhow!("thread panicked"))),
+                    h.join().unwrap_or_else(|panic_val| {
+                        let msg = panic_val
+                            .downcast_ref::<&str>()
+                            .map(|s| s.to_string())
+                            .or_else(|| panic_val.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "unknown panic".to_string());
+                        Err(anyhow::anyhow!("thread panicked: {}", msg))
+                    }),
                 )
             })
             .collect()
