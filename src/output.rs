@@ -1018,7 +1018,7 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
     }
 
     if !v.root.is_empty() {
-        eprintln!("\nhint: add paths to .wspignore to suppress");
+        eprintln!("\nhint: suppress with wspignore (see `wsp help wspignore`)");
     }
 
     Ok(())

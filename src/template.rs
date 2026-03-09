@@ -286,7 +286,8 @@ fn validate_agent_md(tmpl: &Template) -> Result<()> {
 /// Accepts both the template format (`repos: [{url: ...}]`) and the
 /// .wsp.yaml metadata format (`repos: {identity: {url: ...}}`).
 pub fn load_from_file(path: &Path) -> Result<Template> {
-    let data = crate::util::read_yaml_file(path)?;
+    let data = crate::util::read_yaml_file(path)
+        .with_context(|| format!("loading template {:?}", path))?;
 
     // Try template format first
     let tmpl_err = match serde_yaml_ng::from_str::<Template>(&data) {
@@ -382,7 +383,8 @@ pub fn load_source(templates_dir: &Path, name: &str) -> Result<Option<ImportSour
     if !path.exists() {
         return Ok(None);
     }
-    let data = crate::util::read_yaml_file(&path)?;
+    let data = crate::util::read_yaml_file(&path)
+        .with_context(|| format!("loading source metadata for {:?}", name))?;
     let source: ImportSource = serde_yaml_ng::from_str(&data).context("parsing source metadata")?;
     Ok(Some(source))
 }

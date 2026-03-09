@@ -49,6 +49,15 @@ mod tests {
     }
 
     #[test]
+    fn test_read_yaml_file_accepts_exactly_max() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let exact = vec![b'x'; MAX_YAML_BYTES as usize];
+        std::fs::write(tmp.path(), &exact).unwrap();
+        let content = read_yaml_file(tmp.path()).unwrap();
+        assert_eq!(content.len(), MAX_YAML_BYTES as usize);
+    }
+
+    #[test]
     fn test_read_yaml_file_missing() {
         let result = read_yaml_file(Path::new("/nonexistent/file.yaml"));
         assert!(result.is_err());

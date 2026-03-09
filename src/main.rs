@@ -34,9 +34,21 @@ fn main() {
         i.store(true, Ordering::SeqCst);
     });
 
-    let app = cli::build_cli();
-    let matches = app.get_matches();
+    let mut app = cli::build_cli();
+    let matches = app.get_matches_mut();
     let json = matches.get_flag("json");
+
+    // Handle `wsp help [topic]` before general dispatch — it needs
+    // the Command definition to print subcommand help.
+    if let Some(("help", m)) = matches.subcommand() {
+        match cli::help::run(m, &mut app, json) {
+            Ok(_) => process::exit(0),
+            Err(err) => {
+                render_error(err, json);
+                process::exit(1);
+            }
+        }
+    }
 
     let paths = match config::Paths::resolve() {
         Ok(p) => p,

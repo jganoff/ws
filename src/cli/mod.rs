@@ -9,6 +9,7 @@ pub mod diff;
 pub mod exec;
 pub mod fetch;
 pub mod group;
+pub mod help;
 pub mod list;
 pub mod log;
 pub mod new;
@@ -41,7 +42,14 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     ("Workflow", &["st", "diff", "log", "sync", "exec"]),
     (
         "Admin",
-        &["registry", "group", "template", "config", "completion"],
+        &[
+            "registry",
+            "group",
+            "template",
+            "config",
+            "completion",
+            "help",
+        ],
     ),
 ];
 
@@ -79,6 +87,7 @@ pub fn build_cli() -> Command {
 
     #[allow(unused_mut)]
     let mut cli = Command::new("wsp")
+        .disable_help_subcommand(true)
         .about("Multi-repo workspace manager")
         .long_about(
             "Multi-repo workspace manager.\n\n\
@@ -118,6 +127,8 @@ pub fn build_cli() -> Command {
         .subcommand(template::cmd())
         .subcommand(cfg::cmd())
         .subcommand(completion::cmd())
+        // Help with topic support
+        .subcommand(help::cmd())
         // Hidden backward-compat
         .subcommand(setup);
 
