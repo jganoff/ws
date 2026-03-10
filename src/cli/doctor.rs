@@ -239,6 +239,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     // G8. Template repos registered (have mirrors)
     check_template_repos_registered(paths, &cfg, &mut checks);
 
+    // G10. Global wspignore defaults
+    check_wspignore_defaults(paths, fix, &mut checks, &mut fixed);
+
     // --- Workspace checks (if inside one) ---
     let cwd = std::env::current_dir()?;
     if let Ok(ws_dir) = workspace::detect(&cwd) {
@@ -266,9 +269,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
         // W6. Orphaned clone dirs — directories in workspace root not in metadata
         check_orphaned_clone_dirs(&ws_dir, &meta, paths, &ws_scope, &mut checks);
-
-        // W10. Global wspignore defaults
-        check_wspignore_defaults(paths, &ws_scope, fix, &mut checks, &mut fixed);
 
         // W11. go.work validity
         check_go_work_valid(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
@@ -1579,7 +1579,12 @@ fn check_missing_dirs_map(
         }
     }
 
-    if missing.is_empty() && extra.is_empty() {
+    // Check for value mismatches (same keys, different dir names)
+    let value_mismatch = missing.is_empty()
+        && extra.is_empty()
+        && expected.iter().any(|(k, v)| meta.dirs.get(k) != Some(v));
+
+    if missing.is_empty() && extra.is_empty() && !value_mismatch {
         return;
     }
 
@@ -1616,8 +1621,10 @@ fn check_missing_dirs_map(
     } else {
         let detail = if !missing.is_empty() {
             format!("missing collision entries for: {}", missing.join(", "))
-        } else {
+        } else if !extra.is_empty() {
             format!("extra dirs entries for: {}", extra.join(", "))
+        } else {
+            "dirs map has incorrect directory name mappings".into()
         };
         checks.push(DoctorCheck {
             scope: ws_scope.into(),
@@ -1682,10 +1689,9 @@ fn check_orphaned_clone_dirs(
     }
 }
 
-/// W10. Global wspignore defaults — check for expected default patterns.
+/// G10. Global wspignore defaults — check for expected default patterns.
 fn check_wspignore_defaults(
     paths: &Paths,
-    ws_scope: &str,
     fix: bool,
     checks: &mut Vec<DoctorCheck>,
     fixed: &mut usize,
@@ -1702,6 +1708,8 @@ fn check_wspignore_defaults(
     };
 
     // Check that each non-comment, non-empty line from DEFAULT_WSPIGNORE is present
+    // Uses line-based matching to avoid substring false positives
+    let content_lines: Vec<&str> = content.lines().map(|l| l.trim()).collect();
     let expected: Vec<&str> = workspace::DEFAULT_WSPIGNORE
         .lines()
         .filter(|l| {
@@ -1710,11 +1718,14 @@ fn check_wspignore_defaults(
         })
         .collect();
 
-    let missing: Vec<&&str> = expected.iter().filter(|p| !content.contains(**p)).collect();
+    let missing: Vec<&&str> = expected
+        .iter()
+        .filter(|p| !content_lines.contains(&p.trim()))
+        .collect();
 
     if missing.is_empty() {
         checks.push(DoctorCheck {
-            scope: ws_scope.into(),
+            scope: "global".into(),
             check: "wspignore-defaults".into(),
             status: CheckStatus::Ok,
             message: "global wspignore has all default patterns".into(),
@@ -1740,7 +1751,7 @@ fn check_wspignore_defaults(
                     use std::io::Write;
                     if f.write_all(append.as_bytes()).is_ok() {
                         checks.push(DoctorCheck {
-                            scope: ws_scope.into(),
+                            scope: "global".into(),
                             check: "wspignore-defaults".into(),
                             status: CheckStatus::Ok,
                             message: format!(
@@ -1757,7 +1768,7 @@ fn check_wspignore_defaults(
                         *fixed += 1;
                     } else {
                         checks.push(DoctorCheck {
-                            scope: ws_scope.into(),
+                            scope: "global".into(),
                             check: "wspignore-defaults".into(),
                             status: CheckStatus::Warn,
                             message: "wspignore missing defaults, write failed".into(),
@@ -1769,7 +1780,7 @@ fn check_wspignore_defaults(
                 }
                 Err(_) => {
                     checks.push(DoctorCheck {
-                        scope: ws_scope.into(),
+                        scope: "global".into(),
                         check: "wspignore-defaults".into(),
                         status: CheckStatus::Warn,
                         message: "wspignore missing defaults, could not open file".into(),
@@ -1782,7 +1793,7 @@ fn check_wspignore_defaults(
         } else {
             let missing_strs: Vec<&str> = missing.iter().map(|s| **s).collect();
             checks.push(DoctorCheck {
-                scope: ws_scope.into(),
+                scope: "global".into(),
                 check: "wspignore-defaults".into(),
                 status: CheckStatus::Warn,
                 message: format!(
@@ -3676,6 +3687,53 @@ mod tests {
         assert!(reloaded.dirs.contains_key("github.com/org2/shared"));
     }
 
+    #[test]
+    fn missing_dirs_map_value_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        // Two repos with same short name → collision. dirs has right keys but wrong values.
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/branch".into(),
+            repos: std::collections::BTreeMap::from([
+                ("github.com/org1/shared".into(), None),
+                ("github.com/org2/shared".into(), None),
+            ]),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::from([
+                ("github.com/org1/shared".into(), "wrong-name-1".into()),
+                ("github.com/org2/shared".into(), "wrong-name-2".into()),
+            ]),
+        };
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_missing_dirs_map(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "missing-dirs-map");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(
+            checks[0]
+                .message
+                .contains("incorrect directory name mappings"),
+            "expected value mismatch message, got: {}",
+            checks[0].message
+        );
+    }
+
     // -----------------------------------------------------------------------
     // W6. orphaned-clone-dirs
     // -----------------------------------------------------------------------
@@ -3739,7 +3797,7 @@ mod tests {
 
         let mut checks = Vec::new();
         let mut fixed = 0;
-        check_wspignore_defaults(&paths, "workspace/test", false, &mut checks, &mut fixed);
+        check_wspignore_defaults(&paths, false, &mut checks, &mut fixed);
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].check, "wspignore-defaults");
@@ -3755,7 +3813,7 @@ mod tests {
 
         let mut checks = Vec::new();
         let mut fixed = 0;
-        check_wspignore_defaults(&paths, "workspace/test", false, &mut checks, &mut fixed);
+        check_wspignore_defaults(&paths, false, &mut checks, &mut fixed);
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Warn);
@@ -3771,7 +3829,7 @@ mod tests {
 
         let mut checks = Vec::new();
         let mut fixed = 0;
-        check_wspignore_defaults(&paths, "workspace/test", true, &mut checks, &mut fixed);
+        check_wspignore_defaults(&paths, true, &mut checks, &mut fixed);
 
         assert_eq!(fixed, 1);
         assert_eq!(checks[0].status, CheckStatus::Ok);
