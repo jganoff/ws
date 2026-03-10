@@ -14,7 +14,7 @@ use crate::giturl;
 use crate::mirror;
 use crate::util::read_stdin_line;
 
-const CURRENT_METADATA_VERSION: u32 = 0;
+pub const CURRENT_METADATA_VERSION: u32 = 0;
 
 fn default_version() -> u32 {
     CURRENT_METADATA_VERSION

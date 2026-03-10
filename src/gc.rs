@@ -14,7 +14,7 @@ fn is_cross_device(e: &std::io::Error) -> bool {
 }
 
 const GC_META_FILE: &str = ".wsp-gc.yaml";
-const DEFAULT_RETENTION_DAYS: u32 = 7;
+pub const DEFAULT_RETENTION_DAYS: u32 = 7;
 const GC_COOLDOWN_SECS: u64 = 3600; // 1 hour between auto-gc runs
 
 /// Metadata stored inside each gc'd workspace directory.

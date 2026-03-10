@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-const CURRENT_CONFIG_VERSION: u32 = 0;
+pub const CURRENT_CONFIG_VERSION: u32 = 0;
 
 fn default_version() -> u32 {
     CURRENT_CONFIG_VERSION
