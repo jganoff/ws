@@ -715,6 +715,7 @@ pub enum Output {
     Import(ImportOutput),
     RecoverList(RecoverListOutput),
     Path(PathOutput),
+    Doctor(crate::cli::doctor::DoctorOutput),
     None,
 }
 
@@ -744,6 +745,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::Import(v) => print_json(&v),
             Output::RecoverList(v) => print_json(&v),
             Output::Path(v) => print_json(&v),
+            Output::Doctor(v) => print_json(&v),
         };
     }
     match output {
@@ -766,6 +768,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::Import(v) => render_import_text(v),
         Output::RecoverList(v) => render_recover_list_text(v),
         Output::Path(v) => render_path_text(v),
+        Output::Doctor(_) => Ok(()), // text output handled inline during run
     }
 }
 
@@ -777,6 +780,7 @@ pub fn exit_code(output: &Output) -> i32 {
         Output::Sync(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::SyncAbort(v) if v.repos.iter().any(|r| !r.ok) => 1,
         Output::Import(v) if !v.failed.is_empty() => 1,
+        Output::Doctor(v) => crate::cli::doctor::exit_code(v),
         _ => 0,
     }
 }

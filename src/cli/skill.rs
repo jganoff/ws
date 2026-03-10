@@ -70,6 +70,13 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     write_subcommand_section(&cli, &mut out, "config", &["wsp", "config"]);
     out.push_str("```\n\n");
 
+    // Doctor — top-level (no subcommands, just write the command itself)
+    out.push_str("### Diagnostics\n\n```bash\n");
+    if let Some(sub) = cli.find_subcommand("doctor") {
+        write_cmd_line(&mut out, &["wsp"], sub);
+    }
+    out.push_str("```\n\n");
+
     // --- JSON Output Schemas ---
     out.push_str("## JSON Output Schemas\n\n");
 
@@ -93,6 +100,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     );
     write_schema::<ImportOutput>(&mut out, "wsp registry add --from <org> --all --json");
     write_schema::<RecoverListOutput>(&mut out, "wsp recover --json");
+    write_schema::<super::doctor::DoctorOutput>(&mut out, "wsp doctor --json");
     write_schema::<ErrorOutput>(&mut out, "Errors");
 
     // --- Static reference sections ---
@@ -135,6 +143,7 @@ impl_sample!(
     crate::output::MutationOutput,
     crate::output::ImportOutput,
     crate::output::RecoverListOutput,
+    crate::cli::doctor::DoctorOutput,
     crate::output::ErrorOutput,
 );
 

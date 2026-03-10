@@ -64,6 +64,12 @@ wsp config set <key> <value>                    # Set a config value
 wsp config unset <key>                          # Unset a config value
 ```
 
+### Diagnostics
+
+```bash
+wsp doctor [--fix]                              # Check workspace and global state for problems
+```
+
 ## JSON Output Schemas
 
 ### `wsp registry ls --json`
@@ -321,6 +327,39 @@ wsp config unset <key>                          # Unset a config value
       "original_path": "~/dev/workspaces/my-feature"
     }
   ]
+}
+```
+
+### `wsp doctor --json`
+```json
+{
+  "ok": false,
+  "checks": [
+    {
+      "scope": "global",
+      "check": "config-parseable",
+      "status": "ok",
+      "message": "config is valid (5 registered repos)"
+    },
+    {
+      "scope": "workspace/my-feature/bar",
+      "check": "origin-url-match",
+      "status": "warn",
+      "message": "bar: origin URL differs from registered URL",
+      "fixable": true,
+      "details": {
+        "clone_url": "git@github.com:acme/bar.git",
+        "registered_url": "https://github.com/acme/bar"
+      }
+    }
+  ],
+  "summary": {
+    "total": 8,
+    "ok": 7,
+    "warn": 1,
+    "error": 0,
+    "fixed": 0
+  }
 }
 ```
 

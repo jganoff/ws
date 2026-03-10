@@ -6,6 +6,7 @@ pub mod completion;
 pub mod delete;
 pub mod describe;
 pub mod diff;
+pub mod doctor;
 pub mod exec;
 pub mod fetch;
 pub mod help;
@@ -41,7 +42,14 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     ("Workflow", &["st", "diff", "log", "sync", "exec"]),
     (
         "Admin",
-        &["registry", "template", "config", "completion", "help"],
+        &[
+            "registry",
+            "template",
+            "config",
+            "doctor",
+            "completion",
+            "help",
+        ],
     ),
 ];
 
@@ -116,6 +124,7 @@ pub fn build_cli() -> Command {
         .subcommand(registry::cmd())
         .subcommand(template::cmd())
         .subcommand(cfg::cmd())
+        .subcommand(doctor::cmd())
         .subcommand(completion::cmd())
         // Help with topic support
         .subcommand(help::cmd())
@@ -197,6 +206,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("registry", sub)) => registry::dispatch(sub, paths),
         Some(("template", sub)) => template::dispatch(sub, paths),
         Some(("config", sub)) => cfg::dispatch(sub, paths),
+        Some(("doctor", m)) => doctor::run(m, paths),
         Some(("completion", m)) => completion::run(m, paths),
 
         // --- Dev-only codegen ---
