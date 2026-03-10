@@ -211,6 +211,11 @@ pub fn checkout_new_branch(dir: &Path, branch: &str, start_point: &str) -> Resul
     Ok(())
 }
 
+pub fn checkout_orphan(dir: &Path, branch: &str) -> Result<()> {
+    run(Some(dir), &["checkout", "--orphan", branch])?;
+    Ok(())
+}
+
 pub fn branch_rename(dir: &Path, old: &str, new: &str) -> Result<()> {
     run(Some(dir), &["branch", "-m", old, new])?;
     Ok(())

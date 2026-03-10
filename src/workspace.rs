@@ -1613,10 +1613,16 @@ fn clone_from_mirror(
     // No upstream tracking — the workspace branch differs from the default
     // branch, so tracking origin/<default> would cause a bare `git push` to
     // target the wrong branch. Devs set tracking explicitly via `git push -u`.
-    let default_branch = mirror_default_br
-        .ok_or_else(|| anyhow::anyhow!("cannot detect default branch from mirror"))?;
-    let start_point = format!("origin/{}", default_branch);
-    git::checkout_new_branch(&dest, branch, &start_point)?;
+    match mirror_default_br {
+        Some(default_br) => {
+            let start_point = format!("origin/{}", default_br);
+            git::checkout_new_branch(&dest, branch, &start_point)?;
+        }
+        None => {
+            // Empty repo — no branches exist yet. Create an orphan branch.
+            git::checkout_orphan(&dest, branch)?;
+        }
+    }
 
     Ok(())
 }
@@ -1865,6 +1871,57 @@ mod tests {
         let meta = load_metadata(&ws_dir).unwrap();
 
         assert_eq!(meta.branch, "empty-prefix");
+    }
+
+    #[test]
+    fn test_create_with_empty_repo() {
+        // An empty repo has no commits or branches. wsp should handle this
+        // by creating an orphan branch instead of branching off origin/main.
+        let tmp_data = tempfile::tempdir().unwrap();
+        let tmp_home = tempfile::tempdir().unwrap();
+        let data_dir = tmp_data.path().join("wsp");
+        let workspaces_dir = tmp_home.path().join("dev").join("workspaces");
+        fs::create_dir_all(&workspaces_dir).unwrap();
+        let paths = Paths::from_dirs(&data_dir, &workspaces_dir);
+
+        // Create an empty bare repo (git init --bare — no commits)
+        let parsed = giturl::Parsed {
+            host: "test.local".into(),
+            owner: "user".into(),
+            repo: "empty-repo".into(),
+        };
+        let mirror_dir = mirror::dir(&paths.mirrors_dir, &parsed);
+        fs::create_dir_all(&mirror_dir).unwrap();
+        let output = Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(&mirror_dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        let identity = parsed.identity();
+        let refs = BTreeMap::from([(identity.clone(), String::new())]);
+        let upstream_urls = BTreeMap::from([(identity.clone(), String::new())]);
+
+        create(
+            &paths,
+            "empty-ws",
+            &refs,
+            Some("jganoff"),
+            &upstream_urls,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let ws_dir = dir(&paths.workspaces_dir, "empty-ws");
+        let meta = load_metadata(&ws_dir).unwrap();
+        assert_eq!(meta.branch, "jganoff/empty-ws");
+
+        // The clone should exist and be on the orphan branch
+        let clone_dir = ws_dir.join(meta.dir_name(&identity).unwrap());
+        let head = git::run(Some(&clone_dir), &["symbolic-ref", "--short", "HEAD"]).unwrap();
+        assert_eq!(head, "jganoff/empty-ws");
     }
 
     #[test]
