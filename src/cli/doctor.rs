@@ -150,38 +150,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let cfg = cfg_result.unwrap();
 
     // G2. Config version skew
-    if cfg.version > config::CURRENT_CONFIG_VERSION {
-        checks.push(DoctorCheck {
-            scope: "global".into(),
-            check: "config-version".into(),
-            status: CheckStatus::Warn,
-            message: format!(
-                "config version {} is newer than supported version {}",
-                cfg.version,
-                config::CURRENT_CONFIG_VERSION
-            ),
-            fixable: false,
-            details: Some(serde_json::json!({
-                "config_version": cfg.version,
-                "supported_version": config::CURRENT_CONFIG_VERSION,
-            })),
-        });
-        eprintln!(
-            "  ⚠ config version {} is newer than supported version {}",
-            cfg.version,
-            config::CURRENT_CONFIG_VERSION
-        );
-    } else {
-        checks.push(DoctorCheck {
-            scope: "global".into(),
-            check: "config-version".into(),
-            status: CheckStatus::Ok,
-            message: format!("config version {}", cfg.version),
-            fixable: false,
-            details: None,
-        });
-        eprintln!("  ✓ config version {}", cfg.version);
-    }
+    check_config_version(&cfg, &mut checks);
 
     // 2. Mirrors exist for registered repos
     let mut missing_mirrors = Vec::new();
@@ -261,38 +230,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         eprintln!("\nChecking workspace {:?}...", meta.name);
 
         // W1. Metadata version skew
-        if meta.version > workspace::CURRENT_METADATA_VERSION {
-            checks.push(DoctorCheck {
-                scope: ws_scope.clone(),
-                check: "metadata-version".into(),
-                status: CheckStatus::Warn,
-                message: format!(
-                    "metadata version {} is newer than supported version {}",
-                    meta.version,
-                    workspace::CURRENT_METADATA_VERSION
-                ),
-                fixable: false,
-                details: Some(serde_json::json!({
-                    "metadata_version": meta.version,
-                    "supported_version": workspace::CURRENT_METADATA_VERSION,
-                })),
-            });
-            eprintln!(
-                "  ⚠ metadata version {} is newer than supported version {}",
-                meta.version,
-                workspace::CURRENT_METADATA_VERSION
-            );
-        } else {
-            checks.push(DoctorCheck {
-                scope: ws_scope.clone(),
-                check: "metadata-version".into(),
-                status: CheckStatus::Ok,
-                message: format!("metadata version {}", meta.version),
-                fixable: false,
-                details: None,
-            });
-            eprintln!("  ✓ metadata version {}", meta.version);
-        }
+        check_metadata_version(&meta, &ws_scope, &mut checks);
 
         // W3. Legacy ref field — stale @ref values in metadata
         check_legacy_ref_field(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
@@ -520,6 +458,82 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 // ---------------------------------------------------------------------------
 // Global check helpers
 // ---------------------------------------------------------------------------
+
+/// G2. Config version skew.
+fn check_config_version(cfg: &config::Config, checks: &mut Vec<DoctorCheck>) {
+    if cfg.version > config::CURRENT_CONFIG_VERSION {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "config-version".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "config version {} is newer than supported version {}",
+                cfg.version,
+                config::CURRENT_CONFIG_VERSION
+            ),
+            fixable: false,
+            details: Some(serde_json::json!({
+                "config_version": cfg.version,
+                "supported_version": config::CURRENT_CONFIG_VERSION,
+            })),
+        });
+        eprintln!(
+            "  ⚠ config version {} is newer than supported version {}",
+            cfg.version,
+            config::CURRENT_CONFIG_VERSION
+        );
+    } else {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "config-version".into(),
+            status: CheckStatus::Ok,
+            message: format!("config version {}", cfg.version),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ config version {}", cfg.version);
+    }
+}
+
+/// W1. Metadata version skew.
+fn check_metadata_version(
+    meta: &workspace::Metadata,
+    ws_scope: &str,
+    checks: &mut Vec<DoctorCheck>,
+) {
+    if meta.version > workspace::CURRENT_METADATA_VERSION {
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "metadata-version".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "metadata version {} is newer than supported version {}",
+                meta.version,
+                workspace::CURRENT_METADATA_VERSION
+            ),
+            fixable: false,
+            details: Some(serde_json::json!({
+                "metadata_version": meta.version,
+                "supported_version": workspace::CURRENT_METADATA_VERSION,
+            })),
+        });
+        eprintln!(
+            "  ⚠ metadata version {} is newer than supported version {}",
+            meta.version,
+            workspace::CURRENT_METADATA_VERSION
+        );
+    } else {
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "metadata-version".into(),
+            status: CheckStatus::Ok,
+            message: format!("metadata version {}", meta.version),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ metadata version {}", meta.version);
+    }
+}
 
 /// G1. Orphaned mirrors — mirror dirs with no corresponding config entry.
 fn check_orphaned_mirrors(
@@ -1306,6 +1320,69 @@ pub fn exit_code(output: &DoctorOutput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command as StdCommand;
+
+    /// Create a minimal git repo at `dir` with one commit on `main`.
+    fn init_git_repo(dir: &std::path::Path) {
+        for args in &[
+            vec!["git", "init", "--initial-branch=main"],
+            vec!["git", "config", "user.email", "test@test.com"],
+            vec!["git", "config", "user.name", "Test"],
+            vec!["git", "config", "commit.gpgsign", "false"],
+            vec!["git", "commit", "--allow-empty", "-m", "initial"],
+        ] {
+            let out = StdCommand::new(args[0])
+                .args(&args[1..])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    /// Create a workspace dir with .wsp.yaml metadata written to disk.
+    fn create_workspace_on_disk(ws_dir: &std::path::Path, meta: &workspace::Metadata) {
+        fs::create_dir_all(ws_dir).unwrap();
+        workspace::save_metadata(ws_dir, meta).unwrap();
+    }
+
+    /// Build a Metadata with sensible defaults. Repos/dirs can be customized.
+    fn test_metadata(
+        name: &str,
+        branch: &str,
+        repos: std::collections::BTreeMap<String, Option<workspace::WorkspaceRepoRef>>,
+    ) -> workspace::Metadata {
+        workspace::Metadata {
+            version: 0,
+            name: name.into(),
+            branch: branch.into(),
+            repos,
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn test_paths(tmp: &std::path::Path) -> Paths {
+        Paths {
+            config_path: tmp.join("config.yaml"),
+            mirrors_dir: tmp.join("mirrors"),
+            gc_dir: tmp.join("gc"),
+            templates_dir: tmp.join("templates"),
+            workspaces_dir: tmp.join("workspaces"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // URL equivalence
+    // -----------------------------------------------------------------------
 
     #[test]
     fn urls_equivalent_same_string() {
@@ -1766,5 +1843,695 @@ mod tests {
         );
 
         assert!(checks.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // G2. config-version
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn config_version_ok() {
+        let cfg = config::Config {
+            version: config::CURRENT_CONFIG_VERSION,
+            ..Default::default()
+        };
+        let mut checks = Vec::new();
+        check_config_version(&cfg, &mut checks);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "config-version");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn config_version_skew() {
+        let cfg = config::Config {
+            version: config::CURRENT_CONFIG_VERSION + 1,
+            ..Default::default()
+        };
+        let mut checks = Vec::new();
+        check_config_version(&cfg, &mut checks);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "config-version");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("newer than supported"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W1. metadata-version
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn metadata_version_ok() {
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        let mut checks = Vec::new();
+        check_metadata_version(&meta, "workspace/test", &mut checks);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "metadata-version");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn metadata_version_skew() {
+        let mut meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        meta.version = workspace::CURRENT_METADATA_VERSION + 1;
+        let mut checks = Vec::new();
+        check_metadata_version(&meta, "workspace/test", &mut checks);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "metadata-version");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("newer than supported"));
+    }
+
+    // -----------------------------------------------------------------------
+    // G4. gc-stale-entries (with stale data + fix)
+    // -----------------------------------------------------------------------
+
+    /// Create a workspace, GC it, and backdate the entry to 10 days ago.
+    fn create_stale_gc_entry(paths: &Paths) {
+        let ws_dir = paths.workspaces_dir.join("old-ws");
+        fs::create_dir_all(&ws_dir).unwrap();
+        let meta = test_metadata("old-ws", "test/old-ws", std::collections::BTreeMap::new());
+        workspace::save_metadata(&ws_dir, &meta).unwrap();
+        gc::move_to_gc(paths, "old-ws", "test/old-ws").unwrap();
+
+        for item in fs::read_dir(&paths.gc_dir).unwrap() {
+            let path = item.unwrap().path();
+            if !path.is_dir() {
+                continue;
+            }
+            let meta_path = path.join(".wsp-gc.yaml");
+            if let Ok(data) = fs::read_to_string(&meta_path) {
+                let mut entry: gc::GcEntry = serde_yaml_ng::from_str(&data).unwrap();
+                entry.trashed_at = chrono::Utc::now() - chrono::Duration::days(10);
+                fs::write(&meta_path, serde_yaml_ng::to_string(&entry).unwrap()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn gc_stale_entries_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let cfg = config::Config::default();
+        create_stale_gc_entry(&paths);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_gc_stale_entries(&paths, &cfg, false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "gc-stale-entries");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn gc_stale_entries_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let cfg = config::Config::default();
+        create_stale_gc_entry(&paths);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_gc_stale_entries(&paths, &cfg, true, &mut checks, &mut fixed);
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(checks[0].message.contains("purged"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W2. legacy-wsp-mirror-remote (detect + fix)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn legacy_wsp_mirror_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let clone_dir = tmp.path().join("repo");
+        fs::create_dir_all(&clone_dir).unwrap();
+        init_git_repo(&clone_dir);
+
+        // Add a wsp-mirror remote
+        git::run(
+            Some(&clone_dir),
+            &[
+                "remote",
+                "add",
+                "wsp-mirror",
+                "https://example.com/mirror.git",
+            ],
+        )
+        .unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_legacy_wsp_mirror(
+            &clone_dir,
+            "repo",
+            "workspace/test/repo",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "legacy-wsp-mirror-remote");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn legacy_wsp_mirror_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let clone_dir = tmp.path().join("repo");
+        fs::create_dir_all(&clone_dir).unwrap();
+        init_git_repo(&clone_dir);
+
+        git::run(
+            Some(&clone_dir),
+            &[
+                "remote",
+                "add",
+                "wsp-mirror",
+                "https://example.com/mirror.git",
+            ],
+        )
+        .unwrap();
+        assert!(git::has_remote(&clone_dir, "wsp-mirror"));
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_legacy_wsp_mirror(
+            &clone_dir,
+            "repo",
+            "workspace/test/repo",
+            true,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(!git::has_remote(&clone_dir, "wsp-mirror"));
+    }
+
+    #[test]
+    fn legacy_wsp_mirror_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let clone_dir = tmp.path().join("repo");
+        fs::create_dir_all(&clone_dir).unwrap();
+        init_git_repo(&clone_dir);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_legacy_wsp_mirror(
+            &clone_dir,
+            "repo",
+            "workspace/test/repo",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        // No wsp-mirror → no check emitted
+        assert!(checks.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // W7. in-progress-git-op
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn in_progress_op_rebase_detected() {
+        let (clone_dir, source, _ct, _st) = crate::testutil::setup_clone_repo();
+
+        // Create a conflict to leave rebase in progress
+        crate::testutil::local_commit(&clone_dir, "conflict.txt", "local");
+        // Push a conflicting change to origin
+        let out = StdCommand::new("git")
+            .args(["checkout", "main"])
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        std::fs::write(source.join("conflict.txt"), "upstream").unwrap();
+        for args in &[
+            vec!["git", "add", "conflict.txt"],
+            vec!["git", "commit", "-m", "upstream conflict"],
+        ] {
+            let out = StdCommand::new(args[0])
+                .args(&args[1..])
+                .current_dir(&source)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        }
+        git::fetch_from_path(
+            &clone_dir,
+            &source,
+            "+refs/heads/*:refs/remotes/origin/*",
+            false,
+        )
+        .unwrap();
+
+        // Start rebase that will conflict (don't use rebase_onto which auto-aborts)
+        let out = StdCommand::new("git")
+            .args(["rebase", "origin/main"])
+            .current_dir(&clone_dir)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+
+        let mut checks = Vec::new();
+        check_in_progress_op(&clone_dir, "repo", "workspace/test/repo", &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "in-progress-git-op");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("rebase"));
+
+        // Clean up
+        let _ = git::run(Some(&clone_dir), &["rebase", "--abort"]);
+    }
+
+    #[test]
+    fn in_progress_op_merge_detected() {
+        let (clone_dir, source, _ct, _st) = crate::testutil::setup_clone_repo();
+
+        crate::testutil::local_commit(&clone_dir, "conflict.txt", "local");
+        let out = StdCommand::new("git")
+            .args(["checkout", "main"])
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        std::fs::write(source.join("conflict.txt"), "upstream").unwrap();
+        for args in &[
+            vec!["git", "add", "conflict.txt"],
+            vec!["git", "commit", "-m", "upstream conflict"],
+        ] {
+            let out = StdCommand::new(args[0])
+                .args(&args[1..])
+                .current_dir(&source)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        }
+        git::fetch_from_path(
+            &clone_dir,
+            &source,
+            "+refs/heads/*:refs/remotes/origin/*",
+            false,
+        )
+        .unwrap();
+
+        let out = StdCommand::new("git")
+            .args(["merge", "origin/main"])
+            .current_dir(&clone_dir)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+
+        let mut checks = Vec::new();
+        check_in_progress_op(&clone_dir, "repo", "workspace/test/repo", &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "in-progress-git-op");
+        assert!(checks[0].message.contains("merge"));
+
+        let _ = git::run(Some(&clone_dir), &["merge", "--abort"]);
+    }
+
+    #[test]
+    fn in_progress_op_clean() {
+        let (clone_dir, _source, _ct, _st) = crate::testutil::setup_clone_repo();
+
+        let mut checks = Vec::new();
+        check_in_progress_op(&clone_dir, "repo", "workspace/test/repo", &mut checks);
+
+        assert!(checks.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // W8. clone-on-workspace-branch
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn clone_on_wrong_branch() {
+        let (clone_dir, _source, _ct, _st) = crate::testutil::setup_clone_repo();
+        // setup_clone_repo checks out "feature" branch
+        let current = git::branch_current(&clone_dir).unwrap();
+        assert_eq!(current, "feature");
+
+        let mut checks = Vec::new();
+        check_clone_branch(
+            &clone_dir,
+            "repo",
+            "my-workspace-branch",
+            "workspace/test/repo",
+            &mut checks,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "clone-on-workspace-branch");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("feature"));
+        assert!(checks[0].message.contains("my-workspace-branch"));
+    }
+
+    #[test]
+    fn clone_on_correct_branch() {
+        let (clone_dir, _source, _ct, _st) = crate::testutil::setup_clone_repo();
+
+        let mut checks = Vec::new();
+        check_clone_branch(
+            &clone_dir,
+            "repo",
+            "feature", // matches what setup_clone_repo creates
+            "workspace/test/repo",
+            &mut checks,
+        );
+
+        // Correct branch → no check emitted
+        assert!(checks.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // W3. legacy-ref-field (fix path)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn legacy_ref_field_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/branch".into(),
+            repos: std::collections::BTreeMap::from([
+                (
+                    "github.com/acme/repo1".into(),
+                    Some(workspace::WorkspaceRepoRef {
+                        r#ref: "v1.0".into(),
+                        url: None,
+                    }),
+                ),
+                (
+                    "github.com/acme/repo2".into(),
+                    Some(workspace::WorkspaceRepoRef {
+                        r#ref: "main".into(),
+                        url: None,
+                    }),
+                ),
+            ]),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::new(),
+        };
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_legacy_ref_field(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            true,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(checks[0].message.contains("cleared 2 stale ref values"));
+
+        // Verify the fix persisted to disk
+        let reloaded = workspace::load_metadata(&ws_dir).unwrap();
+        for (_, ref_opt) in &reloaded.repos {
+            if let Some(repo_ref) = ref_opt {
+                assert!(repo_ref.r#ref.is_empty(), "ref should be cleared");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // W4. stale-dirs-map (fix path)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stale_dirs_map_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/branch".into(),
+            repos: std::collections::BTreeMap::from([("github.com/acme/repo".into(), None)]),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::from([
+                ("github.com/acme/repo".into(), "repo".into()),
+                ("github.com/acme/removed".into(), "removed".into()),
+            ]),
+        };
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_stale_dirs_map(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            true,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(checks[0].message.contains("removed 1 stale dirs entries"));
+
+        // Verify the fix persisted
+        let reloaded = workspace::load_metadata(&ws_dir).unwrap();
+        assert_eq!(reloaded.dirs.len(), 1);
+        assert!(reloaded.dirs.contains_key("github.com/acme/repo"));
+        assert!(!reloaded.dirs.contains_key("github.com/acme/removed"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W9. agents-md-valid (detect + fix)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn agents_md_valid_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Create a valid AGENTS.md with markers
+        agentmd::update(&ws_dir, &meta).unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_agents_md_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "agents-md-valid");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn agents_md_missing_markers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Write an AGENTS.md without markers
+        fs::write(ws_dir.join("AGENTS.md"), "# My Project\nSome notes.\n").unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_agents_md_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "agents-md-valid");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn agents_md_missing_entirely() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_agents_md_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn agents_md_claude_md_not_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Create valid AGENTS.md
+        agentmd::update(&ws_dir, &meta).unwrap();
+        // Replace CLAUDE.md symlink with a regular file
+        let claude_path = ws_dir.join("CLAUDE.md");
+        let _ = fs::remove_file(&claude_path);
+        fs::write(&claude_path, "not a symlink").unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_agents_md_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn agents_md_fix_regenerates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Start with no AGENTS.md or CLAUDE.md
+        assert!(!ws_dir.join("AGENTS.md").exists());
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_agents_md_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            true,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+
+        // Verify files were created
+        assert!(ws_dir.join("AGENTS.md").exists());
+        let content = fs::read_to_string(ws_dir.join("AGENTS.md")).unwrap();
+        assert!(content.contains(agentmd::MARKER_BEGIN));
+        assert!(content.contains(agentmd::MARKER_END));
+
+        // CLAUDE.md should be a symlink to AGENTS.md
+        let claude_meta = fs::symlink_metadata(ws_dir.join("CLAUDE.md")).unwrap();
+        assert!(claude_meta.file_type().is_symlink());
+        assert_eq!(
+            fs::read_link(ws_dir.join("CLAUDE.md")).unwrap(),
+            std::path::Path::new("AGENTS.md")
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // W12. unregistered-repos (all registered → ok)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unregistered_repos_all_registered() {
+        let meta = test_metadata(
+            "test",
+            "test/branch",
+            std::collections::BTreeMap::from([("github.com/acme/repo".into(), None)]),
+        );
+        let cfg = config::Config {
+            repos: std::collections::BTreeMap::from([(
+                "github.com/acme/repo".to_string(),
+                config::RepoEntry {
+                    url: "git@github.com:acme/repo.git".into(),
+                    added: chrono::Utc::now(),
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let mut checks = Vec::new();
+        check_unregistered_repos(&meta, &cfg, "workspace/test", &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    // -----------------------------------------------------------------------
+    // Orphaned mirrors: symlink guard
+    // -----------------------------------------------------------------------
+
+    #[test]
+    #[cfg(unix)]
+    fn orphaned_mirrors_symlink_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mirrors_dir = tmp.path().join("mirrors");
+        let cfg = config::Config::default();
+
+        // Create a symlink pretending to be a mirror
+        let host_dir = mirrors_dir.join("github.com/acme");
+        fs::create_dir_all(&host_dir).unwrap();
+        std::os::unix::fs::symlink("/tmp", host_dir.join("evil.git")).unwrap();
+
+        let paths = test_paths(tmp.path());
+        let paths = Paths {
+            mirrors_dir,
+            ..paths
+        };
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_orphaned_mirrors(&paths, &cfg, true, &mut checks, &mut fixed);
+
+        // Should warn but NOT fix (symlink guard)
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("symlink"));
+        assert_eq!(fixed, 0);
     }
 }
