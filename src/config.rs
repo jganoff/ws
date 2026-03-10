@@ -23,11 +23,6 @@ pub struct RepoEntry {
     pub added: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupEntry {
-    pub repos: Vec<String>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(
@@ -39,8 +34,6 @@ pub struct Config {
     pub branch_prefix: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub repos: BTreeMap<String, RepoEntry>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub groups: BTreeMap<String, GroupEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language_integrations: Option<BTreeMap<String, bool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -243,7 +236,6 @@ mod tests {
         // Load should return empty config when file doesn't exist
         let mut cfg = Config::load_from(&cfg_path).unwrap();
         assert!(cfg.repos.is_empty());
-        assert!(cfg.groups.is_empty());
 
         // Add data
         let now = Utc.with_ymd_and_hms(2025, 1, 15, 10, 0, 0).unwrap();
@@ -261,15 +253,6 @@ mod tests {
                 added: now,
             },
         );
-        cfg.groups.insert(
-            "backend".into(),
-            GroupEntry {
-                repos: vec![
-                    "github.com/user/repo-a".into(),
-                    "github.com/user/repo-b".into(),
-                ],
-            },
-        );
 
         cfg.save_to(&cfg_path).unwrap();
 
@@ -284,11 +267,6 @@ mod tests {
             "git@github.com:user/repo-a.git"
         );
         assert_eq!(cfg2.repos["github.com/user/repo-a"].added, now);
-        assert_eq!(cfg2.groups.len(), 1);
-        assert_eq!(
-            cfg2.groups["backend"].repos,
-            vec!["github.com/user/repo-a", "github.com/user/repo-b"]
-        );
     }
 
     #[test]
@@ -329,7 +307,6 @@ mod tests {
 
         let cfg = Config::load_from(&cfg_path).unwrap();
         assert!(cfg.repos.is_empty());
-        assert!(cfg.groups.is_empty());
     }
 
     #[test]

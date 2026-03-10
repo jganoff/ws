@@ -10,7 +10,6 @@ use crate::discovery;
 use crate::filelock;
 use crate::gc;
 use crate::giturl;
-use crate::group;
 use crate::mirror;
 use crate::output::{MutationOutput, Output};
 use crate::template;
@@ -39,14 +38,6 @@ pub fn cmd() -> Command {
                 .help("Add repos from a template (name or file path)")
                 .add(ArgValueCandidates::new(completers::complete_templates)),
         )
-        // TODO(0.10.0): Remove deprecated -g/--group flag
-        .arg(
-            Arg::new("group")
-                .short('g')
-                .long("group")
-                .help("Add repos from a group (deprecated, use --template)")
-                .add(ArgValueCandidates::new(completers::complete_groups)),
-        )
         .arg(
             Arg::new("no-discover")
                 .long("no-discover")
@@ -61,12 +52,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         .map(|v| v.collect())
         .unwrap_or_default();
     let template_source = matches.get_one::<String>("template");
-    let group_name = matches.get_one::<String>("group");
-
-    // TODO(0.10.0): Remove deprecated -g/--group handling
-    if group_name.is_some() {
-        eprintln!("warning: --group is deprecated, use --template instead");
-    }
 
     let cwd = std::env::current_dir()?;
     let ws_dir = workspace::detect(&cwd)?;
@@ -88,14 +73,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         template::auto_register(&tmpl, &mut cfg, paths)?;
         let tmpl_identities = tmpl.identities()?;
         for id in tmpl_identities {
-            repo_refs.insert(id, String::new());
-        }
-    }
-
-    // TODO(0.10.0): Remove deprecated -g/--group handling
-    if let Some(gn) = group_name {
-        let group_repos = group::get(&cfg, gn)?;
-        for id in group_repos {
             repo_refs.insert(id, String::new());
         }
     }

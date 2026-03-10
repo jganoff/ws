@@ -26,7 +26,6 @@ The `codegen` Cargo feature gates `wsp generate` (hidden command), which introsp
 - `src/mirror.rs` - Bare clone management
 - `src/workspace.rs` - Workspace CRUD and clone ops
 - `src/gc.rs` - Deferred deletion and recovery (gc pattern)
-- `src/group.rs` - Group management
 - `src/output.rs` - Table formatting and status display
 
 ## Context Repos (Removed)
@@ -46,7 +45,7 @@ Top-level commands use short aliases: `wsp new`, `wsp rm`, `wsp ls`, `wsp st`, `
 
 Workspace-scoped repo ops: `wsp repo add`, `wsp repo rm`, `wsp repo ls`, `wsp repo fetch`.
 
-Admin commands are top-level nouns: `wsp registry add/ls/rm`, `wsp group new/ls/show/update/rm`, `wsp config ls/get/set/unset`, `wsp completion zsh|bash|fish`.
+Admin commands are top-level nouns: `wsp registry add/ls/rm`, `wsp template new/import/ls/show/rm/rename/export/repo/config/agent-md`, `wsp config ls/get/set/unset`, `wsp completion zsh|bash|fish`.
 
 `wsp setup` is a hidden backward-compat alias that dispatches to the new top-level nouns with a deprecation warning on stderr. It will be removed in the next major version.
 
@@ -135,12 +134,12 @@ Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shortha
 - `build.rs` embeds `git describe` into `WSP_VERSION_STRING` for dev/release differentiation
 - Clap `visible_alias`/`alias` dispatches under the primary command name — only match the primary name in dispatch arms (e.g., `Some(("ls", m))` not `Some(("ls", m)) | Some(("list", m))`)
 - Commands that don't modify workspace/config/repo state get `[read-only]` in their `.about()` text. This propagates to `--help` and SKILL.md automatically via clap introspection. Add it when creating new read-only commands.
-- **Shell completions are mandatory**: Every flag and positional arg that accepts a known set of values (workspace names, template names, repo identities, group names) must have an `ArgValueCandidates` completer. Completers live in `src/cli/completers.rs`. File-path arguments (e.g., `-f`/`--file`) use `value_hint(FilePath)` for shell-native path completion.
+- **Shell completions are mandatory**: Every flag and positional arg that accepts a known set of values (workspace names, template names, repo identities) must have an `ArgValueCandidates` completer. Completers live in `src/cli/completers.rs`. File-path arguments (e.g., `-f`/`--file`) use `value_hint(FilePath)` for shell-native path completion.
 - **Roadmap hygiene**: When a feature ships, remove its section from `docs/roadmap.md` entirely — don't mark checkboxes as done. Commit roadmap removals in the same commit as the feature code, not separately.
 
 ## Gotchas
 
-- **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code, but `src/group.rs` tests have a manual `Config { ... }` initializer. Search for `Config {` across the codebase when adding new fields. Also update `src/cli/cfg.rs` (`run_list`, `run_get`, `run_set`, `run_unset`) to handle the new config key.
+- **Adding fields to `Config`**: The `Config` struct uses `#[derive(Default)]` for production code. Search for `Config {` across the codebase when adding new fields. Also update `src/cli/cfg.rs` (`run_list`, `run_get`, `run_set`, `run_unset`) to handle the new config key.
 - **Adding fields to `Metadata`**: Test helpers in `src/lang/go.rs`, `src/lang/mod.rs`, and `src/workspace.rs` tests have manual `Metadata { ... }` initializers. Search for `Metadata {` across the codebase when adding new fields. Also check if `workspace::create()` / `create_inner()` need a corresponding parameter — their signatures mirror Metadata fields, and ~20 test call sites use `create()` directly.
 - **Adding fields to `WorkspaceRepoRef`**: Test helpers in `src/workspace.rs`, `src/agentmd.rs`, `src/filelock.rs`, and `src/lang/go.rs` have manual `WorkspaceRepoRef { ... }` initializers. Search for `WorkspaceRepoRef {` across the codebase when adding new fields.
 - **Adding fields to `Template`**: The `Template` struct in `src/template.rs` has manual initializers in `src/discovery.rs` tests and `src/filelock.rs` tests. Search for `Template {` across the codebase when adding new fields. All new fields should be `Option` with `#[serde(default, skip_serializing_if = "Option::is_none")]` for backward compatibility.

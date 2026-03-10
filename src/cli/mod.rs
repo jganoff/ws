@@ -8,7 +8,6 @@ pub mod describe;
 pub mod diff;
 pub mod exec;
 pub mod fetch;
-pub mod group;
 pub mod help;
 pub mod list;
 pub mod log;
@@ -42,14 +41,7 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     ("Workflow", &["st", "diff", "log", "sync", "exec"]),
     (
         "Admin",
-        &[
-            "registry",
-            "group",
-            "template",
-            "config",
-            "completion",
-            "help",
-        ],
+        &["registry", "template", "config", "completion", "help"],
     ),
 ];
 
@@ -70,7 +62,7 @@ pub fn build_cli() -> Command {
     // Hidden backward-compat alias: `wsp setup <noun>` dispatches to
     // the new top-level nouns with a deprecation warning.
     let setup = Command::new("setup")
-        .about("Deprecated: use top-level registry/group/config/completion commands")
+        .about("Deprecated: use top-level registry/config/completion commands")
         .hide(true)
         .subcommand_required(true)
         .subcommand(
@@ -81,7 +73,6 @@ pub fn build_cli() -> Command {
                 .subcommand(repo::list_cmd())
                 .subcommand(repo::rm_cmd()),
         )
-        .subcommand(group::cmd())
         .subcommand(cfg::cmd())
         .subcommand(completion::cmd());
 
@@ -123,7 +114,6 @@ pub fn build_cli() -> Command {
         .subcommand(repo_ws)
         // Admin commands (promoted from `wsp setup`)
         .subcommand(registry::cmd())
-        .subcommand(group::cmd())
         .subcommand(template::cmd())
         .subcommand(cfg::cmd())
         .subcommand(completion::cmd())
@@ -205,7 +195,6 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
 
         // --- Admin commands (promoted from setup) ---
         Some(("registry", sub)) => registry::dispatch(sub, paths),
-        Some(("group", sub)) => group::dispatch(sub, paths),
         Some(("template", sub)) => template::dispatch(sub, paths),
         Some(("config", sub)) => cfg::dispatch(sub, paths),
         Some(("completion", m)) => completion::run(m, paths),
@@ -242,10 +231,6 @@ fn dispatch_setup(sub: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
                 Some(("rm", m)) => repo::run_remove(m, paths),
                 _ => unreachable!(),
             }
-        }
-        Some(("group", sub2)) => {
-            eprintln!("warning: `wsp setup group` is deprecated, use `wsp group` instead");
-            group::dispatch(sub2, paths)
         }
         Some(("config", sub2)) => {
             eprintln!("warning: `wsp setup config` is deprecated, use `wsp config` instead");

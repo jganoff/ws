@@ -113,23 +113,6 @@ pub struct RepoListEntry {
 }
 
 #[derive(Serialize)]
-pub struct GroupListOutput {
-    pub groups: Vec<GroupListEntry>,
-}
-
-#[derive(Serialize)]
-pub struct GroupListEntry {
-    pub name: String,
-    pub repo_count: usize,
-}
-
-#[derive(Serialize)]
-pub struct GroupShowOutput {
-    pub name: String,
-    pub repos: Vec<String>,
-}
-
-#[derive(Serialize)]
 pub struct TemplateListOutput {
     pub templates: Vec<TemplateListEntry>,
 }
@@ -416,32 +399,6 @@ impl RepoListOutput {
                 shortname: "api-gateway".into(),
                 url: "git@github.com:acme/api-gateway.git".into(),
             }],
-        }
-    }
-}
-
-#[cfg(feature = "codegen")]
-impl GroupListOutput {
-    pub fn sample() -> Self {
-        Self {
-            groups: vec![GroupListEntry {
-                name: "backend".into(),
-                repo_count: 3,
-            }],
-        }
-    }
-}
-
-#[cfg(feature = "codegen")]
-impl GroupShowOutput {
-    pub fn sample() -> Self {
-        Self {
-            name: "backend".into(),
-            repos: vec![
-                "api-gateway".into(),
-                "user-service".into(),
-                "shared-lib".into(),
-            ],
         }
     }
 }
@@ -741,8 +698,6 @@ impl RecoverListOutput {
 
 pub enum Output {
     RepoList(RepoListOutput),
-    GroupList(GroupListOutput),
-    GroupShow(GroupShowOutput),
     TemplateList(TemplateListOutput),
     TemplateShow(TemplateShowOutput),
     WorkspaceList(WorkspaceListOutput),
@@ -772,8 +727,6 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         return match output {
             Output::None => Ok(()),
             Output::RepoList(v) => print_json(&v),
-            Output::GroupList(v) => print_json(&v),
-            Output::GroupShow(v) => print_json(&v),
             Output::TemplateList(v) => print_json(&v),
             Output::TemplateShow(v) => print_json(&v),
             Output::WorkspaceList(v) => print_json(&v),
@@ -796,8 +749,6 @@ pub fn render(output: Output, json: bool) -> Result<()> {
     match output {
         Output::None => Ok(()),
         Output::RepoList(v) => render_repo_list_table(v),
-        Output::GroupList(v) => render_group_list_table(v),
-        Output::GroupShow(v) => render_group_show_text(v),
         Output::TemplateList(v) => render_template_list_table(v),
         Output::TemplateShow(v) => render_template_show_text(v),
         Output::WorkspaceList(v) => render_workspace_list_table(v),
@@ -856,29 +807,6 @@ fn render_repo_list_table(v: RepoListOutput) -> Result<()> {
         table.add_row(vec![r.identity.clone(), r.shortname.clone(), r.url.clone()])?;
     }
     table.render()
-}
-
-fn render_group_list_table(v: GroupListOutput) -> Result<()> {
-    if v.groups.is_empty() {
-        println!("No groups defined.");
-        return Ok(());
-    }
-    let mut table = Table::new(
-        Box::new(std::io::stdout()),
-        vec!["Name".to_string(), "Repos".to_string()],
-    );
-    for g in &v.groups {
-        table.add_row(vec![g.name.clone(), g.repo_count.to_string()])?;
-    }
-    table.render()
-}
-
-fn render_group_show_text(v: GroupShowOutput) -> Result<()> {
-    println!("Group {:?}:", v.name);
-    for r in &v.repos {
-        println!("  {}", r);
-    }
-    Ok(())
 }
 
 fn render_template_list_table(v: TemplateListOutput) -> Result<()> {
@@ -1528,30 +1456,6 @@ mod tests {
         let output = RepoListOutput { repos: vec![] };
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["repos"].as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn test_json_group_list() {
-        let output = GroupListOutput {
-            groups: vec![GroupListEntry {
-                name: "backend".into(),
-                repo_count: 3,
-            }],
-        };
-        let val = serde_json::to_value(&output).unwrap();
-        assert_eq!(val["groups"][0]["name"], "backend");
-        assert_eq!(val["groups"][0]["repo_count"], 3);
-    }
-
-    #[test]
-    fn test_json_group_show() {
-        let output = GroupShowOutput {
-            name: "backend".into(),
-            repos: vec!["repo-a".into(), "repo-b".into()],
-        };
-        let val = serde_json::to_value(&output).unwrap();
-        assert_eq!(val["name"], "backend");
-        assert_eq!(val["repos"].as_array().unwrap().len(), 2);
     }
 
     #[test]

@@ -207,7 +207,7 @@ wsp completion fish | source
 
 This provides:
 
-- Tab completion for workspace names, repo shortnames, template names, and group names
+- Tab completion for workspace names, repo shortnames, and template names
 - Auto-cd into the workspace directory after `wsp new`
 - Auto-cd out of a workspace directory before `wsp rm` if you're inside it
 - All other subcommands pass through to the binary unchanged

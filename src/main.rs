@@ -8,7 +8,6 @@ mod filelock;
 mod gc;
 mod git;
 mod giturl;
-mod group;
 mod lang;
 mod mirror;
 mod output;

@@ -39,20 +39,6 @@ pub fn cmd() -> Command {
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
-    // One-shot migration: convert deprecated groups to templates, then remove
-    // only successfully-migrated groups so they are never re-created (e.g. after
-    // a rename). Groups that fail migration are kept for retry next time.
-    if let Err(e) = filelock::with_config(&paths.config_path, |cfg| {
-        if !cfg.groups.is_empty() {
-            for name in tmpl::migrate_all_groups(&paths.templates_dir, cfg) {
-                cfg.groups.remove(&name);
-            }
-        }
-        Ok(())
-    }) {
-        eprintln!("warning: group migration failed: {e}");
-    }
-
     match matches.subcommand() {
         Some(("new", m)) => run_new(m, paths),
         Some(("import", m)) => run_import(m, paths),

@@ -10,7 +10,6 @@ use crate::config::{self, Paths};
 use crate::discovery;
 use crate::git;
 use crate::giturl;
-use crate::group;
 use crate::mirror;
 use crate::output::{MutationOutput, Output};
 use crate::template;
@@ -54,17 +53,9 @@ pub fn cmd() -> Command {
                 .help("Create from a template file (.yaml)")
                 .value_hint(clap::ValueHint::FilePath),
         )
-        // TODO(0.10.0): Remove deprecated -g/--group flag
-        .arg(
-            Arg::new("group")
-                .short('g')
-                .long("group")
-                .help("Add repos from a group (deprecated, use --template)")
-                .add(ArgValueCandidates::new(completers::complete_groups)),
-        )
         .group(
             clap::ArgGroup::new("source")
-                .args(["template", "from-workspace", "file", "group"])
+                .args(["template", "from-workspace", "file"])
                 .required(false),
         )
         .arg(
@@ -96,13 +87,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let template_source = matches.get_one::<String>("template");
     let from_workspace = matches.get_one::<String>("from-workspace");
     let from_file = matches.get_one::<String>("file");
-    let group_name = matches.get_one::<String>("group");
     let no_fetch = matches.get_flag("no-fetch");
     let description = matches.get_one::<String>("description");
-
-    if group_name.is_some() {
-        eprintln!("warning: --group is deprecated, use --template instead");
-    }
 
     let mut cfg = config::Config::load_from(&paths.config_path)
         .map_err(|e| anyhow::anyhow!("loading config: {}", e))?;
@@ -170,23 +156,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
         created_from = Some(format!("workspace:{}", source_ws));
         loaded_template = Some(tmpl);
-    }
-
-    // Add repos from group — migrate to template on-the-fly
-    if let Some(gn) = group_name {
-        let group_repos = group::get(&cfg, gn)?;
-
-        // Migrate group to a template file if one doesn't exist yet
-        if let Err(e) = template::migrate_group(&paths.templates_dir, &cfg, gn, &group_repos) {
-            eprintln!(
-                "warning: could not migrate group {:?} to template: {}",
-                gn, e
-            );
-        }
-
-        for id in group_repos {
-            repo_refs.insert(id, String::new());
-        }
     }
 
     // Add individual repos
