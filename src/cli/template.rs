@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
-use crate::config::{self, Paths};
+use crate::config::Paths;
 use crate::filelock;
 use crate::giturl;
 use crate::output::{
@@ -31,6 +31,7 @@ pub fn cmd() -> Command {
         .subcommand(list_cmd())
         .subcommand(show_cmd())
         .subcommand(rm_cmd())
+        .subcommand(rename_cmd())
         .subcommand(export_cmd())
         .subcommand(repo_cmd())
         .subcommand(config_cmd())
@@ -38,11 +39,18 @@ pub fn cmd() -> Command {
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
-    // Auto-migrate any existing groups to templates
-    if let Ok(cfg) = config::Config::load_from(&paths.config_path)
-        && !cfg.groups.is_empty()
-    {
-        let _ = tmpl::migrate_all_groups(&paths.templates_dir, &cfg);
+    // One-shot migration: convert deprecated groups to templates, then remove
+    // only successfully-migrated groups so they are never re-created (e.g. after
+    // a rename). Groups that fail migration are kept for retry next time.
+    if let Err(e) = filelock::with_config(&paths.config_path, |cfg| {
+        if !cfg.groups.is_empty() {
+            for name in tmpl::migrate_all_groups(&paths.templates_dir, cfg) {
+                cfg.groups.remove(&name);
+            }
+        }
+        Ok(())
+    }) {
+        eprintln!("warning: group migration failed: {e}");
     }
 
     match matches.subcommand() {
@@ -51,6 +59,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Some(("ls", m)) => run_list(m, paths),
         Some(("show", m)) => run_show(m, paths),
         Some(("rm", m)) => run_rm(m, paths),
+        Some(("rename", m)) => run_rename(m, paths),
         Some(("export", m)) => run_export(m, paths),
         Some(("repo", m)) => dispatch_repo(m, paths),
         Some(("config", m)) => dispatch_config(m, paths),
@@ -213,6 +222,36 @@ fn rm_cmd() -> Command {
                 .required(true)
                 .add(ArgValueCandidates::new(completers::complete_templates)),
         )
+}
+
+fn rename_cmd() -> Command {
+    Command::new("rename")
+        .about("Rename a template")
+        .arg(
+            Arg::new("old")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_templates)),
+        )
+        .arg(Arg::new("new").required(true))
+        .arg(
+            Arg::new("force")
+                .long("force")
+                .action(clap::ArgAction::SetTrue)
+                .help("Overwrite if the target name already exists"),
+        )
+}
+
+fn run_rename(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let old_name = matches.get_one::<String>("old").unwrap();
+    let new_name = matches.get_one::<String>("new").unwrap();
+    let force = matches.get_flag("force");
+
+    tmpl::rename(&paths.templates_dir, old_name, new_name, force)?;
+
+    Ok(Output::Mutation(MutationOutput::new(format!(
+        "Renamed template {:?} to {:?}",
+        old_name, new_name
+    ))))
 }
 
 fn export_cmd() -> Command {

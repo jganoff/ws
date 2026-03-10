@@ -28,11 +28,17 @@ pub fn cmd() -> Command {
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     eprintln!("warning: `wsp group` is deprecated, use `wsp template` instead");
 
-    // Auto-migrate all groups to templates on any group command
-    if let Ok(cfg) = config::Config::load_from(&paths.config_path)
-        && !cfg.groups.is_empty()
-    {
-        let _ = template::migrate_all_groups(&paths.templates_dir, &cfg);
+    // Auto-migrate all groups to templates on any group command, then clear
+    // migrated groups from config (same pattern as cli/template.rs dispatch).
+    if let Err(e) = filelock::with_config(&paths.config_path, |cfg| {
+        if !cfg.groups.is_empty() {
+            for name in template::migrate_all_groups(&paths.templates_dir, cfg) {
+                cfg.groups.remove(&name);
+            }
+        }
+        Ok(())
+    }) {
+        eprintln!("warning: group migration failed: {e}");
     }
 
     match matches.subcommand() {

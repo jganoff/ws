@@ -236,6 +236,43 @@ pub fn delete(templates_dir: &Path, name: &str) -> Result<()> {
     }
 }
 
+pub fn rename(templates_dir: &Path, old_name: &str, new_name: &str, force: bool) -> Result<()> {
+    validate_name(old_name)?;
+    validate_name(new_name)?;
+
+    let old_path = template_path(templates_dir, old_name);
+    let new_path = template_path(templates_dir, new_name);
+
+    if !old_path.exists() {
+        bail!("template {:?} not found", old_name);
+    }
+    if new_path.exists() && !force {
+        bail!(
+            "template {:?} already exists (use --force to overwrite)",
+            new_name
+        );
+    }
+
+    // If forcing over an existing template, clean up its sidecar first
+    if force && new_path.exists() {
+        let _ = delete_source(templates_dir, new_name);
+    }
+
+    fs::rename(&old_path, &new_path)
+        .with_context(|| format!("renaming template {:?} to {:?}", old_name, new_name))?;
+
+    // Rename source sidecar if present
+    let old_source = source_path(templates_dir, old_name);
+    let new_source = source_path(templates_dir, new_name);
+    if old_source.exists() {
+        fs::rename(&old_source, &new_source).with_context(|| {
+            format!("renaming source metadata {:?} to {:?}", old_name, new_name)
+        })?;
+    }
+
+    Ok(())
+}
+
 pub fn list(templates_dir: &Path) -> Result<Vec<String>> {
     if !templates_dir.exists() {
         return Ok(Vec::new());
@@ -769,22 +806,28 @@ pub fn migrate_group(
     Ok(true)
 }
 
-/// Migrate all groups from config to template files. Returns the count of migrated groups.
-pub fn migrate_all_groups(templates_dir: &Path, cfg: &config::Config) -> Result<usize> {
-    let mut count = 0;
+/// Migrate all groups from config to template files. Returns the names of
+/// groups that were successfully migrated (or already existed as templates),
+/// so the caller can selectively remove them from config.
+pub fn migrate_all_groups(templates_dir: &Path, cfg: &config::Config) -> Vec<String> {
+    let mut done = Vec::new();
     for (name, entry) in &cfg.groups {
         match migrate_group(templates_dir, cfg, name, &entry.repos) {
             Ok(true) => {
                 eprintln!("  migrated group {:?} to template", name);
-                count += 1;
+                done.push(name.clone());
             }
-            Ok(false) => {} // already exists, skip silently
+            Ok(false) => {
+                // Template already exists (previous migration or manual create).
+                done.push(name.clone());
+            }
             Err(e) => {
                 eprintln!("  warning: failed to migrate group {:?}: {}", name, e);
+                // Leave this group in config so it can be retried next time.
             }
         }
     }
-    Ok(count)
+    done
 }
 
 #[cfg(test)]
@@ -847,6 +890,79 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let err = delete(tmp.path(), "nonexistent").unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn rename_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        save(&dir, "old-name", &sample_template()).unwrap();
+        assert!(exists(&dir, "old-name"));
+
+        rename(&dir, "old-name", "new-name", false).unwrap();
+        assert!(!exists(&dir, "old-name"));
+        assert!(exists(&dir, "new-name"));
+
+        // Content preserved
+        let t = load(&dir, "new-name").unwrap();
+        assert_eq!(t.repos.len(), 2);
+    }
+
+    #[test]
+    fn rename_with_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        save(&dir, "old", &sample_template()).unwrap();
+        save_source(
+            &dir,
+            "old",
+            &ImportSource {
+                source_path: "/tmp/test.yaml".into(),
+                imported_at: chrono::Utc::now(),
+            },
+        )
+        .unwrap();
+
+        rename(&dir, "old", "new", false).unwrap();
+        assert!(!exists(&dir, "old"));
+        assert!(exists(&dir, "new"));
+        let source = load_source(&dir, "new").unwrap();
+        assert!(source.is_some());
+        assert!(load_source(&dir, "old").unwrap().is_none());
+    }
+
+    #[test]
+    fn rename_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = rename(tmp.path(), "nonexistent", "new", false).unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn rename_target_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        save(&dir, "a", &sample_template()).unwrap();
+        save(&dir, "b", &sample_template()).unwrap();
+
+        let err = rename(&dir, "a", "b", false).unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn rename_force_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("templates");
+
+        save(&dir, "a", &sample_template()).unwrap();
+        save(&dir, "b", &sample_template()).unwrap();
+
+        rename(&dir, "a", "b", true).unwrap();
+        assert!(!exists(&dir, "a"));
+        assert!(exists(&dir, "b"));
     }
 
     #[test]
@@ -1145,8 +1261,8 @@ created: 2026-03-07T10:00:00Z
         let dir = tmp.path().join("templates");
         let cfg = sample_config();
 
-        let count = migrate_all_groups(&dir, &cfg).unwrap();
-        assert_eq!(count, 2);
+        let migrated = migrate_all_groups(&dir, &cfg);
+        assert_eq!(migrated.len(), 2);
 
         assert!(exists(&dir, "backend"));
         assert!(exists(&dir, "frontend"));

@@ -38,6 +38,7 @@ wsp template import <file> [--name <name>] [--update] [--force] # Import a templ
 wsp template ls                                 # List all templates [read-only] (alias: list)
 wsp template show <name>                        # Show template contents [read-only]
 wsp template rm <name>                          # Remove a template (alias: remove)
+wsp template rename <old> <new> [--force]       # Rename a template
 wsp template export <name> [--stdout]           # Export a template to a file or stdout [read-only]
 wsp template repo                               # Add or remove repos in a template
 wsp template config                             # Manage template config overrides
