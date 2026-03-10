@@ -68,7 +68,7 @@ impl Metadata {
 /// Detects repo-name collisions and returns a dirs map with `owner-repo` entries
 /// for all identities that share the same repo short name.
 /// Only colliding identities appear in the returned map.
-fn compute_dir_names(identities: &[&str]) -> Result<BTreeMap<String, String>> {
+pub(crate) fn compute_dir_names(identities: &[&str]) -> Result<BTreeMap<String, String>> {
     let mut by_repo: BTreeMap<String, Vec<(&str, String)>> = BTreeMap::new();
     for &id in identities {
         let parsed = parse_identity(id)?;
@@ -856,7 +856,7 @@ impl std::fmt::Display for RootProblem {
 // ---------------------------------------------------------------------------
 
 /// Default content for the global wspignore file, seeded on first use.
-const DEFAULT_WSPIGNORE: &str = "\
+pub(crate) const DEFAULT_WSPIGNORE: &str = "\
 # Global wspignore — paths to suppress in workspace root checks.
 # Edit this file to add/remove patterns. One path per line.
 # Trailing / matches a directory and everything inside it.
@@ -905,7 +905,7 @@ fn load_wspignore_file(path: &Path) -> Vec<IgnorePattern> {
 }
 
 /// Check if a root problem path matches any ignore pattern.
-fn is_ignored(path: &str, patterns: &[IgnorePattern]) -> bool {
+pub(crate) fn is_ignored(path: &str, patterns: &[IgnorePattern]) -> bool {
     for pat in patterns {
         match pat {
             IgnorePattern::Exact(name) => {
@@ -1228,7 +1228,7 @@ fn check_claude_dir(ws_dir: &Path) -> Vec<RootProblem> {
 }
 
 /// Check go.work — wsp-generated header means it's managed.
-fn check_go_work(ws_dir: &Path) -> Option<RootProblem> {
+pub(crate) fn check_go_work(ws_dir: &Path) -> Option<RootProblem> {
     let path = ws_dir.join("go.work");
     if !path.exists() {
         return None;

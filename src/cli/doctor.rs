@@ -9,8 +9,10 @@ use crate::config::{self, Paths};
 use crate::gc;
 use crate::git;
 use crate::giturl;
+use crate::lang;
 use crate::mirror;
 use crate::output::Output;
+use crate::template;
 use crate::workspace;
 
 // ---------------------------------------------------------------------------
@@ -222,6 +224,21 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     // G4. GC stale entries — entries past retention that should have been purged
     check_gc_stale_entries(paths, &cfg, fix, &mut checks, &mut fixed);
 
+    // G5. GC orphaned entries — dirs in gc/ without valid metadata
+    check_gc_orphaned_entries(paths, &mut checks);
+
+    // G6. GC disk usage — informational
+    check_gc_disk_usage(paths, &mut checks);
+
+    // G3. Workspaces dir exists
+    check_workspaces_dir_exists(paths, fix, &mut checks, &mut fixed);
+
+    // G7. Template repos parseable
+    check_template_repos_parseable(paths, &mut checks);
+
+    // G8. Template repos registered (have mirrors)
+    check_template_repos_registered(paths, &cfg, &mut checks);
+
     // --- Workspace checks (if inside one) ---
     let cwd = std::env::current_dir()?;
     if let Ok(ws_dir) = workspace::detect(&cwd) {
@@ -243,6 +260,18 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
         // W9. AGENTS.md / CLAUDE.md validity
         check_agents_md_valid(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
+
+        // W5. Missing dirs map — collision disambiguation needed but missing
+        check_missing_dirs_map(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
+
+        // W6. Orphaned clone dirs — directories in workspace root not in metadata
+        check_orphaned_clone_dirs(&ws_dir, &meta, paths, &ws_scope, &mut checks);
+
+        // W10. Global wspignore defaults
+        check_wspignore_defaults(paths, &ws_scope, fix, &mut checks, &mut fixed);
+
+        // W11. go.work validity
+        check_go_work_valid(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
 
         // Per-repo checks
         let repo_infos = meta.repo_infos(&ws_dir);
@@ -397,6 +426,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     continue;
                 }
             }
+
+            // W13. Mirror refspec
+            check_mirror_refspec(
+                &info.clone_dir,
+                &info.dir_name,
+                &scope,
+                fix,
+                &mut checks,
+                &mut fixed,
+            );
 
             // All checks passed for this repo
             checks.push(DoctorCheck {
@@ -1252,9 +1291,720 @@ fn check_agents_md_valid(
     }
 }
 
+/// G3. Workspaces dir exists.
+fn check_workspaces_dir_exists(
+    paths: &Paths,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    if paths.workspaces_dir.exists() {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "workspaces-dir-exists".into(),
+            status: CheckStatus::Ok,
+            message: format!("workspaces dir exists: {}", paths.workspaces_dir.display()),
+            fixable: false,
+            details: None,
+        });
+        eprintln!(
+            "  ✓ workspaces dir exists: {}",
+            paths.workspaces_dir.display()
+        );
+    } else {
+        let fixable = true;
+        if fix {
+            match fs::create_dir_all(&paths.workspaces_dir) {
+                Ok(()) => {
+                    checks.push(DoctorCheck {
+                        scope: "global".into(),
+                        check: "workspaces-dir-exists".into(),
+                        status: CheckStatus::Ok,
+                        message: format!(
+                            "created workspaces dir: {}",
+                            paths.workspaces_dir.display()
+                        ),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!(
+                        "  ✓ created workspaces dir: {}",
+                        paths.workspaces_dir.display()
+                    );
+                    *fixed += 1;
+                }
+                Err(e) => {
+                    checks.push(DoctorCheck {
+                        scope: "global".into(),
+                        check: "workspaces-dir-exists".into(),
+                        status: CheckStatus::Error,
+                        message: format!("failed to create workspaces dir: {}", e),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!("  ✗ failed to create workspaces dir: {}", e);
+                }
+            }
+        } else {
+            checks.push(DoctorCheck {
+                scope: "global".into(),
+                check: "workspaces-dir-exists".into(),
+                status: CheckStatus::Error,
+                message: format!("workspaces dir missing: {}", paths.workspaces_dir.display()),
+                fixable,
+                details: None,
+            });
+            eprintln!(
+                "  ✗ workspaces dir missing: {}",
+                paths.workspaces_dir.display()
+            );
+        }
+    }
+}
+
+/// G5. GC orphaned entries — dirs in gc/ without valid metadata.
+fn check_gc_orphaned_entries(paths: &Paths, checks: &mut Vec<DoctorCheck>) {
+    if !paths.gc_dir.exists() {
+        return;
+    }
+
+    let mut orphaned = Vec::new();
+    if let Ok(entries) = fs::read_dir(&paths.gc_dir) {
+        for item in entries.flatten() {
+            let path = item.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let meta_path = path.join(".wsp-gc.yaml");
+            let is_orphaned = if meta_path.exists() {
+                // Metadata exists but might be corrupt
+                match fs::read_to_string(&meta_path) {
+                    Ok(data) => serde_yaml_ng::from_str::<gc::GcEntry>(&data).is_err(),
+                    Err(_) => true,
+                }
+            } else {
+                true
+            };
+            if is_orphaned && let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                orphaned.push(name.to_string());
+            }
+        }
+    }
+
+    if orphaned.is_empty() {
+        // No check emitted when clean — only report problems
+    } else {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "gc-orphaned-entries".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{} gc {} without valid metadata",
+                orphaned.len(),
+                if orphaned.len() == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
+            ),
+            fixable: false,
+            details: Some(serde_json::json!({ "orphaned": orphaned })),
+        });
+        eprintln!(
+            "  ⚠ {} gc {} without valid metadata",
+            orphaned.len(),
+            if orphaned.len() == 1 {
+                "entry"
+            } else {
+                "entries"
+            }
+        );
+    }
+}
+
+/// G6. GC disk usage — informational.
+fn check_gc_disk_usage(paths: &Paths, checks: &mut Vec<DoctorCheck>) {
+    if !paths.gc_dir.exists() {
+        return;
+    }
+
+    let total_bytes = dir_size(&paths.gc_dir);
+    let human = format_bytes(total_bytes);
+
+    checks.push(DoctorCheck {
+        scope: "global".into(),
+        check: "gc-disk-usage".into(),
+        status: CheckStatus::Ok,
+        message: format!("gc disk usage: {}", human),
+        fixable: false,
+        details: Some(serde_json::json!({ "bytes": total_bytes })),
+    });
+    eprintln!("  ✓ gc disk usage: {}", human);
+}
+
+/// G7. Template repos parseable — all repo URLs in templates parse via giturl.
+fn check_template_repos_parseable(paths: &Paths, checks: &mut Vec<DoctorCheck>) {
+    let names = match template::list(&paths.templates_dir) {
+        Ok(n) => n,
+        Err(_) => return, // No templates dir
+    };
+    if names.is_empty() {
+        return;
+    }
+
+    let mut bad = Vec::new();
+    for name in &names {
+        if let Ok(tmpl) = template::load(&paths.templates_dir, name) {
+            for repo in &tmpl.repos {
+                if giturl::parse(&repo.url).is_err() {
+                    bad.push(format!("{}:{}", name, repo.url));
+                }
+            }
+        }
+    }
+
+    if bad.is_empty() {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "template-repos-parseable".into(),
+            status: CheckStatus::Ok,
+            message: format!("{} template(s) have valid repo URLs", names.len()),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ {} template(s) have valid repo URLs", names.len());
+    } else {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "template-repos-parseable".into(),
+            status: CheckStatus::Warn,
+            message: format!("{} template repo URL(s) failed to parse", bad.len()),
+            fixable: false,
+            details: Some(serde_json::json!({ "invalid_urls": bad })),
+        });
+        eprintln!("  ⚠ {} template repo URL(s) failed to parse", bad.len());
+    }
+}
+
+/// G8. Template repos registered — template repos have corresponding mirrors.
+fn check_template_repos_registered(
+    paths: &Paths,
+    cfg: &config::Config,
+    checks: &mut Vec<DoctorCheck>,
+) {
+    let names = match template::list(&paths.templates_dir) {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    if names.is_empty() {
+        return;
+    }
+
+    let mut unregistered = Vec::new();
+    for name in &names {
+        if let Ok(tmpl) = template::load(&paths.templates_dir, name) {
+            for repo in &tmpl.repos {
+                if let Ok(parsed) = giturl::parse(&repo.url) {
+                    let identity = parsed.identity();
+                    if !cfg.repos.contains_key(&identity) {
+                        unregistered.push(format!("{}:{}", name, identity));
+                    }
+                }
+            }
+        }
+    }
+
+    if unregistered.is_empty() {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "template-repos-registered".into(),
+            status: CheckStatus::Ok,
+            message: "all template repos have mirrors".into(),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ all template repos have mirrors");
+    } else {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "template-repos-registered".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{} template repo(s) not in registry (mirrors will be created on `wsp new -t`)",
+                unregistered.len()
+            ),
+            fixable: false,
+            details: Some(serde_json::json!({ "unregistered": unregistered })),
+        });
+        eprintln!(
+            "  ⚠ {} template repo(s) not in registry",
+            unregistered.len()
+        );
+    }
+}
+
+/// W5. Missing dirs map — collision disambiguation needed but absent.
+fn check_missing_dirs_map(
+    ws_dir: &std::path::Path,
+    meta: &workspace::Metadata,
+    ws_scope: &str,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    let identities: Vec<&str> = meta.repos.keys().map(|s| s.as_str()).collect();
+    let expected = match workspace::compute_dir_names(&identities) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    // Check if metadata dirs map matches expected dirs map
+    if meta.dirs == expected {
+        return; // No mismatch
+    }
+
+    // Check if there are collisions that need entries but don't have them
+    let mut missing: Vec<String> = Vec::new();
+    for identity in expected.keys() {
+        if !meta.dirs.contains_key(identity) {
+            missing.push(identity.clone());
+        }
+    }
+
+    // Also check for entries in meta.dirs that shouldn't be there (expected is empty but dirs has entries)
+    let mut extra: Vec<String> = Vec::new();
+    for identity in meta.dirs.keys() {
+        if !expected.contains_key(identity) && meta.repos.contains_key(identity) {
+            extra.push(identity.clone());
+        }
+    }
+
+    if missing.is_empty() && extra.is_empty() {
+        return;
+    }
+
+    let fixable = true;
+    if fix {
+        match crate::filelock::with_metadata(ws_dir, |m| {
+            m.dirs = expected.clone();
+            Ok(())
+        }) {
+            Ok(_) => {
+                checks.push(DoctorCheck {
+                    scope: ws_scope.into(),
+                    check: "missing-dirs-map".into(),
+                    status: CheckStatus::Ok,
+                    message: "recomputed dirs collision map".into(),
+                    fixable,
+                    details: None,
+                });
+                eprintln!("  ✓ recomputed dirs collision map");
+                *fixed += 1;
+            }
+            Err(e) => {
+                checks.push(DoctorCheck {
+                    scope: ws_scope.into(),
+                    check: "missing-dirs-map".into(),
+                    status: CheckStatus::Warn,
+                    message: format!("dirs map mismatch, fix failed: {}", e),
+                    fixable,
+                    details: None,
+                });
+                eprintln!("  ⚠ dirs map mismatch, fix failed: {}", e);
+            }
+        }
+    } else {
+        let detail = if !missing.is_empty() {
+            format!("missing collision entries for: {}", missing.join(", "))
+        } else {
+            format!("extra dirs entries for: {}", extra.join(", "))
+        };
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "missing-dirs-map".into(),
+            status: CheckStatus::Warn,
+            message: detail,
+            fixable,
+            details: Some(serde_json::json!({
+                "expected": expected,
+                "actual": meta.dirs,
+            })),
+        });
+        eprintln!("  ⚠ dirs collision map out of sync");
+    }
+}
+
+/// W6. Orphaned clone dirs — directories in workspace root not in metadata.
+fn check_orphaned_clone_dirs(
+    ws_dir: &std::path::Path,
+    meta: &workspace::Metadata,
+    paths: &Paths,
+    ws_scope: &str,
+    checks: &mut Vec<DoctorCheck>,
+) {
+    let ignore_patterns = workspace::load_wspignore(paths.data_dir(), ws_dir);
+    let problems = match workspace::check_root_content(ws_dir, meta) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    // Filter out ignored paths
+    let unignored: Vec<_> = problems
+        .iter()
+        .filter(|p| !workspace::is_ignored(&p.path, &ignore_patterns))
+        .collect();
+
+    if unignored.is_empty() {
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "orphaned-clone-dirs".into(),
+            status: CheckStatus::Ok,
+            message: "workspace root is clean".into(),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ workspace root is clean");
+    } else {
+        let paths_list: Vec<&str> = unignored.iter().map(|p| p.path.as_str()).collect();
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "orphaned-clone-dirs".into(),
+            status: CheckStatus::Warn,
+            message: format!("{} unexpected item(s) in workspace root", unignored.len()),
+            fixable: false,
+            details: Some(serde_json::json!({ "paths": paths_list })),
+        });
+        eprintln!(
+            "  ⚠ {} unexpected item(s) in workspace root: {}",
+            unignored.len(),
+            paths_list.join(", ")
+        );
+    }
+}
+
+/// W10. Global wspignore defaults — check for expected default patterns.
+fn check_wspignore_defaults(
+    paths: &Paths,
+    ws_scope: &str,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    let wspignore_path = paths.data_dir().join("wspignore");
+    if !wspignore_path.exists() {
+        // ensure_global_wspignore will create it on next command; not an issue
+        return;
+    }
+
+    let content = match fs::read_to_string(&wspignore_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // Check that each non-comment, non-empty line from DEFAULT_WSPIGNORE is present
+    let expected: Vec<&str> = workspace::DEFAULT_WSPIGNORE
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with('#')
+        })
+        .collect();
+
+    let missing: Vec<&&str> = expected.iter().filter(|p| !content.contains(**p)).collect();
+
+    if missing.is_empty() {
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "wspignore-defaults".into(),
+            status: CheckStatus::Ok,
+            message: "global wspignore has all default patterns".into(),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ global wspignore has all default patterns");
+    } else {
+        let fixable = true;
+        if fix {
+            // Append missing patterns
+            let mut append = String::new();
+            append.push_str("\n# Added by wsp doctor --fix\n");
+            for pattern in &missing {
+                append.push_str(pattern);
+                append.push('\n');
+            }
+            match std::fs::OpenOptions::new()
+                .append(true)
+                .open(&wspignore_path)
+            {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    if f.write_all(append.as_bytes()).is_ok() {
+                        checks.push(DoctorCheck {
+                            scope: ws_scope.into(),
+                            check: "wspignore-defaults".into(),
+                            status: CheckStatus::Ok,
+                            message: format!(
+                                "appended {} missing default pattern(s) to wspignore",
+                                missing.len()
+                            ),
+                            fixable,
+                            details: None,
+                        });
+                        eprintln!(
+                            "  ✓ appended {} missing default pattern(s) to wspignore",
+                            missing.len()
+                        );
+                        *fixed += 1;
+                    } else {
+                        checks.push(DoctorCheck {
+                            scope: ws_scope.into(),
+                            check: "wspignore-defaults".into(),
+                            status: CheckStatus::Warn,
+                            message: "wspignore missing defaults, write failed".into(),
+                            fixable,
+                            details: None,
+                        });
+                        eprintln!("  ⚠ wspignore missing defaults, write failed");
+                    }
+                }
+                Err(_) => {
+                    checks.push(DoctorCheck {
+                        scope: ws_scope.into(),
+                        check: "wspignore-defaults".into(),
+                        status: CheckStatus::Warn,
+                        message: "wspignore missing defaults, could not open file".into(),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!("  ⚠ wspignore missing defaults, could not open file");
+                }
+            }
+        } else {
+            let missing_strs: Vec<&str> = missing.iter().map(|s| **s).collect();
+            checks.push(DoctorCheck {
+                scope: ws_scope.into(),
+                check: "wspignore-defaults".into(),
+                status: CheckStatus::Warn,
+                message: format!(
+                    "global wspignore missing {} default pattern(s)",
+                    missing.len()
+                ),
+                fixable,
+                details: Some(serde_json::json!({ "missing_patterns": missing_strs })),
+            });
+            eprintln!(
+                "  ⚠ global wspignore missing {} default pattern(s): {}",
+                missing.len(),
+                missing_strs.join(", ")
+            );
+        }
+    }
+}
+
+/// W11. go.work validity — check wsp-managed go.work header and regenerate if needed.
+fn check_go_work_valid(
+    ws_dir: &std::path::Path,
+    meta: &workspace::Metadata,
+    ws_scope: &str,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    let go_work_path = ws_dir.join("go.work");
+    if !go_work_path.exists() {
+        // No go.work — check if Go integration would create one
+        let go = lang::go::GoIntegration;
+        if lang::LanguageIntegration::detect(&go, ws_dir, meta) {
+            checks.push(DoctorCheck {
+                scope: ws_scope.into(),
+                check: "go-work-valid".into(),
+                status: CheckStatus::Warn,
+                message: "Go repos detected but go.work is missing".into(),
+                fixable: true,
+                details: None,
+            });
+            eprintln!("  ⚠ Go repos detected but go.work is missing");
+            if fix && let Ok(()) = lang::LanguageIntegration::apply(&go, ws_dir, meta) {
+                // Re-emit as fixed
+                let last = checks.last_mut().unwrap();
+                last.status = CheckStatus::Ok;
+                last.message = "generated go.work".into();
+                eprintln!("  ✓ generated go.work");
+                *fixed += 1;
+            }
+        }
+        return;
+    }
+
+    // go.work exists — check if it has the wsp header
+    if let Some(problem) = workspace::check_go_work(ws_dir) {
+        let fixable = true;
+        if fix {
+            let go = lang::go::GoIntegration;
+            match lang::LanguageIntegration::apply(&go, ws_dir, meta) {
+                Ok(()) => {
+                    checks.push(DoctorCheck {
+                        scope: ws_scope.into(),
+                        check: "go-work-valid".into(),
+                        status: CheckStatus::Ok,
+                        message: "regenerated go.work".into(),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!("  ✓ regenerated go.work");
+                    *fixed += 1;
+                }
+                Err(e) => {
+                    checks.push(DoctorCheck {
+                        scope: ws_scope.into(),
+                        check: "go-work-valid".into(),
+                        status: CheckStatus::Warn,
+                        message: format!("go.work: {}, fix failed: {}", problem, e),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!("  ⚠ go.work: {}, fix failed: {}", problem, e);
+                }
+            }
+        } else {
+            checks.push(DoctorCheck {
+                scope: ws_scope.into(),
+                check: "go-work-valid".into(),
+                status: CheckStatus::Warn,
+                message: format!("go.work: {}", problem),
+                fixable,
+                details: None,
+            });
+            eprintln!("  ⚠ go.work: {}", problem);
+        }
+    } else {
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "go-work-valid".into(),
+            status: CheckStatus::Ok,
+            message: "go.work is valid".into(),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ go.work is valid");
+    }
+}
+
+/// W13. Mirror refspec — check clone mirrors have correct fetch refspecs.
+fn check_mirror_refspec(
+    clone_dir: &std::path::Path,
+    dir_name: &str,
+    scope: &str,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    let expected_refspec = "+refs/heads/*:refs/remotes/origin/*";
+    let output = match git::remote_get_url(clone_dir, "origin") {
+        Ok(_) => {
+            // Check fetch refspec
+            match std::process::Command::new("git")
+                .args(["config", "--get-all", "remote.origin.fetch"])
+                .current_dir(clone_dir)
+                .output()
+            {
+                Ok(o) => o,
+                Err(_) => return,
+            }
+        }
+        Err(_) => return,
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let refspecs: Vec<&str> = stdout.lines().collect();
+
+    if refspecs.contains(&expected_refspec) {
+        return; // Correct refspec present, no check emitted
+    }
+
+    let fixable = true;
+    if fix {
+        let result = std::process::Command::new("git")
+            .args(["config", "--add", "remote.origin.fetch", expected_refspec])
+            .current_dir(clone_dir)
+            .output();
+        match result {
+            Ok(o) if o.status.success() => {
+                checks.push(DoctorCheck {
+                    scope: scope.into(),
+                    check: "mirror-refspec".into(),
+                    status: CheckStatus::Ok,
+                    message: format!("{}: added missing fetch refspec", dir_name),
+                    fixable,
+                    details: None,
+                });
+                eprintln!("  ✓ {}: added missing fetch refspec", dir_name);
+                *fixed += 1;
+            }
+            _ => {
+                checks.push(DoctorCheck {
+                    scope: scope.into(),
+                    check: "mirror-refspec".into(),
+                    status: CheckStatus::Warn,
+                    message: format!("{}: missing fetch refspec, fix failed", dir_name),
+                    fixable,
+                    details: None,
+                });
+                eprintln!("  ⚠ {}: missing fetch refspec, fix failed", dir_name);
+            }
+        }
+    } else {
+        checks.push(DoctorCheck {
+            scope: scope.into(),
+            check: "mirror-refspec".into(),
+            status: CheckStatus::Warn,
+            message: format!("{}: missing expected fetch refspec", dir_name),
+            fixable,
+            details: Some(serde_json::json!({
+                "current_refspecs": refspecs,
+                "expected": expected_refspec,
+            })),
+        });
+        eprintln!("  ⚠ {}: missing expected fetch refspec", dir_name);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if ft.is_dir() {
+                total += dir_size(&entry.path());
+            } else {
+                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    total
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} bytes", bytes)
+    }
+}
 
 fn build_output(checks: Vec<DoctorCheck>, fixed: usize) -> DoctorOutput {
     let total = checks.len();
@@ -1370,6 +2120,8 @@ mod tests {
         }
     }
 
+    /// Build Paths rooted under `tmp`. Does NOT create any directories — callers
+    /// must `fs::create_dir_all` for whichever dirs their test needs.
     fn test_paths(tmp: &std::path::Path) -> Paths {
         Paths {
             config_path: tmp.join("config.yaml"),
@@ -2533,5 +3285,722 @@ mod tests {
         assert_eq!(checks[0].status, CheckStatus::Warn);
         assert!(checks[0].message.contains("symlink"));
         assert_eq!(fixed, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // G3. workspaces-dir-exists
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn workspaces_dir_exists_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        fs::create_dir_all(&paths.workspaces_dir).unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_workspaces_dir_exists(&paths, false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "workspaces-dir-exists");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn workspaces_dir_missing_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            workspaces_dir: tmp.path().join("nonexistent"),
+            ..test_paths(tmp.path())
+        };
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_workspaces_dir_exists(&paths, false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Error);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn workspaces_dir_missing_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let new_ws_dir = tmp.path().join("new_workspaces");
+        let paths = Paths {
+            workspaces_dir: new_ws_dir.clone(),
+            ..test_paths(tmp.path())
+        };
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_workspaces_dir_exists(&paths, true, &mut checks, &mut fixed);
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(new_ws_dir.exists());
+    }
+
+    // -----------------------------------------------------------------------
+    // G5. gc-orphaned-entries
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gc_orphaned_entries_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        // Empty gc dir
+
+        let mut checks = Vec::new();
+        check_gc_orphaned_entries(&paths, &mut checks);
+
+        // No orphaned → no check emitted
+        assert!(checks.is_empty());
+    }
+
+    #[test]
+    fn gc_orphaned_entries_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+
+        // Create a dir in gc/ without .wsp-gc.yaml
+        let orphan = paths.gc_dir.join("orphan__12345");
+        fs::create_dir_all(&orphan).unwrap();
+
+        let mut checks = Vec::new();
+        check_gc_orphaned_entries(&paths, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "gc-orphaned-entries");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("1"));
+    }
+
+    #[test]
+    fn gc_orphaned_entries_corrupt_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+
+        // Create a dir with corrupt .wsp-gc.yaml
+        let orphan = paths.gc_dir.join("corrupt__12345");
+        fs::create_dir_all(&orphan).unwrap();
+        fs::write(orphan.join(".wsp-gc.yaml"), "not: valid: gc: entry:").unwrap();
+
+        let mut checks = Vec::new();
+        check_gc_orphaned_entries(&paths, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+    }
+
+    // -----------------------------------------------------------------------
+    // G6. gc-disk-usage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gc_disk_usage_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        fs::create_dir_all(&paths.gc_dir).unwrap();
+
+        let mut checks = Vec::new();
+        check_gc_disk_usage(&paths, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "gc-disk-usage");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(checks[0].message.contains("gc disk usage"));
+    }
+
+    #[test]
+    fn gc_disk_usage_with_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+
+        // Put some data in gc
+        let entry_dir = paths.gc_dir.join("test__12345");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(entry_dir.join("data.bin"), vec![0u8; 2048]).unwrap();
+
+        let mut checks = Vec::new();
+        check_gc_disk_usage(&paths, &mut checks);
+
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        // Should report bytes in details
+        let bytes = checks[0].details.as_ref().unwrap()["bytes"]
+            .as_u64()
+            .unwrap();
+        assert!(bytes >= 2048);
+    }
+
+    // -----------------------------------------------------------------------
+    // G7. template-repos-parseable
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn template_repos_parseable_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        fs::create_dir_all(&paths.templates_dir).unwrap();
+
+        // Create a template with valid URL
+        let tmpl = template::Template {
+            name: Some("test".into()),
+            description: None,
+            wsp_version: None,
+            repos: vec![template::TemplateRepo {
+                url: "git@github.com:acme/repo.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        template::save(&paths.templates_dir, "test", &tmpl).unwrap();
+
+        let mut checks = Vec::new();
+        check_template_repos_parseable(&paths, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "template-repos-parseable");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn template_repos_parseable_bad_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        fs::create_dir_all(&paths.templates_dir).unwrap();
+
+        let tmpl = template::Template {
+            name: Some("bad".into()),
+            description: None,
+            wsp_version: None,
+            repos: vec![template::TemplateRepo {
+                url: "not-a-valid-url".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        template::save(&paths.templates_dir, "bad", &tmpl).unwrap();
+
+        let mut checks = Vec::new();
+        check_template_repos_parseable(&paths, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("failed to parse"));
+    }
+
+    // -----------------------------------------------------------------------
+    // G8. template-repos-registered
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn template_repos_registered_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        fs::create_dir_all(&paths.templates_dir).unwrap();
+
+        let tmpl = template::Template {
+            name: Some("test".into()),
+            description: None,
+            wsp_version: None,
+            repos: vec![template::TemplateRepo {
+                url: "git@github.com:acme/repo.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        template::save(&paths.templates_dir, "test", &tmpl).unwrap();
+
+        let cfg = config::Config {
+            repos: std::collections::BTreeMap::from([(
+                "github.com/acme/repo".to_string(),
+                config::RepoEntry {
+                    url: "git@github.com:acme/repo.git".into(),
+                    added: chrono::Utc::now(),
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let mut checks = Vec::new();
+        check_template_repos_registered(&paths, &cfg, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn template_repos_unregistered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        fs::create_dir_all(&paths.templates_dir).unwrap();
+
+        let tmpl = template::Template {
+            name: Some("test".into()),
+            description: None,
+            wsp_version: None,
+            repos: vec![template::TemplateRepo {
+                url: "git@github.com:acme/repo.git".into(),
+            }],
+            config: None,
+            agent_md: None,
+        };
+        template::save(&paths.templates_dir, "test", &tmpl).unwrap();
+
+        let cfg = config::Config::default(); // No repos registered
+
+        let mut checks = Vec::new();
+        check_template_repos_registered(&paths, &cfg, &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("not in registry"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W5. missing-dirs-map
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn missing_dirs_map_no_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        // Two repos, no collision — dirs map should be empty
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/branch".into(),
+            repos: std::collections::BTreeMap::from([
+                ("github.com/acme/repo1".into(), None),
+                ("github.com/acme/repo2".into(), None),
+            ]),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::new(),
+        };
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_missing_dirs_map(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        // No collision → no check emitted
+        assert!(checks.is_empty());
+    }
+
+    #[test]
+    fn missing_dirs_map_collision_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        // Two repos with same short name but from different orgs → collision
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/branch".into(),
+            repos: std::collections::BTreeMap::from([
+                ("github.com/org1/shared".into(), None),
+                ("github.com/org2/shared".into(), None),
+            ]),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::new(), // Missing collision entries!
+        };
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_missing_dirs_map(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "missing-dirs-map");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn missing_dirs_map_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/branch".into(),
+            repos: std::collections::BTreeMap::from([
+                ("github.com/org1/shared".into(), None),
+                ("github.com/org2/shared".into(), None),
+            ]),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::new(),
+        };
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_missing_dirs_map(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            true,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+
+        // Verify fix persisted
+        let reloaded = workspace::load_metadata(&ws_dir).unwrap();
+        assert!(reloaded.dirs.contains_key("github.com/org1/shared"));
+        assert!(reloaded.dirs.contains_key("github.com/org2/shared"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W6. orphaned-clone-dirs
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn orphaned_clone_dirs_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata(
+            "test",
+            "test/branch",
+            std::collections::BTreeMap::from([("github.com/acme/repo".into(), None)]),
+        );
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Create the expected repo dir
+        fs::create_dir_all(ws_dir.join("repo")).unwrap();
+
+        let paths = test_paths(tmp.path());
+        let mut checks = Vec::new();
+        check_orphaned_clone_dirs(&ws_dir, &meta, &paths, "workspace/test", &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "orphaned-clone-dirs");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn orphaned_clone_dirs_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Create an unexpected directory
+        fs::create_dir_all(ws_dir.join("stray-dir")).unwrap();
+
+        let paths = test_paths(tmp.path());
+        let mut checks = Vec::new();
+        check_orphaned_clone_dirs(&ws_dir, &meta, &paths, "workspace/test", &mut checks);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].message.contains("unexpected"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W10. wspignore-defaults
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wspignore_defaults_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        // Write the default wspignore content
+        fs::write(
+            paths.data_dir().join("wspignore"),
+            workspace::DEFAULT_WSPIGNORE,
+        )
+        .unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_wspignore_defaults(&paths, "workspace/test", false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "wspignore-defaults");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn wspignore_defaults_missing_patterns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        // Write a partial wspignore
+        fs::write(paths.data_dir().join("wspignore"), "# Partial\n.DS_Store\n").unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_wspignore_defaults(&paths, "workspace/test", false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn wspignore_defaults_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        // Write a partial wspignore missing some defaults
+        fs::write(paths.data_dir().join("wspignore"), "# Partial\n.DS_Store\n").unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_wspignore_defaults(&paths, "workspace/test", true, &mut checks, &mut fixed);
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+
+        // Verify missing defaults were appended
+        let content = fs::read_to_string(paths.data_dir().join("wspignore")).unwrap();
+        assert!(content.contains("Thumbs.db"));
+        assert!(content.contains("desktop.ini"));
+    }
+
+    // -----------------------------------------------------------------------
+    // W11. go-work-valid
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn go_work_valid_no_go() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata(
+            "test",
+            "test/branch",
+            std::collections::BTreeMap::from([("github.com/acme/frontend".into(), None)]),
+        );
+        create_workspace_on_disk(&ws_dir, &meta);
+        // Create a non-Go repo
+        let repo_dir = ws_dir.join("frontend");
+        fs::create_dir_all(&repo_dir).unwrap();
+        fs::write(repo_dir.join("package.json"), "{}").unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_go_work_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        // No go.work, no Go repos → no check emitted
+        assert!(checks.is_empty());
+    }
+
+    #[test]
+    fn go_work_valid_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata(
+            "test",
+            "test/branch",
+            std::collections::BTreeMap::from([("github.com/acme/api".into(), None)]),
+        );
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // Create Go repo and valid go.work
+        let repo_dir = ws_dir.join("api");
+        fs::create_dir_all(&repo_dir).unwrap();
+        fs::write(
+            repo_dir.join("go.mod"),
+            "module example.com/api\n\ngo 1.22\n",
+        )
+        .unwrap();
+        fs::write(
+            ws_dir.join("go.work"),
+            format!(
+                "{}\ngo 1.22\n\nuse (\n\t./api\n)\n",
+                crate::lang::GO_WORK_HEADER
+            ),
+        )
+        .unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_go_work_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "go-work-valid");
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn go_work_not_wsp_managed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        let meta = test_metadata(
+            "test",
+            "test/branch",
+            std::collections::BTreeMap::from([("github.com/acme/api".into(), None)]),
+        );
+        create_workspace_on_disk(&ws_dir, &meta);
+
+        // go.work without wsp header
+        fs::write(ws_dir.join("go.work"), "go 1.22\n\nuse (\n\t./api\n)\n").unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_go_work_valid(
+            &ws_dir,
+            &meta,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    // -----------------------------------------------------------------------
+    // W13. mirror-refspec
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mirror_refspec_ok() {
+        let (clone_dir, _source, _ct, _st) = crate::testutil::setup_clone_repo();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_mirror_refspec(
+            &clone_dir,
+            "repo",
+            "workspace/test/repo",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        // setup_clone_repo creates proper refspecs → no check emitted
+        assert!(checks.is_empty());
+    }
+
+    #[test]
+    fn mirror_refspec_missing_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let clone_dir = tmp.path().join("repo");
+        fs::create_dir_all(&clone_dir).unwrap();
+        init_git_repo(&clone_dir);
+
+        // Add origin remote with no fetch refspec (bare remote)
+        git::run(
+            Some(&clone_dir),
+            &["remote", "add", "origin", "https://example.com/repo.git"],
+        )
+        .unwrap();
+        // Remove the default fetch refspec
+        let _ = std::process::Command::new("git")
+            .args(["config", "--unset-all", "remote.origin.fetch"])
+            .current_dir(&clone_dir)
+            .output();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_mirror_refspec(
+            &clone_dir,
+            "repo",
+            "workspace/test/repo",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].check, "mirror-refspec");
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+    }
+
+    #[test]
+    fn mirror_refspec_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let clone_dir = tmp.path().join("repo");
+        fs::create_dir_all(&clone_dir).unwrap();
+        init_git_repo(&clone_dir);
+
+        git::run(
+            Some(&clone_dir),
+            &["remote", "add", "origin", "https://example.com/repo.git"],
+        )
+        .unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["config", "--unset-all", "remote.origin.fetch"])
+            .current_dir(&clone_dir)
+            .output();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_mirror_refspec(
+            &clone_dir,
+            "repo",
+            "workspace/test/repo",
+            true,
+            &mut checks,
+            &mut fixed,
+        );
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+
+        // Verify refspec was added
+        let output = std::process::Command::new("git")
+            .args(["config", "--get-all", "remote.origin.fetch"])
+            .current_dir(&clone_dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("+refs/heads/*:refs/remotes/origin/*"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper: format_bytes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_bytes_cases() {
+        assert_eq!(format_bytes(0), "0 bytes");
+        assert_eq!(format_bytes(512), "512 bytes");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1048576), "1.0 MB");
+        assert_eq!(format_bytes(1073741824), "1.0 GB");
     }
 }
