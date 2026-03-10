@@ -74,8 +74,6 @@ wsp new my-feature -t dash                # create workspace from template
 wsp new my-feature -t dash api-gateway    # template + extra inline repos
 ```
 
-The `-t` / `--template` flag replaces `-g` / `--group`.
-
 Inline repos can still be specified without a template:
 ```
 wsp new my-feature api-gateway user-service
