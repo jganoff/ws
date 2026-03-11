@@ -18,7 +18,7 @@ pub fn cmd() -> Command {
              branch-prefix, workspaces-dir, gc.retention-days, git_config.* overrides, \
              and language integration toggles. Use `wsp config ls` to see all current values.",
         )
-        .subcommand_required(true)
+        .subcommand_required(false)
         .subcommand(list_cmd())
         .subcommand(get_cmd())
         .subcommand(set_cmd())
@@ -31,6 +31,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Some(("get", m)) => run_get(m, paths),
         Some(("set", m)) => run_set(m, paths),
         Some(("unset", m)) => run_unset(m, paths),
+        None => run_list(matches, paths),
         _ => unreachable!(),
     }
 }
