@@ -110,6 +110,26 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         });
     }
 
+    // experimental: show gate and individual features (only when enabled)
+    let exp = cfg.experimental.as_ref();
+    let exp_enabled = exp.is_some_and(|e| e.enabled);
+    entries.push(ConfigListEntry {
+        key: "experimental".into(),
+        value: exp_enabled.to_string(),
+    });
+    if exp_enabled {
+        for feature in config::EXPERIMENTAL_FEATURES {
+            let enabled = exp
+                .and_then(|e| e.features.get(*feature))
+                .copied()
+                .unwrap_or(false);
+            entries.push(ConfigListEntry {
+                key: format!("experimental.{}", feature),
+                value: enabled.to_string(),
+            });
+        }
+    }
+
     Ok(Output::ConfigList(ConfigListOutput { entries }))
 }
 
@@ -157,6 +177,31 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
                 value: effective.get(git_key).cloned(),
+            }))
+        }
+        "experimental" => {
+            let enabled = cfg.experimental.as_ref().is_some_and(|e| e.enabled);
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: Some(enabled.to_string()),
+            }))
+        }
+        k if k.starts_with("experimental.") => {
+            let feature = &k["experimental.".len()..];
+            if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
+                bail!(
+                    "unknown experimental feature: {} (known: {})",
+                    feature,
+                    config::EXPERIMENTAL_FEATURES.join(", ")
+                );
+            }
+            let enabled = cfg
+                .experimental
+                .as_ref()
+                .is_some_and(|e| e.is_feature_enabled(feature));
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: Some(enabled.to_string()),
             }))
         }
         _ => bail!("unknown config key: {}", key),
@@ -254,6 +299,49 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             })?;
             format!("git_config.{} = {}", git_key, value)
         }
+        "experimental" => {
+            let enabled: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
+            filelock::with_config(&paths.config_path, |cfg| {
+                let exp = cfg
+                    .experimental
+                    .get_or_insert_with(config::ExperimentalConfig::default);
+                exp.enabled = enabled;
+                Ok(())
+            })?;
+            format!("experimental = {}", enabled)
+        }
+        k if k.starts_with("experimental.") => {
+            let feature = &k["experimental.".len()..];
+            if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
+                bail!(
+                    "unknown experimental feature: {} (known: {})",
+                    feature,
+                    config::EXPERIMENTAL_FEATURES.join(", ")
+                );
+            }
+            let enabled: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
+            let feature = feature.to_string();
+            filelock::with_config(&paths.config_path, |cfg| {
+                let exp = cfg
+                    .experimental
+                    .get_or_insert_with(config::ExperimentalConfig::default);
+                // Auto-enable the gate when enabling a specific feature
+                if enabled {
+                    exp.enabled = true;
+                }
+                exp.features.insert(feature.clone(), enabled);
+                Ok(())
+            })?;
+            if enabled {
+                format!("experimental.{} = true (experimental enabled)", feature)
+            } else {
+                format!("experimental.{} = false", feature)
+            }
+        }
         _ => bail!("unknown config key: {}", key),
     };
 
@@ -337,6 +425,31 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Some(v) => format!("git_config.{} unset (default: {})", git_key, v),
                 None => format!("git_config.{} unset", git_key),
             }
+        }
+        "experimental" => {
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.experimental = None;
+                Ok(())
+            })?;
+            "experimental unset (default: false)".into()
+        }
+        k if k.starts_with("experimental.") => {
+            let feature = &k["experimental.".len()..];
+            if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
+                bail!(
+                    "unknown experimental feature: {} (known: {})",
+                    feature,
+                    config::EXPERIMENTAL_FEATURES.join(", ")
+                );
+            }
+            let feature = feature.to_string();
+            filelock::with_config(&paths.config_path, |cfg| {
+                if let Some(ref mut exp) = cfg.experimental {
+                    exp.features.remove(&feature);
+                }
+                Ok(())
+            })?;
+            format!("experimental.{} unset (default: false)", feature)
         }
         _ => bail!("unknown config key: {}", key),
     };

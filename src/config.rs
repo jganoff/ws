@@ -24,6 +24,24 @@ pub struct RepoEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExperimentalConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub features: BTreeMap<String, bool>,
+}
+
+impl ExperimentalConfig {
+    /// Returns true if the experimental gate is on AND the named feature is enabled.
+    pub fn is_feature_enabled(&self, feature: &str) -> bool {
+        self.enabled && self.features.get(feature).copied().unwrap_or(false)
+    }
+}
+
+/// All known experimental feature names.
+pub const EXPERIMENTAL_FEATURES: &[&str] = &["shell-tmux-title", "shell-prompt"];
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(
         default = "default_version",
@@ -46,6 +64,8 @@ pub struct Config {
     pub gc_retention_days: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_config: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experimental: Option<ExperimentalConfig>,
 }
 
 impl Config {
@@ -473,5 +493,59 @@ mod tests {
         // Effective still returns defaults
         let effective = cfg.effective_git_config();
         assert_eq!(effective.get("push.autoSetupRemote").unwrap(), "true");
+    }
+
+    #[test]
+    fn test_experimental_default_none() {
+        let cfg = Config::default();
+        assert!(cfg.experimental.is_none());
+    }
+
+    #[test]
+    fn test_experimental_is_feature_enabled() {
+        let mut exp = ExperimentalConfig::default();
+        // Gate off, feature off → false
+        assert!(!exp.is_feature_enabled("shell-prompt"));
+
+        // Gate off, feature on → false
+        exp.features.insert("shell-prompt".into(), true);
+        assert!(!exp.is_feature_enabled("shell-prompt"));
+
+        // Gate on, feature on → true
+        exp.enabled = true;
+        assert!(exp.is_feature_enabled("shell-prompt"));
+
+        // Gate on, feature off → false
+        assert!(!exp.is_feature_enabled("shell-tmux-title"));
+    }
+
+    #[test]
+    fn test_experimental_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+
+        let mut cfg = Config::default();
+        let mut exp = ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert("shell-prompt".into(), true);
+        exp.features.insert("shell-tmux-title".into(), false);
+        cfg.experimental = Some(exp);
+        cfg.save_to(&cfg_path).unwrap();
+
+        let loaded = Config::load_from(&cfg_path).unwrap();
+        let exp = loaded.experimental.unwrap();
+        assert!(exp.enabled);
+        assert!(exp.is_feature_enabled("shell-prompt"));
+        assert!(!exp.is_feature_enabled("shell-tmux-title"));
+    }
+
+    #[test]
+    fn test_backward_compat_no_experimental() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+        fs::write(&cfg_path, "branch_prefix: test\n").unwrap();
+
+        let cfg = Config::load_from(&cfg_path).unwrap();
+        assert!(cfg.experimental.is_none());
     }
 }
