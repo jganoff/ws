@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
 use clap::{Arg, ArgMatches, Command};
+use clap_complete::engine::ArgValueCandidates;
 
+use crate::cli::completers;
 use crate::config::{self, Paths};
 use crate::filelock;
 use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, MutationOutput, Output};
@@ -42,20 +44,34 @@ pub fn list_cmd() -> Command {
 pub fn get_cmd() -> Command {
     Command::new("get")
         .about("Get a config value [read-only]")
-        .arg(Arg::new("key").required(true))
+        .arg(
+            Arg::new("key")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_config_keys)),
+        )
 }
 
 pub fn set_cmd() -> Command {
     Command::new("set")
         .about("Set a config value")
-        .arg(Arg::new("key").required(true))
-        .arg(Arg::new("value").required(true))
+        .arg(
+            Arg::new("key")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_config_keys)),
+        )
+        .arg(
+            Arg::new("value")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_config_values)),
+        )
 }
 
 pub fn unset_cmd() -> Command {
-    Command::new("unset")
-        .about("Unset a config value")
-        .arg(Arg::new("key").required(true))
+    Command::new("unset").about("Unset a config value").arg(
+        Arg::new("key")
+            .required(true)
+            .add(ArgValueCandidates::new(completers::complete_config_keys)),
+    )
 }
 
 pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {

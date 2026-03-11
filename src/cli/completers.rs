@@ -68,6 +68,72 @@ pub fn complete_template_config_keys() -> Vec<CompletionCandidate> {
     ]
 }
 
+/// Complete config keys for `wsp config get/set/unset`.
+pub fn complete_config_keys() -> Vec<CompletionCandidate> {
+    let mut keys: Vec<CompletionCandidate> = vec![
+        CompletionCandidate::new("branch-prefix"),
+        CompletionCandidate::new("workspaces-dir"),
+        CompletionCandidate::new("sync-strategy"),
+        CompletionCandidate::new("agent-md"),
+        CompletionCandidate::new("gc.retention-days"),
+        CompletionCandidate::new("experimental"),
+    ];
+
+    // experimental.<feature> keys
+    for feature in crate::config::EXPERIMENTAL_FEATURES {
+        keys.push(CompletionCandidate::new(format!(
+            "experimental.{}",
+            feature
+        )));
+    }
+
+    // language-integrations.<name> keys
+    for name in crate::lang::integration_names() {
+        keys.push(CompletionCandidate::new(format!(
+            "language-integrations.{}",
+            name
+        )));
+    }
+
+    // git_config.* — show defaults as suggestions
+    for key in crate::config::Config::default_git_config().keys() {
+        keys.push(CompletionCandidate::new(format!("git_config.{}", key)));
+    }
+
+    keys
+}
+
+/// Complete config values for `wsp config set` based on the key being set.
+pub fn complete_config_values() -> Vec<CompletionCandidate> {
+    // Inspect prior args to find the key
+    let args: Vec<String> = std::env::args().collect();
+    // Pattern: wsp config set <key> <value>
+    let key = args
+        .iter()
+        .position(|a| a == "set")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.as_str());
+
+    match key {
+        Some("sync-strategy") => vec![
+            CompletionCandidate::new("rebase"),
+            CompletionCandidate::new("merge"),
+        ],
+        Some("agent-md" | "experimental") => bool_candidates(),
+        Some(k) if k.starts_with("language-integrations.") || k.starts_with("experimental.") => {
+            bool_candidates()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn bool_candidates() -> Vec<CompletionCandidate> {
+    vec![
+        CompletionCandidate::new("true"),
+        CompletionCandidate::new("false"),
+    ]
+}
+
 pub fn complete_workspaces() -> Vec<CompletionCandidate> {
     let Ok(paths) = Paths::resolve() else {
         return Vec::new();
