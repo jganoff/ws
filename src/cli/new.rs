@@ -24,7 +24,10 @@ pub fn cmd() -> Command {
             "Create a new workspace.\n\n\
              Sets up a directory with local clones of the specified repos, all sharing a \
              single feature branch. Clones are bootstrapped from local bare mirrors, so \
-             creation is fast and works offline once mirrors exist.",
+             creation is fast and works offline once mirrors exist.\n\n\
+             When run inside an existing workspace with no repos specified, automatically \
+             copies the repo list from the current workspace. This makes it easy to spin up \
+             parallel workspaces for related features.",
         )
         .arg(Arg::new("workspace").required(true))
         .arg(
@@ -166,8 +169,37 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         repo_refs.insert(id, String::new());
     }
 
-    if repo_refs.is_empty() {
-        bail!("no repos specified (use repo args, -t, -w, or -f)");
+    // Implicit -w: if no repos specified and we're inside a workspace, copy its repos
+    if repo_refs.is_empty()
+        && repo_args.is_empty()
+        && template_source.is_none()
+        && from_workspace.is_none()
+        && from_file.is_none()
+    {
+        let cwd = std::env::current_dir()?;
+        if let Ok(ws_dir) = workspace::detect(&cwd) {
+            let meta = workspace::load_metadata(&ws_dir)?;
+            let source_name = &meta.name;
+            let tmpl = template::from_workspace(paths, source_name)?;
+
+            template::auto_register(&tmpl, &mut cfg, paths)?;
+
+            let identities = tmpl.identities()?;
+            let count = identities.len();
+            for id in identities {
+                repo_refs.insert(id, String::new());
+            }
+            eprintln!(
+                "Copying {} repo{} from workspace {}",
+                count,
+                if count == 1 { "" } else { "s" },
+                source_name,
+            );
+            created_from = Some(format!("workspace:{}", source_name));
+            loaded_template = Some(tmpl);
+        } else {
+            bail!("no repos specified (use repo args, -t, -w, or -f)");
+        }
     }
 
     // Validate early before expensive I/O
