@@ -106,7 +106,7 @@ The gc dir lives alongside mirrors in the XDG data directory (`~/.local/share/ws
 
 ## Security Notes
 
-- **Shell completion scripts** (`src/cli/completion.rs`): User-configurable values (paths, config) embedded in generated shell code must be escaped for the target shell. Single quotes in POSIX shells have no escape mechanism — use `'` → `'\''`. In fish, use `'` → `\'`. Always test with shell metacharacters (`'`, `$`, `` ` ``, newlines) in paths.
+- **Shell completion scripts** (`src/cli/completion.rs`): User-configurable values (paths, config) embedded in generated shell code must be escaped for the target shell. Single quotes in POSIX shells have no escape mechanism — use `'` → `'\''`. In fish, use `'` → `\'`. Always test with shell metacharacters (`'`, `$`, `` ` ``, newlines) in paths. Clap's `COMPLETE=zsh` output calls `compdef` which requires `compinit` — the zsh codepath guards against this with a no-op stub + stderr warning. Any changes to the zsh completion path must preserve this guard.
 - **Path traversal**: `giturl::validate_component()` guards identity parsing. Any new code that builds filesystem paths from user input must go through similar validation.
 - `#![deny(unsafe_code)]` is enforced at the crate root.
 - **Platform-specific code**: wsp ships on macOS, Linux, and Windows. Never use `std::os::unix` or `std::os::windows` without `#[cfg(unix)]` / `#[cfg(windows)]` guards. See `src/agentmd.rs:218` for the pattern. `just check-cross` type-checks against Windows and Linux targets to catch this locally.
@@ -123,6 +123,8 @@ The project was renamed from `ws` to `wsp`. User-facing identifiers all use `wsp
 - Brew formula: `wsp`
 
 Internal Rust variable names (`ws_dir`, `ws_bin` parameters) are kept as shorthand for "workspace" and are NOT product identifiers — don't rename them.
+
+**CLAUDE.md is a symlink to AGENTS.md** — wsp generates AGENTS.md in workspace roots (with `<!-- wsp:begin/end -->` markers) and creates CLAUDE.md as a symlink to it. Edits to either file modify the same underlying file. Do not replace the symlink with a regular file. The `wsp doctor` W9 check validates this relationship.
 
 ## Conventions
 
