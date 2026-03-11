@@ -1,4 +1,5 @@
 use clap::{Arg, Command};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use serde::Serialize;
 
 use crate::output::Output;
@@ -212,6 +213,26 @@ struct HelpTopicSummary {
     summary: String,
 }
 
+fn complete_help_topics() -> Vec<CompletionCandidate> {
+    let mut candidates: Vec<CompletionCandidate> = TOPICS
+        .iter()
+        .map(|(name, summary, _)| CompletionCandidate::new(*name).help(Some((*summary).into())))
+        .collect();
+
+    // Also complete subcommand names (wsp help <command> shows --help)
+    let cli = super::build_cli();
+    for sub in cli.get_subcommands() {
+        let name = sub.get_name();
+        if name == "help" || sub.is_hide_set() {
+            continue;
+        }
+        let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+        candidates.push(CompletionCandidate::new(name).help(Some(about.into())));
+    }
+
+    candidates
+}
+
 pub fn cmd() -> Command {
     Command::new("help")
         .about("Display help for a command or topic [read-only]")
@@ -221,7 +242,11 @@ pub fn cmd() -> Command {
              detailed documentation for that topic. Use `wsp help -g` to list \
              available guides.",
         )
-        .arg(Arg::new("topic").help("Command name or help topic"))
+        .arg(
+            Arg::new("topic")
+                .help("Command name or help topic")
+                .add(ArgValueCandidates::new(complete_help_topics)),
+        )
         .arg(
             Arg::new("guides")
                 .short('g')
