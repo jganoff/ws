@@ -242,6 +242,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     // G10. Global wspignore defaults
     check_wspignore_defaults(paths, fix, &mut checks, &mut fixed);
 
+    // G11. Unknown experimental keys — typos or stale keys in experimental config
+    check_unknown_experimental_keys(paths, &cfg, fix, &mut checks, &mut fixed);
+
     // --- Workspace checks (if inside one) ---
     let cwd = std::env::current_dir()?;
     if let Ok(ws_dir) = workspace::detect(&cwd) {
@@ -1539,6 +1542,126 @@ fn check_template_repos_registered(
         eprintln!(
             "  ⚠ {} template repo(s) not in registry",
             unregistered.len()
+        );
+    }
+}
+
+/// G11. Unknown experimental keys — typos or stale feature names in experimental config.
+fn check_unknown_experimental_keys(
+    paths: &Paths,
+    cfg: &config::Config,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    let exp = match cfg.experimental.as_ref() {
+        Some(e) if !e.features.is_empty() => e,
+        _ => {
+            checks.push(DoctorCheck {
+                scope: "global".into(),
+                check: "unknown-experimental-keys".into(),
+                status: CheckStatus::Ok,
+                message: "no unknown experimental keys".into(),
+                fixable: false,
+                details: None,
+            });
+            eprintln!("  ✓ no unknown experimental keys");
+            return;
+        }
+    };
+
+    let unknown: Vec<String> = exp
+        .features
+        .keys()
+        .filter(|k| !config::EXPERIMENTAL_FEATURES.contains(&k.as_str()))
+        .cloned()
+        .collect();
+
+    if unknown.is_empty() {
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "unknown-experimental-keys".into(),
+            status: CheckStatus::Ok,
+            message: "no unknown experimental keys".into(),
+            fixable: false,
+            details: None,
+        });
+        eprintln!("  ✓ no unknown experimental keys");
+    } else {
+        let fixable = true;
+        if fix {
+            let to_remove = unknown.clone();
+            match crate::filelock::with_config(&paths.config_path, |cfg| {
+                if let Some(ref mut exp) = cfg.experimental {
+                    for key in &to_remove {
+                        exp.features.remove(key);
+                    }
+                }
+                Ok(())
+            }) {
+                Ok(_) => {
+                    checks.push(DoctorCheck {
+                        scope: "global".into(),
+                        check: "unknown-experimental-keys".into(),
+                        status: CheckStatus::Ok,
+                        message: format!(
+                            "removed {} unknown experimental key(s): {}",
+                            unknown.len(),
+                            unknown.join(", ")
+                        ),
+                        fixable,
+                        details: Some(serde_json::json!({ "removed": unknown })),
+                    });
+                    eprintln!(
+                        "  ✓ removed {} unknown experimental key(s): {}",
+                        unknown.len(),
+                        unknown.join(", ")
+                    );
+                    *fixed += 1;
+                    return;
+                }
+                Err(e) => {
+                    checks.push(DoctorCheck {
+                        scope: "global".into(),
+                        check: "unknown-experimental-keys".into(),
+                        status: CheckStatus::Warn,
+                        message: format!(
+                            "{} unknown experimental key(s), fix failed: {}",
+                            unknown.len(),
+                            e
+                        ),
+                        fixable,
+                        details: Some(serde_json::json!({ "unknown": unknown })),
+                    });
+                    eprintln!(
+                        "  ⚠ {} unknown experimental key(s), fix failed: {}",
+                        unknown.len(),
+                        e
+                    );
+                    return;
+                }
+            }
+        }
+        checks.push(DoctorCheck {
+            scope: "global".into(),
+            check: "unknown-experimental-keys".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{} unknown experimental key(s): {} (known: {})",
+                unknown.len(),
+                unknown.join(", "),
+                config::EXPERIMENTAL_FEATURES.join(", ")
+            ),
+            fixable,
+            details: Some(serde_json::json!({
+                "unknown": unknown,
+                "known": config::EXPERIMENTAL_FEATURES,
+            })),
+        });
+        eprintln!(
+            "  ⚠ {} unknown experimental key(s): {}",
+            unknown.len(),
+            unknown.join(", ")
         );
     }
 }
@@ -4046,6 +4169,94 @@ mod tests {
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("+refs/heads/*:refs/remotes/origin/*"));
+    }
+
+    // -----------------------------------------------------------------------
+    // G11: Unknown experimental keys
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unknown_experimental_keys_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let cfg = config::Config::default();
+        cfg.save_to(&paths.config_path).unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_unknown_experimental_keys(&paths, &cfg, false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn unknown_experimental_keys_all_known() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let mut cfg = config::Config::default();
+        let mut exp = config::ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert("shell-prompt".into(), true);
+        cfg.experimental = Some(exp);
+        cfg.save_to(&paths.config_path).unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_unknown_experimental_keys(&paths, &cfg, false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn unknown_experimental_keys_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let mut cfg = config::Config::default();
+        let mut exp = config::ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert("shell-promt".into(), true); // typo
+        exp.features.insert("old-removed-feature".into(), false);
+        cfg.experimental = Some(exp);
+        cfg.save_to(&paths.config_path).unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_unknown_experimental_keys(&paths, &cfg, false, &mut checks, &mut fixed);
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
+        assert!(checks[0].message.contains("old-removed-feature"));
+        assert!(checks[0].message.contains("shell-promt"));
+    }
+
+    #[test]
+    fn unknown_experimental_keys_fix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let mut cfg = config::Config::default();
+        let mut exp = config::ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert("shell-prompt".into(), true); // valid
+        exp.features.insert("typo-feature".into(), true); // invalid
+        cfg.experimental = Some(exp);
+        cfg.save_to(&paths.config_path).unwrap();
+
+        let mut checks = Vec::new();
+        let mut fixed = 0;
+        check_unknown_experimental_keys(&paths, &cfg, true, &mut checks, &mut fixed);
+
+        assert_eq!(fixed, 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+        assert!(checks[0].message.contains("removed"));
+
+        // Verify the valid key was preserved
+        let reloaded = config::Config::load_from(&paths.config_path).unwrap();
+        let exp = reloaded.experimental.unwrap();
+        assert!(exp.features.contains_key("shell-prompt"));
+        assert!(!exp.features.contains_key("typo-feature"));
     }
 
     // -----------------------------------------------------------------------

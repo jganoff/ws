@@ -229,14 +229,19 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let value = matches.get_one::<String>("value").unwrap();
 
     // Validate inputs before acquiring lock
-    let message = match key.as_str() {
+    let (message, hint) = match key.as_str() {
         "branch-prefix" => {
             let v = value.clone();
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.branch_prefix = Some(v);
                 Ok(())
             })?;
-            format!("branch-prefix = {}", value)
+            (
+                format!("branch-prefix = {}", value),
+                Some(
+                    "new workspaces will use this prefix; existing workspaces are unchanged".into(),
+                ),
+            )
         }
         "workspaces-dir" => {
             let path = std::path::Path::new(value.as_str());
@@ -248,7 +253,12 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 cfg.workspaces_dir = Some(v);
                 Ok(())
             })?;
-            format!("workspaces-dir = {}", value)
+            (
+                format!("workspaces-dir = {}", value),
+                Some(
+                    "new workspaces will be created here; existing workspaces are not moved".into(),
+                ),
+            )
         }
         "sync-strategy" => {
             match value.as_str() {
@@ -260,7 +270,10 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 cfg.sync_strategy = Some(v);
                 Ok(())
             })?;
-            format!("sync-strategy = {}", value)
+            (
+                format!("sync-strategy = {}", value),
+                Some(format!("wsp sync will use {} for all workspaces", value)),
+            )
         }
         "agent-md" => {
             let enabled: bool = value
@@ -270,7 +283,10 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 cfg.agent_md = Some(enabled);
                 Ok(())
             })?;
-            format!("agent-md = {}", enabled)
+            (
+                format!("agent-md = {}", enabled),
+                Some("takes effect on next wsp new or wsp sync".into()),
+            )
         }
         "gc.retention-days" => {
             let days: u32 = value
@@ -283,7 +299,13 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 cfg.gc_retention_days = Some(days);
                 Ok(())
             })?;
-            format!("gc.retention-days = {}", days)
+            (
+                format!("gc.retention-days = {}", days),
+                Some(format!(
+                    "deleted workspaces recoverable via wsp recover for {} days",
+                    days
+                )),
+            )
         }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
@@ -300,7 +322,10 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 integrations.insert(lang.clone(), enabled);
                 Ok(())
             })?;
-            format!("language-integrations.{} = {}", lang, enabled)
+            (
+                format!("language-integrations.{} = {}", lang, enabled),
+                Some("takes effect on next wsp new or wsp sync".into()),
+            )
         }
         k if k.starts_with("git_config.") => {
             let git_key = k["git_config.".len()..].to_string();
@@ -313,7 +338,10 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 gc.insert(git_key.clone(), v);
                 Ok(())
             })?;
-            format!("git_config.{} = {}", git_key, value)
+            (
+                format!("git_config.{} = {}", git_key, value),
+                Some("applied to new clones; run wsp sync to update existing repos".into()),
+            )
         }
         "experimental" => {
             let enabled: bool = value
@@ -326,7 +354,12 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 exp.enabled = enabled;
                 Ok(())
             })?;
-            format!("experimental = {}", enabled)
+            let hint = if enabled {
+                "use wsp config set experimental.<feature> true to enable specific features"
+            } else {
+                "all experimental features are now disabled"
+            };
+            (format!("experimental = {}", enabled), Some(hint.into()))
         }
         k if k.starts_with("experimental.") => {
             let feature = &k["experimental.".len()..];
@@ -352,56 +385,86 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 exp.features.insert(feature.clone(), enabled);
                 Ok(())
             })?;
-            if enabled {
+            let msg = if enabled {
                 format!("experimental.{} = true (experimental enabled)", feature)
             } else {
                 format!("experimental.{} = false", feature)
-            }
+            };
+            (msg, config_set_hint_for_experimental(&feature, enabled))
         }
         _ => bail!("unknown config key: {}", key),
     };
 
-    Ok(Output::Mutation(MutationOutput::new(message)))
+    let mut out = MutationOutput::new(message);
+    if let Some(h) = hint {
+        out = out.with_hint(h);
+    }
+    Ok(Output::Mutation(out))
+}
+
+/// Extracts the hint from an Output::Mutation, if present.
+#[cfg(test)]
+fn extract_hint(output: &Output) -> Option<&str> {
+    match output {
+        Output::Mutation(m) => m.hint.as_deref(),
+        _ => None,
+    }
+}
+
+/// Returns a hint for setting an experimental feature, if applicable.
+fn config_set_hint_for_experimental(feature: &str, enabled: bool) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    match feature {
+        "shell-prompt" | "shell-tmux-title" => {
+            Some("re-source your shell to activate: eval \"$(wsp completion zsh)\"".into())
+        }
+        _ => None,
+    }
 }
 
 pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let key = matches.get_one::<String>("key").unwrap();
 
-    let message = match key.as_str() {
+    let (message, hint) = match key.as_str() {
         "branch-prefix" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.branch_prefix = None;
                 Ok(())
             })?;
-            "branch-prefix unset".into()
+            ("branch-prefix unset".into(), None)
         }
         "workspaces-dir" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.workspaces_dir = None;
                 Ok(())
             })?;
-            "workspaces-dir unset (default: ~/dev/workspaces)".into()
+            (
+                "workspaces-dir unset (default: ~/dev/workspaces)".into(),
+                None,
+            )
         }
         "sync-strategy" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.sync_strategy = None;
                 Ok(())
             })?;
-            "sync-strategy unset (default: rebase)".into()
+            ("sync-strategy unset (default: rebase)".into(), None)
         }
         "agent-md" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.agent_md = None;
                 Ok(())
             })?;
-            "agent-md unset (default: true)".into()
+            ("agent-md unset (default: true)".into(), None)
         }
         "gc.retention-days" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.gc_retention_days = None;
                 Ok(())
             })?;
-            "gc.retention-days unset (default: 7)".into()
+            ("gc.retention-days unset (default: 7)".into(), None)
         }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];
@@ -419,7 +482,10 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Ok(())
             })?;
-            format!("language-integrations.{} unset (default: false)", lang)
+            (
+                format!("language-integrations.{} unset (default: false)", lang),
+                None,
+            )
         }
         k if k.starts_with("git_config.") => {
             let git_key = k["git_config.".len()..].to_string();
@@ -437,17 +503,21 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Ok(())
             })?;
-            match default_val {
+            let msg = match default_val {
                 Some(v) => format!("git_config.{} unset (default: {})", git_key, v),
                 None => format!("git_config.{} unset", git_key),
-            }
+            };
+            (msg, None)
         }
         "experimental" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.experimental = None;
                 Ok(())
             })?;
-            "experimental unset (default: false)".into()
+            (
+                "experimental unset (default: false)".into(),
+                Some("all experimental features and their settings have been reset".into()),
+            )
         }
         k if k.starts_with("experimental.") => {
             let feature = &k["experimental.".len()..];
@@ -465,10 +535,133 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Ok(())
             })?;
-            format!("experimental.{} unset (default: false)", feature)
+            let hint = config_set_hint_for_experimental(&feature, false);
+            (
+                format!("experimental.{} unset (default: false)", feature),
+                hint,
+            )
         }
         _ => bail!("unknown config key: {}", key),
     };
 
-    Ok(Output::Mutation(MutationOutput::new(message)))
+    let mut out = MutationOutput::new(message);
+    if let Some(h) = hint {
+        out = out.with_hint(h);
+    }
+    Ok(Output::Mutation(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Paths;
+
+    fn test_paths(tmp: &std::path::Path) -> Paths {
+        Paths {
+            config_path: tmp.join("config.yaml"),
+            mirrors_dir: tmp.join("mirrors"),
+            gc_dir: tmp.join("gc"),
+            templates_dir: tmp.join("templates"),
+            workspaces_dir: tmp.join("workspaces"),
+        }
+    }
+
+    /// Helper: run `wsp config set <key> <value>` and return the Output.
+    fn do_set(paths: &Paths, key: &str, value: &str) -> Output {
+        let cmd = set_cmd();
+        let matches = cmd.get_matches_from(["set", key, value]);
+        run_set(&matches, paths).unwrap()
+    }
+
+    /// Helper: run `wsp config unset <key>` and return the Output.
+    fn do_unset(paths: &Paths, key: &str) -> Output {
+        let cmd = unset_cmd();
+        let matches = cmd.get_matches_from(["unset", key]);
+        run_unset(&matches, paths).unwrap()
+    }
+
+    #[test]
+    fn set_hints_present_for_all_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+
+        let cases = vec![
+            ("branch-prefix", "jg"),
+            ("workspaces-dir", "/tmp/ws"),
+            ("sync-strategy", "merge"),
+            ("agent-md", "true"),
+            ("gc.retention-days", "14"),
+            ("language-integrations.go", "true"),
+            ("git_config.push.default", "current"),
+            ("experimental", "true"),
+            ("experimental.shell-prompt", "true"),
+            ("experimental.shell-tmux-title", "true"),
+        ];
+
+        for (key, value) in cases {
+            let out = do_set(&paths, key, value);
+            assert!(
+                extract_hint(&out).is_some(),
+                "config set {} should produce a hint",
+                key,
+            );
+        }
+    }
+
+    #[test]
+    fn set_experimental_shell_hint_mentions_shell() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+
+        let out = do_set(&paths, "experimental.shell-prompt", "true");
+        let hint = extract_hint(&out).unwrap();
+        assert!(
+            hint.contains("eval") && hint.contains("completion"),
+            "shell feature hint should mention re-sourcing: got {:?}",
+            hint
+        );
+    }
+
+    #[test]
+    fn set_experimental_disabled_no_shell_hint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+
+        // Enable first so we can disable
+        do_set(&paths, "experimental.shell-prompt", "true");
+        let out = do_set(&paths, "experimental.shell-prompt", "false");
+        // Disabling should not produce a "re-source" hint
+        let hint = extract_hint(&out);
+        assert!(
+            hint.is_none() || !hint.unwrap().contains("eval"),
+            "disabling shell feature should not suggest re-sourcing"
+        );
+    }
+
+    #[test]
+    fn unset_experimental_warns_about_reset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+
+        do_set(&paths, "experimental.shell-prompt", "true");
+        let out = do_unset(&paths, "experimental");
+        let hint = extract_hint(&out).unwrap();
+        assert!(
+            hint.contains("reset"),
+            "unsetting experimental should warn about reset: got {:?}",
+            hint
+        );
+    }
 }

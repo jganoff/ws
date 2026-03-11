@@ -296,6 +296,8 @@ pub struct MutationOutput {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 impl MutationOutput {
@@ -304,11 +306,17 @@ impl MutationOutput {
             ok: true,
             message: message.into(),
             duration_ms: None,
+            hint: None,
         }
     }
 
     pub fn with_duration(mut self, duration_ms: u64) -> Self {
         self.duration_ms = Some(duration_ms);
+        self
+    }
+
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
         self
     }
 }
@@ -648,6 +656,7 @@ impl MutationOutput {
             ok: true,
             message: "Registered github.com/acme/api-gateway".into(),
             duration_ms: None,
+            hint: None,
         }
     }
 }
@@ -1086,6 +1095,9 @@ fn render_mutation_text(v: MutationOutput) -> Result<()> {
     match v.duration_ms {
         Some(ms) => println!("{} ({:.1}s)", v.message, ms as f64 / 1000.0),
         None => println!("{}", v.message),
+    }
+    if let Some(hint) = &v.hint {
+        println!("  {}", hint);
     }
     Ok(())
 }
@@ -1663,6 +1675,16 @@ mod tests {
         let val = serde_json::to_value(&output).unwrap();
         assert_eq!(val["ok"], true);
         assert_eq!(val["message"], "Registered repo");
+        assert!(val.get("hint").is_none()); // omitted when None
+    }
+
+    #[test]
+    fn test_json_mutation_with_hint() {
+        let output = MutationOutput::new("experimental.shell-prompt = true")
+            .with_hint("re-source your shell to activate");
+        let val = serde_json::to_value(&output).unwrap();
+        assert_eq!(val["ok"], true);
+        assert_eq!(val["hint"], "re-source your shell to activate");
     }
 
     #[test]
