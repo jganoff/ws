@@ -3,8 +3,21 @@ use std::io::Write;
 use anyhow::{Result, bail};
 use clap::{Arg, ArgMatches, Command};
 
-use crate::config::Paths;
+use crate::config::{Config, Paths};
 use crate::output::Output;
+
+/// Shell hook options baked in at generation time from config.
+#[derive(Debug, Clone, Copy, Default)]
+struct ShellHookOpts {
+    tmux_title: bool,
+    prompt: bool,
+}
+
+impl ShellHookOpts {
+    fn any_enabled(&self) -> bool {
+        self.tmux_title || self.prompt
+    }
+}
 
 pub fn cmd() -> Command {
     Command::new("completion")
@@ -23,17 +36,25 @@ pub fn cmd() -> Command {
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let shell = matches.get_one::<String>("shell").unwrap();
+    let cfg = Config::load_from(&paths.config_path)?;
+    let hooks = match cfg.experimental.as_ref() {
+        Some(exp) => ShellHookOpts {
+            tmux_title: exp.is_feature_enabled("shell-tmux-title"),
+            prompt: exp.is_feature_enabled("shell-prompt"),
+        },
+        None => ShellHookOpts::default(),
+    };
     match shell.as_str() {
         "zsh" => {
-            generate_posix(&mut std::io::stdout(), paths, "zsh")?;
+            generate_posix(&mut std::io::stdout(), paths, "zsh", hooks)?;
             Ok(Output::None)
         }
         "bash" => {
-            generate_posix(&mut std::io::stdout(), paths, "bash")?;
+            generate_posix(&mut std::io::stdout(), paths, "bash", hooks)?;
             Ok(Output::None)
         }
         "fish" => {
-            generate_fish(&mut std::io::stdout(), paths)?;
+            generate_fish(&mut std::io::stdout(), paths, hooks)?;
             Ok(Output::None)
         }
         _ => bail!("unsupported shell: {} (supported: zsh, bash, fish)", shell),
@@ -63,13 +84,24 @@ fn fish_escape(s: &str) -> String {
 
 // ---------- zsh / bash (POSIX-like) ----------
 
-fn generate_posix(w: &mut dyn Write, paths: &Paths, shell: &str) -> Result<()> {
+fn generate_posix(
+    w: &mut dyn Write,
+    paths: &Paths,
+    shell: &str,
+    hooks: ShellHookOpts,
+) -> Result<()> {
     let bin_str = bin_path()?;
     let wsp_root = paths.workspaces_dir.display().to_string();
-    write_posix(w, &bin_str, &wsp_root, shell)
+    write_posix(w, &bin_str, &wsp_root, shell, hooks)
 }
 
-fn write_posix(w: &mut dyn Write, bin_str: &str, wsp_root: &str, shell: &str) -> Result<()> {
+fn write_posix(
+    w: &mut dyn Write,
+    bin_str: &str,
+    wsp_root: &str,
+    shell: &str,
+    hooks: ShellHookOpts,
+) -> Result<()> {
     let cases = build_posix_cases();
     let bin_esc = posix_escape(bin_str);
     let root_esc = posix_escape(wsp_root);
@@ -123,6 +155,11 @@ fn write_posix(w: &mut dyn Write, bin_str: &str, wsp_root: &str, shell: &str) ->
         writeln!(w, "fi")?;
     } else {
         writeln!(w, "source <(COMPLETE={shell} '{bin_esc}')")?;
+    }
+
+    // Experimental: shell hooks for workspace detection, tmux title, prompt variable
+    if hooks.any_enabled() {
+        write_posix_hooks(w, &root_esc, shell, hooks)?;
     }
 
     Ok(())
@@ -188,15 +225,78 @@ fn build_posix_cd_out(cmd_name: &str) -> String {
     )
 }
 
-// ---------- fish ----------
+fn write_posix_hooks(
+    w: &mut dyn Write,
+    root_esc: &str,
+    shell: &str,
+    hooks: ShellHookOpts,
+) -> Result<()> {
+    writeln!(w)?;
+    writeln!(
+        w,
+        "# wsp shell hooks (experimental) — workspace detection + integrations"
+    )?;
+    writeln!(w, "_wsp_hook() {{")?;
+    writeln!(w, "  local wsp_root='{root_esc}'")?;
+    writeln!(w, "  if [[ \"$PWD\" = \"$wsp_root\"/* ]]; then")?;
+    writeln!(w, "    local _wsp_ws=\"${{PWD#$wsp_root/}}\"")?;
+    writeln!(w, "    _wsp_ws=\"${{_wsp_ws%%/*}}\"")?;
+    writeln!(w, "    export WSP_WORKSPACE=\"$_wsp_ws\"")?;
+    writeln!(w, "  else")?;
+    writeln!(w, "    unset WSP_WORKSPACE")?;
+    writeln!(w, "  fi")?;
 
-fn generate_fish(w: &mut dyn Write, paths: &Paths) -> Result<()> {
-    let bin_str = bin_path()?;
-    let wsp_root = paths.workspaces_dir.display().to_string();
-    write_fish(w, &bin_str, &wsp_root)
+    if hooks.tmux_title {
+        writeln!(w)?;
+        writeln!(w, "  if [ -n \"$TMUX\" ]; then")?;
+        writeln!(w, "    if [ -n \"$WSP_WORKSPACE\" ]; then")?;
+        writeln!(
+            w,
+            "      printf '\\033]2;wsp:%s\\033\\\\' \"$WSP_WORKSPACE\""
+        )?;
+        writeln!(w, "    else")?;
+        writeln!(w, "      printf '\\033]2;\\033\\\\'")?;
+        writeln!(w, "    fi")?;
+        writeln!(w, "  fi")?;
+    }
+
+    writeln!(w, "}}")?;
+    writeln!(w)?;
+
+    // Hook registration differs by shell
+    if shell == "zsh" {
+        writeln!(w, "autoload -Uz add-zsh-hook")?;
+        writeln!(w, "add-zsh-hook precmd _wsp_hook")?;
+    } else {
+        // bash
+        writeln!(w, "if [[ ! \"$PROMPT_COMMAND\" == *_wsp_hook* ]]; then")?;
+        writeln!(
+            w,
+            "  PROMPT_COMMAND=\"_wsp_hook${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\""
+        )?;
+        writeln!(w, "fi")?;
+    }
+
+    // Trigger on initial load
+    writeln!(w, "_wsp_hook")?;
+
+    Ok(())
 }
 
-fn write_fish(w: &mut dyn Write, bin_str: &str, wsp_root: &str) -> Result<()> {
+// ---------- fish ----------
+
+fn generate_fish(w: &mut dyn Write, paths: &Paths, hooks: ShellHookOpts) -> Result<()> {
+    let bin_str = bin_path()?;
+    let wsp_root = paths.workspaces_dir.display().to_string();
+    write_fish(w, &bin_str, &wsp_root, hooks)
+}
+
+fn write_fish(
+    w: &mut dyn Write,
+    bin_str: &str,
+    wsp_root: &str,
+    hooks: ShellHookOpts,
+) -> Result<()> {
     let bin_esc = fish_escape(bin_str);
     let root_esc = fish_escape(wsp_root);
 
@@ -249,6 +349,49 @@ end\n\
 COMPLETE=fish '{bin_esc}' | source\n"
     )?;
 
+    if hooks.any_enabled() {
+        write_fish_hooks(w, &root_esc, hooks)?;
+    }
+
+    Ok(())
+}
+
+fn write_fish_hooks(w: &mut dyn Write, root_esc: &str, hooks: ShellHookOpts) -> Result<()> {
+    writeln!(w)?;
+    writeln!(
+        w,
+        "# wsp shell hooks (experimental) — workspace detection + integrations"
+    )?;
+    writeln!(w, "function _wsp_hook --on-variable PWD")?;
+    writeln!(w, "    set -l wsp_root '{root_esc}'")?;
+    writeln!(w, "    if string match -q \"$wsp_root/*\" $PWD")?;
+    writeln!(
+        w,
+        "        set -gx WSP_WORKSPACE (string split / (string replace \"$wsp_root/\" '' $PWD))[1]"
+    )?;
+    writeln!(w, "    else")?;
+    writeln!(w, "        set -ge WSP_WORKSPACE")?;
+    writeln!(w, "    end")?;
+
+    if hooks.tmux_title {
+        writeln!(w)?;
+        writeln!(w, "    if set -q TMUX")?;
+        writeln!(w, "        if set -q WSP_WORKSPACE")?;
+        writeln!(
+            w,
+            "            printf '\\033]2;wsp:%s\\033\\\\' $WSP_WORKSPACE"
+        )?;
+        writeln!(w, "        else")?;
+        writeln!(w, "            printf '\\033]2;\\033\\\\'")?;
+        writeln!(w, "        end")?;
+        writeln!(w, "    end")?;
+    }
+
+    writeln!(w, "end")?;
+    writeln!(w)?;
+    writeln!(w, "# Trigger on initial load")?;
+    writeln!(w, "_wsp_hook")?;
+
     Ok(())
 }
 
@@ -281,7 +424,15 @@ mod tests {
         ];
 
         for tc in cases {
-            let out = output(|w| write_posix(w, "/opt/my tools/ws", "/home/user/dev", tc.shell));
+            let out = output(|w| {
+                write_posix(
+                    w,
+                    "/opt/my tools/ws",
+                    "/home/user/dev",
+                    tc.shell,
+                    ShellHookOpts::default(),
+                )
+            });
             assert!(
                 out.contains("local wsp_bin='/opt/my tools/ws'"),
                 "case {}: wsp_bin should be single-quoted",
@@ -316,7 +467,15 @@ mod tests {
 
     #[test]
     fn test_posix_contains_all_cases() {
-        let out = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "zsh"));
+        let out = output(|w| {
+            write_posix(
+                w,
+                "/usr/bin/ws",
+                "/home/user/dev",
+                "zsh",
+                ShellHookOpts::default(),
+            )
+        });
         for pattern in &["new)", "cd)", "rm)", "remove)", "*)"] {
             assert!(out.contains(pattern), "missing case pattern: {}", pattern);
         }
@@ -324,16 +483,39 @@ mod tests {
 
     #[test]
     fn test_posix_shell_name_in_header() {
-        let bash = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "bash"));
+        let bash = output(|w| {
+            write_posix(
+                w,
+                "/usr/bin/ws",
+                "/home/user/dev",
+                "bash",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(bash.contains("eval \"$(wsp completion bash)\""));
 
-        let zsh = output(|w| write_posix(w, "/usr/bin/ws", "/home/user/dev", "zsh"));
+        let zsh = output(|w| {
+            write_posix(
+                w,
+                "/usr/bin/ws",
+                "/home/user/dev",
+                "zsh",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(zsh.contains("eval \"$(wsp completion zsh)\""));
     }
 
     #[test]
     fn test_fish_quotes_bin_path_and_wsp_root() {
-        let out = output(|w| write_fish(w, "/opt/my tools/ws", "/home/user/dev"));
+        let out = output(|w| {
+            write_fish(
+                w,
+                "/opt/my tools/ws",
+                "/home/user/dev",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(
             out.contains("set -l wsp_bin '/opt/my tools/ws'"),
             "wsp_bin should be single-quoted"
@@ -358,7 +540,8 @@ mod tests {
 
     #[test]
     fn test_fish_contains_all_cases() {
-        let out = output(|w| write_fish(w, "/usr/bin/ws", "/home/user/dev"));
+        let out =
+            output(|w| write_fish(w, "/usr/bin/ws", "/home/user/dev", ShellHookOpts::default()));
         for pattern in &["case new", "case cd", "case rm remove", "case '*'"] {
             assert!(out.contains(pattern), "missing case pattern: {}", pattern);
         }
@@ -366,13 +549,22 @@ mod tests {
 
     #[test]
     fn test_fish_header() {
-        let out = output(|w| write_fish(w, "/usr/bin/ws", "/home/user/dev"));
+        let out =
+            output(|w| write_fish(w, "/usr/bin/ws", "/home/user/dev", ShellHookOpts::default()));
         assert!(out.contains("wsp completion fish | source"));
     }
 
     #[test]
     fn test_posix_path_with_dollar_sign() {
-        let out = output(|w| write_posix(w, "/opt/$weird/ws", "/home/user/dev", "bash"));
+        let out = output(|w| {
+            write_posix(
+                w,
+                "/opt/$weird/ws",
+                "/home/user/dev",
+                "bash",
+                ShellHookOpts::default(),
+            )
+        });
         // Single quotes prevent $weird from being expanded
         assert!(out.contains("local wsp_bin='/opt/$weird/ws'"));
         assert!(out.contains("COMPLETE=bash '/opt/$weird/ws'"));
@@ -380,7 +572,15 @@ mod tests {
 
     #[test]
     fn test_posix_path_with_single_quote() {
-        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/o'brien/dev", "bash"));
+        let out = output(|w| {
+            write_posix(
+                w,
+                "/usr/bin/wsp",
+                "/home/o'brien/dev",
+                "bash",
+                ShellHookOpts::default(),
+            )
+        });
         // Single quote in wsp_root must be escaped as '\''
         assert!(
             out.contains(r"local wsp_root='/home/o'\''brien/dev'"),
@@ -391,7 +591,15 @@ mod tests {
 
     #[test]
     fn test_posix_bin_with_single_quote() {
-        let out = output(|w| write_posix(w, "/opt/it's here/wsp", "/home/user/dev", "bash"));
+        let out = output(|w| {
+            write_posix(
+                w,
+                "/opt/it's here/wsp",
+                "/home/user/dev",
+                "bash",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(
             out.contains(r"local wsp_bin='/opt/it'\''s here/wsp'"),
             "wsp_bin single quote must be escaped: {}",
@@ -406,7 +614,14 @@ mod tests {
 
     #[test]
     fn test_fish_path_with_single_quote() {
-        let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/o'brien/dev"));
+        let out = output(|w| {
+            write_fish(
+                w,
+                "/usr/bin/wsp",
+                "/home/o'brien/dev",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(
             out.contains(r"set -l wsp_root '/home/o\'brien/dev'"),
             "fish wsp_root single quote must be escaped: {}",
@@ -416,7 +631,14 @@ mod tests {
 
     #[test]
     fn test_fish_bin_with_single_quote() {
-        let out = output(|w| write_fish(w, "/opt/it's here/wsp", "/home/user/dev"));
+        let out = output(|w| {
+            write_fish(
+                w,
+                "/opt/it's here/wsp",
+                "/home/user/dev",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(
             out.contains(r"set -l wsp_bin '/opt/it\'s here/wsp'"),
             "fish wsp_bin single quote must be escaped: {}",
@@ -431,7 +653,15 @@ mod tests {
 
     #[test]
     fn test_zsh_compdef_guard() {
-        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh"));
+        let out = output(|w| {
+            write_posix(
+                w,
+                "/usr/bin/wsp",
+                "/home/user/dev",
+                "zsh",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(
             out.contains("if ! (( $+functions[compdef] ))"),
             "zsh output should guard against missing compdef"
@@ -448,10 +678,113 @@ mod tests {
 
     #[test]
     fn test_bash_no_compdef_guard() {
-        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "bash"));
+        let out = output(|w| {
+            write_posix(
+                w,
+                "/usr/bin/wsp",
+                "/home/user/dev",
+                "bash",
+                ShellHookOpts::default(),
+            )
+        });
         assert!(
             !out.contains("compdef"),
             "bash output should not have compdef guard"
+        );
+    }
+
+    // --- Shell hook tests ---
+
+    #[test]
+    fn test_no_hooks_by_default() {
+        let opts = ShellHookOpts::default();
+        for shell in &["zsh", "bash"] {
+            let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", shell, opts));
+            assert!(
+                !out.contains("_wsp_hook"),
+                "{}: should not emit hooks when disabled",
+                shell
+            );
+            assert!(
+                !out.contains("WSP_WORKSPACE"),
+                "{}: should not emit WSP_WORKSPACE when disabled",
+                shell
+            );
+        }
+        let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/user/dev", opts));
+        assert!(!out.contains("_wsp_hook"), "fish: no hooks when disabled");
+    }
+
+    #[test]
+    fn test_prompt_only_hooks() {
+        let opts = ShellHookOpts {
+            prompt: true,
+            tmux_title: false,
+        };
+        // zsh
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh", opts));
+        assert!(out.contains("_wsp_hook"), "zsh: hook function emitted");
+        assert!(out.contains("WSP_WORKSPACE"), "zsh: sets WSP_WORKSPACE");
+        assert!(out.contains("add-zsh-hook precmd"), "zsh: registers precmd");
+        assert!(!out.contains("\\033]2;"), "zsh: no tmux escape");
+
+        // bash
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "bash", opts));
+        assert!(
+            out.contains("PROMPT_COMMAND"),
+            "bash: registers PROMPT_COMMAND"
+        );
+        assert!(!out.contains("\\033]2;"), "bash: no tmux escape");
+
+        // fish
+        let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/user/dev", opts));
+        assert!(out.contains("--on-variable PWD"), "fish: PWD hook");
+        assert!(out.contains("WSP_WORKSPACE"), "fish: sets WSP_WORKSPACE");
+        assert!(!out.contains("\\033]2;"), "fish: no tmux escape");
+    }
+
+    #[test]
+    fn test_tmux_title_hooks() {
+        let opts = ShellHookOpts {
+            prompt: false,
+            tmux_title: true,
+        };
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh", opts));
+        assert!(out.contains("_wsp_hook"), "hook function emitted");
+        assert!(out.contains("WSP_WORKSPACE"), "sets WSP_WORKSPACE");
+        assert!(out.contains("\\033]2;wsp:%s"), "tmux title escape present");
+        assert!(out.contains("$TMUX"), "guards on TMUX env var");
+
+        let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/user/dev", opts));
+        assert!(
+            out.contains("\\033]2;wsp:%s"),
+            "fish: tmux title escape present"
+        );
+    }
+
+    #[test]
+    fn test_both_hooks() {
+        let opts = ShellHookOpts {
+            prompt: true,
+            tmux_title: true,
+        };
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh", opts));
+        assert!(out.contains("WSP_WORKSPACE"));
+        assert!(out.contains("\\033]2;wsp:%s"));
+        assert!(out.contains("add-zsh-hook precmd"));
+    }
+
+    #[test]
+    fn test_hook_path_escaping() {
+        let opts = ShellHookOpts {
+            prompt: true,
+            tmux_title: false,
+        };
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/o'brien/dev", "zsh", opts));
+        assert!(
+            out.contains(r"local wsp_root='/home/o'\''brien/dev'"),
+            "hook wsp_root must escape single quotes: {}",
+            out
         );
     }
 }
