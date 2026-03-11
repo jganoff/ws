@@ -174,14 +174,15 @@ pub struct StatusOutput {
 
 #[derive(Serialize)]
 pub struct RepoStatusEntry {
-    pub name: String,
+    pub identity: String,
+    pub shortname: String,
+    pub path: String,
     pub branch: String,
     pub ahead: u32,
     pub behind: u32,
     pub changed: u32,
     pub has_upstream: bool,
     pub role: String,
-    pub status: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -198,7 +199,9 @@ pub struct DiffOutput {
 
 #[derive(Serialize)]
 pub struct RepoDiffEntry {
-    pub name: String,
+    pub identity: String,
+    pub shortname: String,
+    pub path: String,
     pub diff: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -213,7 +216,9 @@ pub struct LogOutput {
 
 #[derive(Serialize)]
 pub struct RepoLogEntry {
-    pub name: String,
+    pub identity: String,
+    pub shortname: String,
+    pub path: String,
     pub commits: Vec<LogCommit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
@@ -264,7 +269,9 @@ pub struct ExecOutput {
 
 #[derive(Serialize)]
 pub struct ExecRepoResult {
-    pub name: String,
+    pub identity: String,
+    pub shortname: String,
+    pub path: String,
     pub directory: String,
     pub exit_code: i32,
     pub ok: bool,
@@ -368,7 +375,9 @@ pub struct SyncOutput {
 
 #[derive(Serialize)]
 pub struct SyncRepoResult {
-    pub name: String,
+    pub identity: String,
+    pub shortname: String,
+    pub path: String,
     pub action: String,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -394,7 +403,9 @@ pub struct SyncAbortOutput {
 
 #[derive(Serialize)]
 pub struct SyncAbortRepoResult {
-    pub name: String,
+    pub identity: String,
+    pub shortname: String,
+    pub path: String,
     pub action: String,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -478,14 +489,15 @@ impl StatusOutput {
             workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
             created: "2026-01-15T10:00:00Z".parse::<DateTime<Utc>>().unwrap(),
             repos: vec![RepoStatusEntry {
-                name: "api-gateway".into(),
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                 branch: "my-feature".into(),
                 ahead: 2,
                 behind: 0,
                 changed: 1,
                 has_upstream: true,
                 role: "active".into(),
-                status: "2 ahead, 1 modified".into(),
                 files: vec![],
                 error: None,
                 expected_branch: None,
@@ -501,7 +513,9 @@ impl DiffOutput {
     pub fn sample() -> Self {
         Self {
             repos: vec![RepoDiffEntry {
-                name: "api-gateway".into(),
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                 diff: "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n+use std::io;\n ..."
                     .into(),
                 error: None,
@@ -516,7 +530,9 @@ impl LogOutput {
         Self {
             oneline: false,
             repos: vec![RepoLogEntry {
-                name: "api-gateway".into(),
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                 commits: vec![LogCommit {
                     hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".into(),
                     timestamp: 1700000000,
@@ -537,7 +553,9 @@ impl SyncOutput {
             branch: "my-feature".into(),
             dry_run: false,
             repos: vec![SyncRepoResult {
-                name: "api-gateway".into(),
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                 action: "rebase onto origin/main".into(),
                 ok: true,
                 detail: Some("2 commit(s) rebased".into()),
@@ -557,13 +575,17 @@ impl SyncAbortOutput {
             workspace: "my-feature".into(),
             repos: vec![
                 SyncAbortRepoResult {
-                    name: "api-gateway".into(),
+                    identity: "github.com/acme/api-gateway".into(),
+                    shortname: "api-gateway".into(),
+                    path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                     action: "skip".into(),
                     ok: true,
                     error: None,
                 },
                 SyncAbortRepoResult {
-                    name: "user-service".into(),
+                    identity: "github.com/acme/user-service".into(),
+                    shortname: "user-service".into(),
+                    path: "/home/user/dev/workspaces/my-feature/user-service".into(),
                     action: "rebase aborted".into(),
                     ok: true,
                     error: None,
@@ -630,7 +652,9 @@ impl ExecOutput {
     pub fn sample() -> Self {
         Self {
             repos: vec![ExecRepoResult {
-                name: "github.com/acme/api-gateway".into(),
+                identity: "github.com/acme/api-gateway".into(),
+                shortname: "api-gateway".into(),
+                path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                 directory: "api-gateway".into(),
                 exit_code: 0,
                 ok: true,
@@ -966,9 +990,15 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
         let status = if let Some(ref e) = rs.error {
             format_error(e)
         } else {
-            rs.status.clone()
+            format_repo_status(
+                rs.ahead,
+                rs.behind,
+                rs.changed,
+                rs.has_upstream,
+                &rs.expected_branch,
+            )
         };
-        table.add_row(vec![rs.name.clone(), rs.branch.clone(), status])?;
+        table.add_row(vec![rs.shortname.clone(), rs.branch.clone(), status])?;
     }
     if !v.root.is_empty() {
         let root_status = format!("{} untracked", v.root.len());
@@ -983,7 +1013,7 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
             if rs.error.is_some() || rs.files.is_empty() {
                 continue;
             }
-            println!("\n==> [{}]", rs.name);
+            println!("\n==> [{}]", rs.shortname);
             for f in &rs.files {
                 println!("  {}", f);
             }
@@ -1009,7 +1039,7 @@ fn render_diff_text(v: DiffOutput) -> Result<()> {
     let mut first = true;
     for entry in &v.repos {
         if let Some(ref e) = entry.error {
-            eprintln!("[{}] error: {}", entry.name, e);
+            eprintln!("[{}] error: {}", entry.shortname, e);
             continue;
         }
         if entry.diff.is_empty() {
@@ -1018,7 +1048,7 @@ fn render_diff_text(v: DiffOutput) -> Result<()> {
         if !first {
             println!();
         }
-        println!("==> [{}]", entry.name);
+        println!("==> [{}]", entry.shortname);
         println!("{}", entry.diff);
         first = false;
     }
@@ -1060,7 +1090,7 @@ fn render_sync_text(v: SyncOutput) -> Result<()> {
         } else {
             r.detail.clone().unwrap_or_default()
         };
-        table.add_row(vec![r.name.clone(), r.action.clone(), result])?;
+        table.add_row(vec![r.shortname.clone(), r.action.clone(), result])?;
     }
     table.render()?;
 
@@ -1102,7 +1132,7 @@ fn render_sync_abort_text(v: SyncAbortOutput) -> Result<()> {
         } else {
             "ok".into()
         };
-        table.add_row(vec![r.name.clone(), r.action.clone(), result])?;
+        table.add_row(vec![r.shortname.clone(), r.action.clone(), result])?;
     }
     table.render()?;
     Ok(())
@@ -1291,7 +1321,7 @@ fn render_log_grouped(repos: &[RepoLogEntry]) -> Result<()> {
         if !first {
             println!();
         }
-        println!("==> [{}]", entry.name);
+        println!("==> [{}]", entry.shortname);
 
         if let Some(ref e) = entry.error {
             eprintln!("  error: {}", e);
@@ -1333,20 +1363,20 @@ fn render_log_oneline(repos: &[RepoLogEntry]) -> Result<()> {
         if entry.error.is_some() {
             eprintln!(
                 "[{}] error: {}",
-                entry.name,
+                entry.shortname,
                 entry.error.as_deref().unwrap_or("")
             );
             continue;
         }
         if let Some(ref raw) = entry.raw {
             if !raw.is_empty() {
-                println!("==> [{}]", entry.name);
+                println!("==> [{}]", entry.shortname);
                 println!("{}", raw);
             }
             continue;
         }
         for c in &entry.commits {
-            all.push((&entry.name, c));
+            all.push((&entry.shortname, c));
         }
     }
 
@@ -1668,27 +1698,29 @@ mod tests {
             created: "2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
             repos: vec![
                 RepoStatusEntry {
-                    name: "repo-a".into(),
+                    identity: "github.com/user/repo-a".into(),
+                    shortname: "repo-a".into(),
+                    path: "/tmp/workspaces/my-ws/repo-a".into(),
                     branch: "my-ws".into(),
                     ahead: 1,
                     behind: 3,
                     changed: 2,
                     has_upstream: true,
                     role: "active".into(),
-                    status: "1 ahead, 3 behind, 2 modified".into(),
                     files: vec![" M src/main.rs".into(), "?? new.txt".into()],
                     error: None,
                     expected_branch: None,
                 },
                 RepoStatusEntry {
-                    name: "repo-b".into(),
+                    identity: "github.com/user/repo-b".into(),
+                    shortname: "repo-b".into(),
+                    path: String::new(),
                     branch: String::new(),
                     ahead: 0,
                     behind: 0,
                     changed: 0,
                     has_upstream: false,
                     role: "active".into(),
-                    status: String::new(),
                     files: vec![],
                     error: Some("parse error".into()),
                     expected_branch: None,
@@ -1743,12 +1775,16 @@ mod tests {
         let output = DiffOutput {
             repos: vec![
                 RepoDiffEntry {
-                    name: "repo-a".into(),
+                    identity: "github.com/user/repo-a".into(),
+                    shortname: "repo-a".into(),
+                    path: "/tmp/ws/repo-a".into(),
                     diff: "--- a/file\n+++ b/file".into(),
                     error: None,
                 },
                 RepoDiffEntry {
-                    name: "repo-b".into(),
+                    identity: "github.com/user/repo-b".into(),
+                    shortname: "repo-b".into(),
+                    path: String::new(),
                     diff: String::new(),
                     error: Some("not found".into()),
                 },
@@ -1819,7 +1855,9 @@ mod tests {
                 LogOutput {
                     oneline: false,
                     repos: vec![RepoLogEntry {
-                        name: "api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: "/tmp/ws/api-gateway".into(),
                         commits: vec![LogCommit {
                             hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".into(),
                             timestamp: 1700000000,
@@ -1831,7 +1869,9 @@ mod tests {
                 },
                 serde_json::json!({
                     "repos": [{
-                        "name": "api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "/tmp/ws/api-gateway",
                         "commits": [{
                             "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
                             "timestamp": 1700000000,
@@ -1845,7 +1885,9 @@ mod tests {
                 LogOutput {
                     oneline: false,
                     repos: vec![RepoLogEntry {
-                        name: "api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: "/tmp/ws/api-gateway".into(),
                         commits: vec![],
                         raw: Some("a1b2c3d feat: add billing\n".into()),
                         error: None,
@@ -1853,7 +1895,9 @@ mod tests {
                 },
                 serde_json::json!({
                     "repos": [{
-                        "name": "api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "/tmp/ws/api-gateway",
                         "commits": [],
                         "raw": "a1b2c3d feat: add billing\n"
                     }]
@@ -1864,7 +1908,9 @@ mod tests {
                 LogOutput {
                     oneline: false,
                     repos: vec![RepoLogEntry {
-                        name: "broken".into(),
+                        identity: "github.com/acme/broken".into(),
+                        shortname: "broken".into(),
+                        path: String::new(),
                         commits: vec![],
                         raw: None,
                         error: Some("repo not found".into()),
@@ -1872,7 +1918,9 @@ mod tests {
                 },
                 serde_json::json!({
                     "repos": [{
-                        "name": "broken",
+                        "identity": "github.com/acme/broken",
+                        "shortname": "broken",
+                        "path": "",
                         "commits": [],
                         "error": "repo not found"
                     }]
@@ -1903,7 +1951,9 @@ mod tests {
                     branch: "my-ws".into(),
                     dry_run: false,
                     repos: vec![SyncRepoResult {
-                        name: "api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: "/tmp/ws/api-gateway".into(),
                         action: "rebase onto origin/main".into(),
                         ok: true,
                         detail: Some("2 commit(s) rebased".into()),
@@ -1918,7 +1968,9 @@ mod tests {
                     "branch": "my-ws",
                     "dry_run": false,
                     "repos": [{
-                        "name": "api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "/tmp/ws/api-gateway",
                         "action": "rebase onto origin/main",
                         "ok": true,
                         "detail": "2 commit(s) rebased"
@@ -1932,7 +1984,9 @@ mod tests {
                     branch: "my-ws".into(),
                     dry_run: true,
                     repos: vec![SyncRepoResult {
-                        name: "api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: "/tmp/ws/api-gateway".into(),
                         action: "rebase onto origin/main".into(),
                         ok: true,
                         detail: Some("1 behind, 2 ahead".into()),
@@ -1947,7 +2001,9 @@ mod tests {
                     "branch": "my-ws",
                     "dry_run": true,
                     "repos": [{
-                        "name": "api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "/tmp/ws/api-gateway",
                         "action": "rebase onto origin/main",
                         "ok": true,
                         "detail": "1 behind, 2 ahead"
@@ -1961,7 +2017,9 @@ mod tests {
                     branch: "my-ws".into(),
                     dry_run: false,
                     repos: vec![SyncRepoResult {
-                        name: "shared-lib".into(),
+                        identity: "github.com/acme/shared-lib".into(),
+                        shortname: "shared-lib".into(),
+                        path: "/tmp/ws/shared-lib".into(),
                         action: "rebase onto origin/main".into(),
                         ok: false,
                         detail: None,
@@ -1976,7 +2034,9 @@ mod tests {
                     "branch": "my-ws",
                     "dry_run": false,
                     "repos": [{
-                        "name": "shared-lib",
+                        "identity": "github.com/acme/shared-lib",
+                        "shortname": "shared-lib",
+                        "path": "/tmp/ws/shared-lib",
                         "action": "rebase onto origin/main",
                         "ok": false,
                         "error": "aborted, repo unchanged"
@@ -1997,7 +2057,9 @@ mod tests {
                 "success with captured output",
                 ExecOutput {
                     repos: vec![ExecRepoResult {
-                        name: "github.com/acme/api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: "/tmp/ws/api-gateway".into(),
                         directory: "api-gateway".into(),
                         exit_code: 0,
                         ok: true,
@@ -2008,7 +2070,9 @@ mod tests {
                 },
                 serde_json::json!({
                     "repos": [{
-                        "name": "github.com/acme/api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "/tmp/ws/api-gateway",
                         "directory": "api-gateway",
                         "exit_code": 0,
                         "ok": true,
@@ -2021,7 +2085,9 @@ mod tests {
                 "failure without capture",
                 ExecOutput {
                     repos: vec![ExecRepoResult {
-                        name: "github.com/acme/api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: "/tmp/ws/api-gateway".into(),
                         directory: "api-gateway".into(),
                         exit_code: 1,
                         ok: false,
@@ -2032,7 +2098,9 @@ mod tests {
                 },
                 serde_json::json!({
                     "repos": [{
-                        "name": "github.com/acme/api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "/tmp/ws/api-gateway",
                         "directory": "api-gateway",
                         "exit_code": 1,
                         "ok": false
@@ -2043,7 +2111,9 @@ mod tests {
                 "spawn error",
                 ExecOutput {
                     repos: vec![ExecRepoResult {
-                        name: "github.com/acme/api-gateway".into(),
+                        identity: "github.com/acme/api-gateway".into(),
+                        shortname: "api-gateway".into(),
+                        path: String::new(),
                         directory: String::new(),
                         exit_code: -1,
                         ok: false,
@@ -2054,7 +2124,9 @@ mod tests {
                 },
                 serde_json::json!({
                     "repos": [{
-                        "name": "github.com/acme/api-gateway",
+                        "identity": "github.com/acme/api-gateway",
+                        "shortname": "api-gateway",
+                        "path": "",
                         "directory": "",
                         "exit_code": -1,
                         "ok": false,
@@ -2076,7 +2148,9 @@ mod tests {
                 "all ok",
                 ExecOutput {
                     repos: vec![ExecRepoResult {
-                        name: "r".into(),
+                        identity: "r".into(),
+                        shortname: "r".into(),
+                        path: String::new(),
                         directory: "r".into(),
                         exit_code: 0,
                         ok: true,
@@ -2092,7 +2166,9 @@ mod tests {
                 ExecOutput {
                     repos: vec![
                         ExecRepoResult {
-                            name: "a".into(),
+                            identity: "a".into(),
+                            shortname: "a".into(),
+                            path: String::new(),
                             directory: "a".into(),
                             exit_code: 0,
                             ok: true,
@@ -2101,7 +2177,9 @@ mod tests {
                             error: None,
                         },
                         ExecRepoResult {
-                            name: "b".into(),
+                            identity: "b".into(),
+                            shortname: "b".into(),
+                            path: String::new(),
                             directory: "b".into(),
                             exit_code: 1,
                             ok: false,
@@ -2128,7 +2206,9 @@ mod tests {
                 SyncAbortOutput {
                     workspace: "ws".into(),
                     repos: vec![SyncAbortRepoResult {
-                        name: "r".into(),
+                        identity: "r".into(),
+                        shortname: "r".into(),
+                        path: String::new(),
                         action: "skip".into(),
                         ok: true,
                         error: None,
@@ -2142,13 +2222,17 @@ mod tests {
                     workspace: "ws".into(),
                     repos: vec![
                         SyncAbortRepoResult {
-                            name: "a".into(),
+                            identity: "a".into(),
+                            shortname: "a".into(),
+                            path: String::new(),
                             action: "rebase aborted".into(),
                             ok: true,
                             error: None,
                         },
                         SyncAbortRepoResult {
-                            name: "b".into(),
+                            identity: "b".into(),
+                            shortname: "b".into(),
+                            path: String::new(),
                             action: "rebase aborted".into(),
                             ok: false,
                             error: Some("abort failed".into()),

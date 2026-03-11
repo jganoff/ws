@@ -64,7 +64,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(d) => d,
             Err(e) => {
                 repos.push(RepoDiffEntry {
-                    name: identity.clone(),
+                    identity: identity.clone(),
+                    shortname: identity.rsplit('/').next().unwrap_or(identity).to_string(),
+                    path: String::new(),
                     diff: String::new(),
                     error: Some(e.to_string()),
                 });
@@ -92,7 +94,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(o) => o,
             Err(e) => {
                 repos.push(RepoDiffEntry {
-                    name: dir_name,
+                    identity: identity.clone(),
+                    shortname: dir_name,
+                    path: repo_dir.to_string_lossy().to_string(),
                     diff: String::new(),
                     error: Some(e.to_string()),
                 });
@@ -101,7 +105,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         };
 
         repos.push(RepoDiffEntry {
-            name: dir_name,
+            identity: identity.clone(),
+            shortname: dir_name,
+            path: repo_dir.to_string_lossy().to_string(),
             diff,
             error: None,
         });

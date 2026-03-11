@@ -47,7 +47,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     eprintln!("[{}] error: {}", identity, e);
                 }
                 results.push(ExecRepoResult {
-                    name: identity.to_string(),
+                    identity: identity.to_string(),
+                    shortname: identity.rsplit('/').next().unwrap_or(identity).to_string(),
+                    path: String::new(),
                     directory: String::new(),
                     exit_code: -1,
                     ok: false,
@@ -82,7 +84,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     eprintln!("[{}] error: {}", dir_name, e);
                 }
                 results.push(ExecRepoResult {
-                    name: identity.to_string(),
+                    identity: identity.to_string(),
+                    shortname: dir_name.clone(),
+                    path: repo_dir.to_string_lossy().to_string(),
                     directory: dir_name,
                     exit_code: -1,
                     ok: false,
@@ -105,7 +109,7 @@ fn run_command(
     command: &[&String],
     dir: &Path,
     capture: bool,
-    name: &str,
+    identity: &str,
     dir_name: &str,
 ) -> Result<ExecRepoResult> {
     debug_assert!(
@@ -132,7 +136,9 @@ fn run_command(
         let output = cmd.spawn()?.wait_with_output()?;
         let code = output.status.code().unwrap_or(-1);
         Ok(ExecRepoResult {
-            name: name.to_string(),
+            identity: identity.to_string(),
+            shortname: dir_name.to_string(),
+            path: dir.to_string_lossy().to_string(),
             directory: dir_name.to_string(),
             exit_code: code,
             ok: code == 0,
@@ -147,7 +153,9 @@ fn run_command(
         let status = cmd.status()?;
         let code = status.code().unwrap_or(-1);
         Ok(ExecRepoResult {
-            name: name.to_string(),
+            identity: identity.to_string(),
+            shortname: dir_name.to_string(),
+            path: dir.to_string_lossy().to_string(),
             directory: dir_name.to_string(),
             exit_code: code,
             ok: code == 0,

@@ -152,7 +152,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     for info in &repo_infos {
         if let Some(ref e) = info.error {
             results.push(SyncRepoResult {
-                name: info.dir_name.clone(),
+                identity: info.identity.clone(),
+                shortname: info.dir_name.clone(),
+                path: info.clone_dir.to_string_lossy().to_string(),
                 action: String::new(),
                 ok: false,
                 detail: None,
@@ -171,7 +173,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(b) => b,
             Err(e) => {
                 results.push(SyncRepoResult {
-                    name: info.dir_name.clone(),
+                    identity: info.identity.clone(),
+                    shortname: info.dir_name.clone(),
+                    path: info.clone_dir.to_string_lossy().to_string(),
                     action: format!("{} onto origin/?", strategy),
                     ok: false,
                     detail: None,
@@ -190,7 +194,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let changed = git::changed_file_count(&info.clone_dir).unwrap_or(0);
         if changed > 0 {
             results.push(SyncRepoResult {
-                name: info.dir_name.clone(),
+                identity: info.identity.clone(),
+                shortname: info.dir_name.clone(),
+                path: info.clone_dir.to_string_lossy().to_string(),
                 action,
                 ok: false,
                 detail: None,
@@ -208,7 +214,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         if dry_run {
             let detail = describe_pending_sync(&info.clone_dir, &target);
             results.push(SyncRepoResult {
-                name: info.dir_name.clone(),
+                identity: info.identity.clone(),
+                shortname: info.dir_name.clone(),
+                path: info.clone_dir.to_string_lossy().to_string(),
                 action,
                 ok: true,
                 detail: Some(detail),
@@ -225,7 +233,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                         detail.push_str(" (fetch failed, data may be stale)");
                     }
                     results.push(SyncRepoResult {
-                        name: info.dir_name.clone(),
+                        identity: info.identity.clone(),
+                        shortname: info.dir_name.clone(),
+                        path: info.clone_dir.to_string_lossy().to_string(),
                         action,
                         ok: true,
                         detail: Some(detail),
@@ -237,7 +247,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Err(_) => {
                     results.push(SyncRepoResult {
-                        name: info.dir_name.clone(),
+                        identity: info.identity.clone(),
+                        shortname: info.dir_name.clone(),
+                        path: info.clone_dir.to_string_lossy().to_string(),
                         action,
                         ok: false,
                         detail: None,
@@ -282,7 +294,9 @@ fn run_abort(ws_dir: &Path, meta: &workspace::Metadata) -> Result<Output> {
     for info in &repo_infos {
         if let Some(ref e) = info.error {
             results.push(SyncAbortRepoResult {
-                name: info.dir_name.clone(),
+                identity: info.identity.clone(),
+                shortname: info.dir_name.clone(),
+                path: info.clone_dir.to_string_lossy().to_string(),
                 action: "error".into(),
                 ok: false,
                 error: Some(e.clone()),
@@ -298,13 +312,17 @@ fn run_abort(ws_dir: &Path, meta: &workspace::Metadata) -> Result<Output> {
                 };
                 match git::abort_in_progress(&info.clone_dir, &op) {
                     Ok(()) => results.push(SyncAbortRepoResult {
-                        name: info.dir_name.clone(),
+                        identity: info.identity.clone(),
+                        shortname: info.dir_name.clone(),
+                        path: info.clone_dir.to_string_lossy().to_string(),
                         action: action.into(),
                         ok: true,
                         error: None,
                     }),
                     Err(e) => results.push(SyncAbortRepoResult {
-                        name: info.dir_name.clone(),
+                        identity: info.identity.clone(),
+                        shortname: info.dir_name.clone(),
+                        path: info.clone_dir.to_string_lossy().to_string(),
                         action: action.into(),
                         ok: false,
                         error: Some(e.to_string()),
@@ -312,7 +330,9 @@ fn run_abort(ws_dir: &Path, meta: &workspace::Metadata) -> Result<Output> {
                 }
             }
             None => results.push(SyncAbortRepoResult {
-                name: info.dir_name.clone(),
+                identity: info.identity.clone(),
+                shortname: info.dir_name.clone(),
+                path: info.clone_dir.to_string_lossy().to_string(),
                 action: "skip".into(),
                 ok: true,
                 error: None,

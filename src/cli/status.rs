@@ -7,7 +7,7 @@ use clap_complete::engine::ArgValueCandidates;
 use crate::config::Paths;
 use crate::gc;
 use crate::git;
-use crate::output::{self, Output, RepoStatusEntry, StatusOutput};
+use crate::output::{Output, RepoStatusEntry, StatusOutput};
 use crate::workspace;
 
 use super::completers;
@@ -93,14 +93,15 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(d) => d,
             Err(e) => {
                 repos.push(RepoStatusEntry {
-                    name: identity.clone(),
+                    identity: identity.clone(),
+                    shortname: identity.rsplit('/').next().unwrap_or(identity).to_string(),
+                    path: String::new(),
                     branch: String::new(),
                     ahead: 0,
                     behind: 0,
                     changed: 0,
                     has_upstream: false,
                     role: "active".into(),
-                    status: String::new(),
                     files: vec![],
                     error: Some(e.to_string()),
                     expected_branch: None,
@@ -126,18 +127,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let behind = git::behind_count_from(&repo_dir, &upstream).unwrap_or(0);
         let files = git::changed_files(&repo_dir).unwrap_or_default();
         let changed = files.len() as u32;
-        let status =
-            output::format_repo_status(ahead, behind, changed, has_upstream, &expected_branch);
-
         repos.push(RepoStatusEntry {
-            name: dir_name,
+            identity: identity.clone(),
+            shortname: dir_name.clone(),
+            path: repo_dir.to_string_lossy().to_string(),
             branch,
             ahead,
             behind,
             changed,
             has_upstream,
             role: "active".into(),
-            status,
             files,
             error: None,
             expected_branch,

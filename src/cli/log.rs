@@ -64,7 +64,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(d) => d,
             Err(e) => {
                 repos.push(RepoLogEntry {
-                    name: identity.clone(),
+                    identity: identity.clone(),
+                    shortname: identity.rsplit('/').next().unwrap_or(identity).to_string(),
+                    path: String::new(),
                     commits: vec![],
                     raw: None,
                     error: Some(e.to_string()),
@@ -86,7 +88,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             match git::run(Some(&repo_dir), &args) {
                 Ok(output) => {
                     repos.push(RepoLogEntry {
-                        name: dir_name,
+                        identity: identity.clone(),
+                        shortname: dir_name,
+                        path: repo_dir.to_string_lossy().to_string(),
                         commits: vec![],
                         raw: Some(output),
                         error: None,
@@ -94,7 +98,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Err(e) => {
                     repos.push(RepoLogEntry {
-                        name: dir_name,
+                        identity: identity.clone(),
+                        shortname: dir_name,
+                        path: repo_dir.to_string_lossy().to_string(),
                         commits: vec![],
                         raw: None,
                         error: Some(e.to_string()),
@@ -107,7 +113,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Some(range) => match fetch_commits(&repo_dir, &range) {
                     Ok(commits) => {
                         repos.push(RepoLogEntry {
-                            name: dir_name,
+                            identity: identity.clone(),
+                            shortname: dir_name,
+                            path: repo_dir.to_string_lossy().to_string(),
                             commits,
                             raw: None,
                             error: None,
@@ -115,7 +123,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     }
                     Err(e) => {
                         repos.push(RepoLogEntry {
-                            name: dir_name,
+                            identity: identity.clone(),
+                            shortname: dir_name,
+                            path: repo_dir.to_string_lossy().to_string(),
                             commits: vec![],
                             raw: None,
                             error: Some(e.to_string()),
@@ -125,7 +135,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 None => {
                     // No upstream — skip this repo silently (no range to compare)
                     repos.push(RepoLogEntry {
-                        name: dir_name,
+                        identity: identity.clone(),
+                        shortname: dir_name,
+                        path: repo_dir.to_string_lossy().to_string(),
                         commits: vec![],
                         raw: None,
                         error: None,

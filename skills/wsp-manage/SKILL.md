@@ -113,14 +113,15 @@ wsp doctor [--fix]                              # Check workspace and global sta
   "created": "2026-01-15T10:00:00Z",
   "repos": [
     {
-      "name": "api-gateway",
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "path": "/home/user/dev/workspaces/my-feature/api-gateway",
       "branch": "my-feature",
       "ahead": 2,
       "behind": 0,
       "changed": 1,
       "has_upstream": true,
-      "role": "active",
-      "status": "2 ahead, 1 modified"
+      "role": "active"
     }
   ]
 }
@@ -131,7 +132,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
 {
   "repos": [
     {
-      "name": "api-gateway",
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "path": "/home/user/dev/workspaces/my-feature/api-gateway",
       "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n+use std::io;\n ..."
     }
   ]
@@ -143,7 +146,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
 {
   "repos": [
     {
-      "name": "api-gateway",
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "path": "/home/user/dev/workspaces/my-feature/api-gateway",
       "commits": [
         {
           "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
@@ -164,7 +169,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
   "dry_run": false,
   "repos": [
     {
-      "name": "api-gateway",
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "path": "/home/user/dev/workspaces/my-feature/api-gateway",
       "action": "rebase onto origin/main",
       "ok": true,
       "detail": "2 commit(s) rebased"
@@ -179,12 +186,16 @@ wsp doctor [--fix]                              # Check workspace and global sta
   "workspace": "my-feature",
   "repos": [
     {
-      "name": "api-gateway",
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "path": "/home/user/dev/workspaces/my-feature/api-gateway",
       "action": "skip",
       "ok": true
     },
     {
-      "name": "user-service",
+      "identity": "github.com/acme/user-service",
+      "shortname": "user-service",
+      "path": "/home/user/dev/workspaces/my-feature/user-service",
       "action": "rebase aborted",
       "ok": true
     }
@@ -215,7 +226,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
 {
   "repos": [
     {
-      "name": "github.com/acme/api-gateway",
+      "identity": "github.com/acme/api-gateway",
+      "shortname": "api-gateway",
+      "path": "/home/user/dev/workspaces/my-feature/api-gateway",
       "directory": "api-gateway",
       "exit_code": 0,
       "ok": true,
