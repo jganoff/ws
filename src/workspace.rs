@@ -1348,14 +1348,18 @@ pub fn remove(paths: &Paths, name: &str, force: bool, permanent: bool) -> Result
             load_wspignore(paths.config_path.parent().unwrap_or(Path::new("")), &ws_dir);
         match check_root_content(&ws_dir, &meta) {
             Ok(raw_problems) => {
-                let ignored_count = raw_problems.len();
-                let root_problems = filter_ignored(raw_problems, &ignore_patterns);
-                let ignored_count = ignored_count - root_problems.len();
-                if ignored_count > 0 {
+                let root_problems = filter_ignored(raw_problems.clone(), &ignore_patterns);
+                let ignored: Vec<_> = raw_problems
+                    .iter()
+                    .filter(|p| !root_problems.iter().any(|rp| rp.path == p.path))
+                    .collect();
+                if !ignored.is_empty() {
+                    let names: Vec<&str> = ignored.iter().map(|p| p.path.as_str()).collect();
                     eprintln!(
-                        "  note: {} root item{} suppressed by wspignore",
-                        ignored_count,
-                        if ignored_count == 1 { "" } else { "s" }
+                        "  note: {} root item{} suppressed by wspignore: {}",
+                        ignored.len(),
+                        if ignored.len() == 1 { "" } else { "s" },
+                        names.join(", ")
                     );
                 }
                 if !root_problems.is_empty() {

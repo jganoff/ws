@@ -53,8 +53,22 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     eprintln!("Removing workspace {:?}...", name);
     workspace::remove(paths, &name, force, permanent)?;
 
-    Ok(Output::Mutation(MutationOutput::new(format!(
-        "Workspace {:?} removed.",
-        name
-    ))))
+    let mut out = MutationOutput::new(format!("Workspace {:?} removed.", name));
+    if !permanent {
+        let cfg = crate::config::Config::load_from(&paths.config_path).unwrap_or_default();
+        let days = cfg
+            .gc_retention_days
+            .unwrap_or(crate::gc::DEFAULT_RETENTION_DAYS);
+        let hint = if days == 0 {
+            "recoverable via `wsp recover` (gc disabled, kept indefinitely)".into()
+        } else {
+            format!(
+                "recoverable via `wsp recover` for {} day{}",
+                days,
+                if days == 1 { "" } else { "s" }
+            )
+        };
+        out = out.with_hint(hint);
+    }
+    Ok(Output::Mutation(out))
 }

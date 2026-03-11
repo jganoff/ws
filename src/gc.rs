@@ -26,6 +26,24 @@ pub struct GcEntry {
     pub original_path: String,
 }
 
+/// Enriched list entry with repo count.
+#[derive(Debug, Clone, Serialize)]
+pub struct GcListEntry {
+    #[serde(flatten)]
+    pub entry: GcEntry,
+    pub repo_count: usize,
+}
+
+/// Detailed info for `wsp recover show`.
+#[derive(Debug, Clone, Serialize)]
+pub struct GcShowEntry {
+    #[serde(flatten)]
+    pub entry: GcEntry,
+    pub repos: Vec<String>,
+    pub disk_bytes: u64,
+    pub gc_path: String,
+}
+
 /// Move a directory, falling back to recursive copy + delete if rename
 /// fails with EXDEV (cross-filesystem). An incomplete copy is cleaned up
 /// on failure so the gc area doesn't accumulate garbage.
@@ -150,6 +168,94 @@ pub fn list(gc_dir: &Path) -> Result<Vec<GcEntry>> {
     Ok(entries)
 }
 
+/// List all recoverable workspaces with repo count.
+pub fn list_enriched(gc_dir: &Path) -> Result<Vec<GcListEntry>> {
+    if !gc_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut entries = Vec::new();
+    for item in fs::read_dir(gc_dir)? {
+        let item = item?;
+        let path = item.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let meta_path = path.join(GC_META_FILE);
+        if let Ok(data) = crate::util::read_yaml_file(&meta_path)
+            && let Ok(entry) = serde_yaml_ng::from_str::<GcEntry>(&data)
+        {
+            let repo_count = count_repos(&path);
+            entries.push(GcListEntry { entry, repo_count });
+        }
+    }
+
+    // Oldest first = next to expire at the top
+    entries.sort_by(|a, b| a.entry.trashed_at.cmp(&b.entry.trashed_at));
+    Ok(entries)
+}
+
+/// Show detailed info for a specific gc'd workspace.
+pub fn show(gc_dir: &Path, name: &str) -> Result<GcShowEntry> {
+    let entries = find_entries(gc_dir, name)?;
+    if entries.is_empty() {
+        anyhow::bail!("no recoverable workspace named {:?}", name);
+    }
+
+    let (gc_name, entry) = entries.into_iter().next().unwrap();
+    let gc_path = gc_dir.join(&gc_name);
+
+    let repos = read_repo_identities(&gc_path);
+    let disk_bytes = dir_size(&gc_path);
+
+    Ok(GcShowEntry {
+        entry,
+        repos,
+        disk_bytes,
+        gc_path: gc_path.display().to_string(),
+    })
+}
+
+/// Count repos in a gc'd workspace by reading .wsp.yaml.
+fn count_repos(ws_dir: &Path) -> usize {
+    read_repo_identities(ws_dir).len()
+}
+
+/// Read repo identities from a gc'd workspace's .wsp.yaml.
+fn read_repo_identities(ws_dir: &Path) -> Vec<String> {
+    let meta_path = ws_dir.join(".wsp.yaml");
+    let data = match crate::util::read_yaml_file(&meta_path) {
+        Ok(d) => d,
+        Err(_) => return vec![],
+    };
+    match serde_yaml_ng::from_str::<crate::workspace::Metadata>(&data) {
+        Ok(meta) => meta.repos.keys().cloned().collect(),
+        Err(_) => vec![],
+    }
+}
+
+/// Calculate total disk usage of a directory, recursively.
+/// Uses `DirEntry::file_type()` which does NOT follow symlinks, so symlinks
+/// are counted by their metadata size only (not their target). This prevents
+/// escaping the gc directory or looping on circular symlinks.
+fn dir_size(path: &Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if ft.is_dir() {
+                total += dir_size(&entry.path());
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
 /// Restore a workspace from the gc area back to the workspaces directory.
 pub fn restore(paths: &Paths, name: &str) -> Result<()> {
     let entries = find_entries(&paths.gc_dir, name)?;
@@ -183,8 +289,9 @@ pub fn restore(paths: &Paths, name: &str) -> Result<()> {
 }
 
 /// Purge gc entries older than the retention period.
+/// A `retention_days` of 0 means "never purge" — all entries are kept indefinitely.
 pub fn purge(gc_dir: &Path, retention_days: u32) -> Result<u32> {
-    if !gc_dir.exists() {
+    if retention_days == 0 || !gc_dir.exists() {
         return Ok(0);
     }
 
@@ -240,6 +347,9 @@ pub fn maybe_run(paths: &Paths, retention_days: Option<u32>) {
     }
 
     let days = retention_days.unwrap_or(DEFAULT_RETENTION_DAYS);
+    if days == 0 {
+        return; // never purge
+    }
     if let Err(e) = purge(&paths.gc_dir, days) {
         eprintln!("  warning: gc failed: {}", e);
     }
@@ -561,6 +671,141 @@ mod tests {
             fs::read_to_string(dest.join("sub/nested.txt")).unwrap(),
             "nested"
         );
+    }
+
+    /// Helper: create a workspace with repos in its metadata.
+    fn create_workspace_with_repos(paths: &Paths, name: &str, repos: &[&str]) {
+        let ws_dir = paths.workspaces_dir.join(name);
+        fs::create_dir_all(&ws_dir).unwrap();
+        let mut repo_map = std::collections::BTreeMap::new();
+        for r in repos {
+            repo_map.insert(r.to_string(), None);
+        }
+        let meta = crate::workspace::Metadata {
+            version: 0,
+            name: name.to_string(),
+            branch: format!("test/{}", name),
+            repos: repo_map,
+            created: Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: std::collections::BTreeMap::new(),
+        };
+        let yaml = serde_yaml_ng::to_string(&meta).unwrap();
+        fs::write(ws_dir.join(".wsp.yaml"), yaml).unwrap();
+    }
+
+    #[test]
+    fn test_purge_zero_retention_never_purges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "keep-forever");
+
+        move_to_gc(&paths, "keep-forever", "test/keep-forever").unwrap();
+        backdate_gc_entries(&paths.gc_dir, 365); // backdate to a year ago
+
+        let removed = purge(&paths.gc_dir, 0).unwrap();
+        assert_eq!(removed, 0, "retention_days=0 should never purge");
+
+        let entries = list(&paths.gc_dir).unwrap();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_maybe_run_zero_retention_skips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        create_workspace(&paths, "keep-me");
+        move_to_gc(&paths, "keep-me", "test/keep-me").unwrap();
+        backdate_gc_entries(&paths.gc_dir, 365);
+
+        maybe_run(&paths, Some(0));
+
+        let entries = list(&paths.gc_dir).unwrap();
+        assert_eq!(
+            entries.len(),
+            1,
+            "maybe_run with 0 retention should skip gc"
+        );
+    }
+
+    #[test]
+    fn test_list_enriched_with_repo_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+
+        create_workspace_with_repos(
+            &paths,
+            "multi-repo",
+            &["github.com/acme/api", "github.com/acme/web"],
+        );
+        move_to_gc(&paths, "multi-repo", "test/multi-repo").unwrap();
+
+        create_workspace(&paths, "empty-ws");
+        move_to_gc(&paths, "empty-ws", "test/empty-ws").unwrap();
+
+        let entries = list_enriched(&paths.gc_dir).unwrap();
+        assert_eq!(entries.len(), 2);
+
+        // Find by name since order is by trashed_at
+        let multi = entries
+            .iter()
+            .find(|e| e.entry.name == "multi-repo")
+            .unwrap();
+        let empty = entries.iter().find(|e| e.entry.name == "empty-ws").unwrap();
+        assert_eq!(multi.repo_count, 2);
+        assert_eq!(empty.repo_count, 0);
+    }
+
+    #[test]
+    fn test_show_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+
+        create_workspace_with_repos(
+            &paths,
+            "show-test",
+            &["github.com/acme/api", "github.com/acme/web"],
+        );
+        // Add some content so disk_bytes > 0
+        fs::write(
+            paths.workspaces_dir.join("show-test/somefile.txt"),
+            "hello world",
+        )
+        .unwrap();
+
+        move_to_gc(&paths, "show-test", "test/show-test").unwrap();
+
+        let entry = show(&paths.gc_dir, "show-test").unwrap();
+        assert_eq!(entry.entry.name, "show-test");
+        assert_eq!(entry.entry.branch, "test/show-test");
+        assert_eq!(entry.repos.len(), 2);
+        assert!(entry.repos.contains(&"github.com/acme/api".to_string()));
+        assert!(entry.repos.contains(&"github.com/acme/web".to_string()));
+        assert!(entry.disk_bytes > 0);
+        assert!(entry.gc_path.contains("show-test"));
+    }
+
+    #[test]
+    fn test_show_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+
+        let err = show(&paths.gc_dir, "nonexistent").unwrap_err();
+        assert!(err.to_string().contains("no recoverable workspace"));
+    }
+
+    #[test]
+    fn test_dir_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("measure");
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("a.txt"), "hello").unwrap(); // 5 bytes
+        fs::write(dir.join("sub/b.txt"), "world!").unwrap(); // 6 bytes
+
+        let size = dir_size(&dir);
+        assert_eq!(size, 11);
     }
 
     /// Backdate all gc entries by the given number of days.

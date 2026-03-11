@@ -23,9 +23,9 @@ pub fn generate_cmd() -> Command {
 pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     use crate::output::{
         ConfigGetOutput, ConfigListOutput, DiffOutput, ErrorOutput, ExecOutput, FetchOutput,
-        ImportOutput, LogOutput, MutationOutput, RecoverListOutput, RepoListOutput, StatusOutput,
-        SyncAbortOutput, SyncOutput, TemplateListOutput, TemplateShowOutput, WorkspaceListOutput,
-        WorkspaceRepoListOutput,
+        ImportOutput, LogOutput, MutationOutput, RecoverListOutput, RecoverShowOutput,
+        RepoListOutput, StatusOutput, SyncAbortOutput, SyncOutput, TemplateListOutput,
+        TemplateShowOutput, WorkspaceListOutput, WorkspaceRepoListOutput,
     };
 
     let cli = super::build_cli();
@@ -100,6 +100,7 @@ pub fn run_generate(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
     );
     write_schema::<ImportOutput>(&mut out, "wsp registry add --from <org> --all --json");
     write_schema::<RecoverListOutput>(&mut out, "wsp recover --json");
+    write_schema::<RecoverShowOutput>(&mut out, "wsp recover show <name> --json");
     write_schema::<super::doctor::DoctorOutput>(&mut out, "wsp doctor --json");
     write_schema::<ErrorOutput>(&mut out, "Errors");
 
@@ -143,6 +144,7 @@ impl_sample!(
     crate::output::MutationOutput,
     crate::output::ImportOutput,
     crate::output::RecoverListOutput,
+    crate::output::RecoverShowOutput,
     crate::cli::doctor::DoctorOutput,
     crate::output::ErrorOutput,
 );

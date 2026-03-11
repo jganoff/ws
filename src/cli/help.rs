@@ -6,6 +6,62 @@ use crate::output::Output;
 /// Built-in help topics. Each is (name, short description, full text).
 const TOPICS: &[(&str, &str, &str)] = &[
     (
+        "gc",
+        "Garbage collection and workspace recovery",
+        "\
+gc — garbage collection and workspace recovery
+
+When you remove a workspace with `wsp rm`, it isn't permanently deleted.
+Instead, it's moved to a gc (garbage collection) directory and held there
+for a configurable retention period. This gives you a safety net to recover
+workspaces you removed by mistake.
+
+HOW IT WORKS
+
+  `wsp rm <name>`       Moves workspace to gc area (soft delete)
+  `wsp rm --permanent`  Bypasses gc — permanently deletes immediately
+
+  GC runs automatically (at most once per hour) and purges entries older
+  than the retention period. The retention check happens at purge time,
+  so changing the setting protects all existing entries immediately.
+
+CONFIGURATION
+
+  gc.retention-days     How long deleted workspaces are kept (default: 7).
+                        Set to 0 to disable gc entirely — workspaces are
+                        kept indefinitely until you manually delete them.
+
+  wsp config set gc.retention-days 30    # keep for 30 days
+  wsp config set gc.retention-days 0     # never auto-purge
+
+RECOVERY
+
+  wsp recover           List all recoverable workspaces
+  wsp recover show <n>  Inspect a deleted workspace (repos, size, path)
+  wsp recover <name>    Restore workspace to its original location
+
+  Only the most recent deletion of a given name is restored.
+
+STORAGE
+
+  GC'd workspaces live in ~/.local/share/wsp/gc/<name>__<timestamp>/
+  with a .wsp-gc.yaml metadata file inside. The original .wsp.yaml and
+  all repo clones are preserved intact.
+
+EMERGENCY: PREVENTING DATA LOSS
+
+  If you accidentally removed a workspace and are worried gc might purge
+  it before you can recover, you have two options:
+
+  1. Recover immediately:  wsp recover <name>
+  2. Disable gc:           wsp config set gc.retention-days 0
+
+  Option 2 prevents ALL future purges until you re-enable gc. Existing
+  entries are safe because gc checks retention at purge time, not at
+  deletion time.
+",
+    ),
+    (
         "wspignore",
         "Suppress files from workspace root checks",
         "\
@@ -77,8 +133,9 @@ GENERAL
 
 GC (GARBAGE COLLECTION)
 
-  gc.retention-days     Integer (≥1). How many days `wsp rm` keeps deleted
+  gc.retention-days     Integer (≥0). How many days `wsp rm` keeps deleted
                         workspaces recoverable via `wsp recover`.
+                        Set to 0 to disable gc (keep indefinitely).
                         Default: 7
 
 GIT CONFIG

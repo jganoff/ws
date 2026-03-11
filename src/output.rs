@@ -328,7 +328,14 @@ pub struct PathOutput {
 
 #[derive(Serialize)]
 pub struct RecoverListOutput {
-    pub entries: Vec<crate::gc::GcEntry>,
+    pub entries: Vec<crate::gc::GcListEntry>,
+    pub retention_days: u32,
+}
+
+#[derive(Serialize)]
+pub struct RecoverShowOutput {
+    pub entry: crate::gc::GcShowEntry,
+    pub retention_days: u32,
 }
 
 #[derive(Serialize)]
@@ -689,14 +696,44 @@ impl RecoverListOutput {
     pub fn sample() -> Self {
         use chrono::Utc;
         Self {
-            entries: vec![crate::gc::GcEntry {
-                name: "my-feature".into(),
-                branch: "jganoff/my-feature".into(),
-                trashed_at: "2026-01-01T00:00:00Z"
-                    .parse::<chrono::DateTime<Utc>>()
-                    .unwrap(),
-                original_path: "~/dev/workspaces/my-feature".into(),
+            entries: vec![crate::gc::GcListEntry {
+                entry: crate::gc::GcEntry {
+                    name: "my-feature".into(),
+                    branch: "jganoff/my-feature".into(),
+                    trashed_at: "2026-01-01T00:00:00Z"
+                        .parse::<chrono::DateTime<Utc>>()
+                        .unwrap(),
+                    original_path: "~/dev/workspaces/my-feature".into(),
+                },
+                repo_count: 3,
             }],
+            retention_days: 7,
+        }
+    }
+}
+
+#[cfg(feature = "codegen")]
+impl RecoverShowOutput {
+    pub fn sample() -> Self {
+        use chrono::Utc;
+        Self {
+            entry: crate::gc::GcShowEntry {
+                entry: crate::gc::GcEntry {
+                    name: "my-feature".into(),
+                    branch: "jganoff/my-feature".into(),
+                    trashed_at: "2026-01-01T00:00:00Z"
+                        .parse::<chrono::DateTime<Utc>>()
+                        .unwrap(),
+                    original_path: "~/dev/workspaces/my-feature".into(),
+                },
+                repos: vec![
+                    "github.com/acme/api-gateway".into(),
+                    "github.com/acme/user-service".into(),
+                ],
+                disk_bytes: 52_428_800,
+                gc_path: "~/.local/share/wsp/gc/my-feature__20260101T000000.000".into(),
+            },
+            retention_days: 7,
         }
     }
 }
@@ -723,6 +760,7 @@ pub enum Output {
     Mutation(MutationOutput),
     Import(ImportOutput),
     RecoverList(RecoverListOutput),
+    RecoverShow(RecoverShowOutput),
     Path(PathOutput),
     Doctor(crate::cli::doctor::DoctorOutput),
     None,
@@ -753,6 +791,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
             Output::Mutation(v) => print_json(&v),
             Output::Import(v) => print_json(&v),
             Output::RecoverList(v) => print_json(&v),
+            Output::RecoverShow(v) => print_json(&v),
             Output::Path(v) => print_json(&v),
             Output::Doctor(v) => print_json(&v),
         };
@@ -776,6 +815,7 @@ pub fn render(output: Output, json: bool) -> Result<()> {
         Output::Mutation(v) => render_mutation_text(v),
         Output::Import(v) => render_import_text(v),
         Output::RecoverList(v) => render_recover_list_text(v),
+        Output::RecoverShow(v) => render_recover_show_text(v),
         Output::Path(v) => render_path_text(v),
         Output::Doctor(_) => Ok(()), // text output handled inline during run
     }
@@ -1132,6 +1172,49 @@ fn render_path_text(v: PathOutput) -> Result<()> {
     Ok(())
 }
 
+fn format_age(trashed_at: &chrono::DateTime<chrono::Utc>) -> String {
+    let age = chrono::Utc::now() - trashed_at;
+    if age.num_seconds() < 0 {
+        return "just now".into();
+    }
+    if age.num_days() > 0 {
+        format!("{}d ago", age.num_days())
+    } else if age.num_hours() > 0 {
+        format!("{}h ago", age.num_hours())
+    } else {
+        format!("{}m ago", age.num_minutes())
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1_024 {
+        format!("{:.0} KB", bytes as f64 / 1_024.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn format_expires(trashed_at: &chrono::DateTime<chrono::Utc>, retention_days: u32) -> String {
+    if retention_days == 0 {
+        return "never".into();
+    }
+    let expires_at = *trashed_at + chrono::Duration::days(retention_days as i64);
+    let remaining = expires_at - chrono::Utc::now();
+    if remaining.num_seconds() <= 0 {
+        "soon".into()
+    } else if remaining.num_days() > 0 {
+        format!("in {}d", remaining.num_days())
+    } else if remaining.num_hours() > 0 {
+        format!("in {}h", remaining.num_hours())
+    } else {
+        format!("in {}m", remaining.num_minutes())
+    }
+}
+
 fn render_recover_list_text(v: RecoverListOutput) -> Result<()> {
     if v.entries.is_empty() {
         println!("No recoverable workspaces.");
@@ -1142,22 +1225,54 @@ fn render_recover_list_text(v: RecoverListOutput) -> Result<()> {
         vec![
             "Name".to_string(),
             "Branch".to_string(),
+            "Repos".to_string(),
             "Removed".to_string(),
+            "Expires".to_string(),
         ],
     );
     for e in &v.entries {
-        let age = chrono::Utc::now() - e.trashed_at;
-        let age_str = if age.num_days() > 0 {
-            format!("{}d ago", age.num_days())
-        } else if age.num_hours() > 0 {
-            format!("{}h ago", age.num_hours())
-        } else {
-            format!("{}m ago", age.num_minutes())
-        };
-        table.add_row(vec![e.name.clone(), e.branch.clone(), age_str])?;
+        let age_str = format_age(&e.entry.trashed_at);
+        let expires_str = format_expires(&e.entry.trashed_at, v.retention_days);
+        table.add_row(vec![
+            e.entry.name.clone(),
+            e.entry.branch.clone(),
+            e.repo_count.to_string(),
+            age_str,
+            expires_str,
+        ])?;
     }
     table.render()?;
-    println!("\nUse `wsp recover <name>` to restore.");
+    let footer = if v.retention_days == 0 {
+        "gc disabled (retention-days=0): entries kept indefinitely.".to_string()
+    } else {
+        format!(
+            "Retention: {} days. Use `wsp config set gc.retention-days` to change.",
+            v.retention_days
+        )
+    };
+    println!("\n{}", footer);
+    println!("Use `wsp recover show <name>` to inspect, `wsp recover <name>` to restore.");
+    Ok(())
+}
+
+fn render_recover_show_text(v: RecoverShowOutput) -> Result<()> {
+    let e = &v.entry;
+    let expires_str = format_expires(&e.entry.trashed_at, v.retention_days);
+    println!("Name:     {}", e.entry.name);
+    println!("Branch:   {}", e.entry.branch);
+    println!("Removed:  {}", format_age(&e.entry.trashed_at));
+    println!("Expires:  {}", expires_str);
+    println!("Size:     {}", format_bytes(e.disk_bytes));
+    println!("Path:     {}", e.gc_path);
+    if e.repos.is_empty() {
+        println!("Repos:    (none)");
+    } else {
+        println!("Repos:");
+        for repo in &e.repos {
+            println!("  {}", repo);
+        }
+    }
+    println!("\nUse `wsp recover {}` to restore.", e.entry.name);
     Ok(())
 }
 
@@ -2075,5 +2190,46 @@ mod tests {
         for (name, ts, want) in cases {
             assert_eq!(format_relative_time(ts, now), want, "{}", name);
         }
+    }
+
+    #[test]
+    fn test_format_bytes() {
+        let cases = vec![
+            (0, "0 B"),
+            (512, "512 B"),
+            (1024, "1 KB"),
+            (1_048_576, "1.0 MB"),
+            (52_428_800, "50.0 MB"),
+            (1_073_741_824, "1.0 GB"),
+        ];
+        for (bytes, expected) in cases {
+            assert_eq!(format_bytes(bytes), expected, "bytes={}", bytes);
+        }
+    }
+
+    #[test]
+    fn test_json_recover_show() {
+        use chrono::Utc;
+        let output = RecoverShowOutput {
+            entry: crate::gc::GcShowEntry {
+                entry: crate::gc::GcEntry {
+                    name: "my-ws".into(),
+                    branch: "test/my-ws".into(),
+                    trashed_at: "2026-01-01T00:00:00Z"
+                        .parse::<chrono::DateTime<Utc>>()
+                        .unwrap(),
+                    original_path: "/tmp/ws/my-ws".into(),
+                },
+                repos: vec!["github.com/acme/api".into()],
+                disk_bytes: 1024,
+                gc_path: "/tmp/gc/my-ws__123".into(),
+            },
+            retention_days: 7,
+        };
+        let val = serde_json::to_value(&output).unwrap();
+        assert_eq!(val["entry"]["name"], "my-ws");
+        assert_eq!(val["entry"]["repos"][0], "github.com/acme/api");
+        assert_eq!(val["entry"]["disk_bytes"], 1024);
+        assert_eq!(val["entry"]["gc_path"], "/tmp/gc/my-ws__123");
     }
 }

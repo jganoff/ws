@@ -47,7 +47,7 @@ wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] [--abort] [--no-disco
 wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
 wsp cd <workspace>                              # Change directory into a workspace
 wsp rm [<workspace>] [-f] [--permanent]         # Remove a workspace (alias: remove)
-wsp recover [<workspace>]                       # List or restore recently removed workspaces [read-only without args]
+wsp recover [<workspace>]                       # List, inspect, or restore recently removed workspaces [read-only without args]
 wsp rename <old> <new>                          # Rename a workspace, its directory, and git branches
 wsp repo add [<repos>]... [-t <template>] [--no-discover] # Add repos to current workspace
 wsp repo rm <repos>... [-f]                     # Remove repo(s) from the current workspace (alias: remove)
@@ -324,9 +324,30 @@ wsp doctor [--fix]                              # Check workspace and global sta
       "name": "my-feature",
       "branch": "jganoff/my-feature",
       "trashed_at": "2026-01-01T00:00:00Z",
-      "original_path": "~/dev/workspaces/my-feature"
+      "original_path": "~/dev/workspaces/my-feature",
+      "repo_count": 3
     }
-  ]
+  ],
+  "retention_days": 7
+}
+```
+
+### `wsp recover show <name> --json`
+```json
+{
+  "entry": {
+    "name": "my-feature",
+    "branch": "jganoff/my-feature",
+    "trashed_at": "2026-01-01T00:00:00Z",
+    "original_path": "~/dev/workspaces/my-feature",
+    "repos": [
+      "github.com/acme/api-gateway",
+      "github.com/acme/user-service"
+    ],
+    "disk_bytes": 52428800,
+    "gc_path": "~/.local/share/wsp/gc/my-feature__20260101T000000.000"
+  },
+  "retention_days": 7
 }
 ```
 

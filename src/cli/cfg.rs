@@ -291,21 +291,20 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         "gc.retention-days" => {
             let days: u32 = value
                 .parse()
-                .map_err(|_| anyhow::anyhow!("value must be a positive integer"))?;
-            if days < 1 {
-                bail!("gc.retention-days must be at least 1");
-            }
+                .map_err(|_| anyhow::anyhow!("value must be a non-negative integer"))?;
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.gc_retention_days = Some(days);
                 Ok(())
             })?;
-            (
-                format!("gc.retention-days = {}", days),
-                Some(format!(
+            let hint = if days == 0 {
+                "gc disabled: deleted workspaces kept indefinitely until manually purged".into()
+            } else {
+                format!(
                     "deleted workspaces recoverable via wsp recover for {} days",
                     days
-                )),
-            )
+                )
+            };
+            (format!("gc.retention-days = {}", days), Some(hint))
         }
         k if k.starts_with("language-integrations.") => {
             let lang = &k["language-integrations.".len()..];

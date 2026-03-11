@@ -188,6 +188,16 @@ Auto-generate VS Code multi-root workspace files when creating/modifying workspa
 - [ ] Generate `<workspace>.code-workspace` with all repo directories
 - [ ] Config key `language-integrations.vscode` (default true)
 
+### Background GC
+
+**Complexity:** Small
+
+Detach `gc::purge()` into a background process (like git's `gc.autoDetach`) so it never blocks the CLI. Currently runs synchronously after command completion — fast in practice (1-hour cooldown, just `remove_dir_all`), but could stall if many large workspaces expire simultaneously.
+
+- [ ] Fork/daemonize before `purge()` in `maybe_run()`
+- [ ] Ensure error reporting from detached child (stderr or log file)
+- [ ] Handle signal/process cleanup
+
 ## P4 — Ideas (Needs Design)
 
 Features that surfaced during analysis but need more thought before committing to a design.
