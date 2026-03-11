@@ -4,10 +4,11 @@ use serde::Serialize;
 use crate::output::Output;
 
 /// Built-in help topics. Each is (name, short description, full text).
-const TOPICS: &[(&str, &str, &str)] = &[(
-    "wspignore",
-    "Suppress files from workspace root checks",
-    "\
+const TOPICS: &[(&str, &str, &str)] = &[
+    (
+        "wspignore",
+        "Suppress files from workspace root checks",
+        "\
 wspignore — suppress files from workspace root checks
 
 `wsp st` checks the workspace root directory for files that aren't managed
@@ -47,7 +48,94 @@ EXAMPLES
   # Suppress a one-off file in this workspace
   echo 'notes.md' >> .wspignore
 ",
-)];
+    ),
+    (
+        "config",
+        "Configuration keys and their effects",
+        "\
+config — configuration keys and their effects
+
+All settings are stored in ~/.local/share/wsp/config.yaml. Manage them
+with `wsp config ls`, `wsp config get <key>`, `wsp config set <key> <value>`,
+and `wsp config unset <key>`.
+
+GENERAL
+
+  branch-prefix         String. Prefix prepended to workspace branch names.
+                        Example: `jganoff` → branch `jganoff/my-feature`.
+                        Default: not set (branches are just the workspace name).
+
+  workspaces-dir        Absolute path. Where workspaces are created.
+                        Default: ~/dev/workspaces
+
+  sync-strategy         `rebase` or `merge`. How `wsp sync` integrates upstream.
+                        Default: rebase
+
+  agent-md              Boolean. Generate AGENTS.md (+ CLAUDE.md symlink) in
+                        workspace roots. Provides context for AI agents.
+                        Default: true
+
+GC (GARBAGE COLLECTION)
+
+  gc.retention-days     Integer (≥1). How many days `wsp rm` keeps deleted
+                        workspaces recoverable via `wsp recover`.
+                        Default: 7
+
+GIT CONFIG
+
+  git_config.<key>      Override git config applied to every clone. The key
+                        is any valid git config key (e.g., push.default).
+                        These merge with built-in defaults:
+
+                          push.autoSetupRemote  true
+                          push.default          current
+                          rerere.enabled        true
+                          branch.sort           -committerdate
+
+                        Example: `wsp config set git_config.merge.conflictstyle zdiff3`
+                        Unset reverts to the built-in default (if any).
+
+LANGUAGE INTEGRATIONS
+
+  language-integrations.<name>
+                        Boolean. Enable/disable per-language workspace support.
+                        Available: go (generates go.work for multi-module repos).
+                        Default: false
+
+EXPERIMENTAL
+
+  experimental          Boolean. Top-level gate for unstable features. When false,
+                        experimental features are hidden from config ls and tab
+                        completion. Must be true for any experimental.* flag to
+                        take effect.
+                        Default: false
+
+  experimental.shell-prompt
+                        Boolean. Emit a shell hook that sets the WSP_WORKSPACE
+                        environment variable to the current workspace name.
+                        Use in your prompt: PS1='${WSP_WORKSPACE:+[wsp:$WSP_WORKSPACE] }%~ $ '
+                        Requires re-sourcing: eval \"$(wsp completion zsh)\"
+                        Default: false
+
+  experimental.shell-tmux-title
+                        Boolean. Emit a shell hook that sets the tmux pane/window
+                        title to `wsp:<workspace>` when inside a workspace.
+                        Clears the title when outside. Only active when $TMUX is set.
+                        Requires re-sourcing: eval \"$(wsp completion zsh)\"
+                        Default: false
+
+EXAMPLES
+
+  wsp config ls                                   # show all settings
+  wsp config set branch-prefix jganoff            # prefix branches
+  wsp config set sync-strategy merge              # use merge instead of rebase
+  wsp config set gc.retention-days 30             # keep deleted workspaces 30 days
+  wsp config set git_config.merge.conflictstyle zdiff3
+  wsp config set experimental.shell-prompt true   # enable prompt variable
+  wsp config unset branch-prefix                  # revert to default
+",
+    ),
+];
 
 #[derive(Serialize)]
 struct HelpTopicOutput {

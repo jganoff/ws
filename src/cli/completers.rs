@@ -1,3 +1,6 @@
+// Test completions from the command line with:
+//   _CLAP_IFS=$'\n' _CLAP_COMPLETE_INDEX=<N> COMPLETE=zsh target/release/wsp -- wsp <words...>
+// where N is the 0-based index of the word to complete.
 use clap_complete::engine::CompletionCandidate;
 
 use crate::config::{Config, Paths};
@@ -80,16 +83,15 @@ pub fn complete_config_keys() -> Vec<CompletionCandidate> {
     ];
 
     // experimental.<feature> keys — only visible when experimental gate is on
-    if let Ok(paths) = Paths::resolve() {
-        if let Ok(cfg) = Config::load_from(&paths.config_path) {
-            if cfg.experimental.as_ref().is_some_and(|e| e.enabled) {
-                for feature in crate::config::EXPERIMENTAL_FEATURES {
-                    keys.push(CompletionCandidate::new(format!(
-                        "experimental.{}",
-                        feature
-                    )));
-                }
-            }
+    if let Ok(paths) = Paths::resolve()
+        && let Ok(cfg) = Config::load_from(&paths.config_path)
+        && cfg.experimental.as_ref().is_some_and(|e| e.enabled)
+    {
+        for feature in crate::config::EXPERIMENTAL_FEATURES {
+            keys.push(CompletionCandidate::new(format!(
+                "experimental.{}",
+                feature
+            )));
         }
     }
 
