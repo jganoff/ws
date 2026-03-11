@@ -15,7 +15,6 @@ pub fn cmd() -> Command {
              registered before they can be added to workspaces. Registration also creates a \
              local bare mirror used to speed up cloning and fetching.",
         )
-        .subcommand_required(true)
         .subcommand(repo::add_cmd())
         .subcommand(repo::list_cmd())
         .subcommand(repo::rm_cmd())
@@ -26,6 +25,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Some(("add", m)) => repo::run_add(m, paths),
         Some(("ls", m)) => repo::run_list(m, paths),
         Some(("rm", m)) => repo::run_remove(m, paths),
+        None => repo::run_list(matches, paths),
         _ => unreachable!(),
     }
 }

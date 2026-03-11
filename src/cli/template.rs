@@ -25,7 +25,6 @@ pub fn cmd() -> Command {
              config overrides, and optional AGENTS.md content for AI coding assistants. \
              Create workspaces from templates with `wsp new -t <name>`.",
         )
-        .subcommand_required(true)
         .subcommand(new_cmd())
         .subcommand(import_cmd())
         .subcommand(list_cmd())
@@ -50,6 +49,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         Some(("repo", m)) => dispatch_repo(m, paths),
         Some(("config", m)) => dispatch_config(m, paths),
         Some(("agent-md", m)) => dispatch_agent_md(m, paths),
+        None => run_list(matches, paths),
         _ => unreachable!(),
     }
 }

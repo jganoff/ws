@@ -61,7 +61,6 @@ pub fn build_cli() -> Command {
              Add, remove, list, and fetch repos within the current workspace. Must be run \
              from inside a workspace directory.",
         )
-        .subcommand_required(true)
         .subcommand(add::cmd())
         .subcommand(remove::cmd())
         .subcommand(fetch::cmd())
@@ -185,6 +184,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
             Some(("rm", m)) => remove::run(m, paths),
             Some(("fetch", m)) => fetch::run(m, paths),
             Some(("ls", m)) => repo_list::run(m, paths),
+            None => repo_list::run(sub, paths),
             _ => unreachable!(),
         },
 
