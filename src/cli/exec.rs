@@ -102,7 +102,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
-    Ok(Output::Exec(ExecOutput { repos: results }))
+    Ok(Output::Exec(ExecOutput {
+        workspace: ws_name.to_string(),
+        repos: results,
+    }))
 }
 
 fn run_command(

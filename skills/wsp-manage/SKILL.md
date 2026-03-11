@@ -130,6 +130,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp diff --json`
 ```json
 {
+  "workspace": "my-feature",
+  "branch": "my-feature",
+  "workspace_dir": "/home/user/dev/workspaces/my-feature",
   "repos": [
     {
       "identity": "github.com/acme/api-gateway",
@@ -144,6 +147,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp log --json`
 ```json
 {
+  "workspace": "my-feature",
+  "branch": "my-feature",
+  "workspace_dir": "/home/user/dev/workspaces/my-feature",
   "repos": [
     {
       "identity": "github.com/acme/api-gateway",
@@ -206,6 +212,9 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp repo ls --json`
 ```json
 {
+  "workspace": "my-feature",
+  "branch": "my-feature",
+  "workspace_dir": "/home/user/dev/workspaces/my-feature",
   "repos": [
     {
       "identity": "github.com/acme/api-gateway",
@@ -224,6 +233,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp exec <workspace> --json -- <command>`
 ```json
 {
+  "workspace": "my-feature",
   "repos": [
     {
       "identity": "github.com/acme/api-gateway",
@@ -241,6 +251,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp repo fetch --json`
 ```json
 {
+  "workspace": "my-feature",
   "repos": [
     {
       "identity": "github.com/acme/api-gateway",
@@ -283,7 +294,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp config ls --json`
 ```json
 {
-  "entries": [
+  "settings": [
     {
       "key": "branch-prefix",
       "value": "jg"
@@ -332,7 +343,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
 ### `wsp recover --json`
 ```json
 {
-  "entries": [
+  "workspaces": [
     {
       "name": "my-feature",
       "branch": "jganoff/my-feature",

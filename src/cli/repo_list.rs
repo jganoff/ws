@@ -48,5 +48,10 @@ pub fn run(_matches: &ArgMatches, _paths: &Paths) -> Result<Output> {
         })
         .collect();
 
-    Ok(Output::WorkspaceRepoList(WorkspaceRepoListOutput { repos }))
+    Ok(Output::WorkspaceRepoList(WorkspaceRepoListOutput {
+        workspace: meta.name,
+        branch: meta.branch,
+        workspace_dir: ws_dir,
+        repos,
+    }))
 }

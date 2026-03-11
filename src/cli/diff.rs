@@ -113,7 +113,12 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         });
     }
 
-    Ok(Output::Diff(DiffOutput { repos }))
+    Ok(Output::Diff(DiffOutput {
+        workspace: meta.name,
+        branch: meta.branch,
+        workspace_dir: ws_dir,
+        repos,
+    }))
 }
 
 /// Pick the best ref to diff against: the merge-base between the upstream

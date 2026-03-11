@@ -148,6 +148,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     Ok(Output::Log(LogOutput {
+        workspace: meta.name,
+        branch: meta.branch,
+        workspace_dir: ws_dir,
         repos,
         oneline: is_oneline,
     }))

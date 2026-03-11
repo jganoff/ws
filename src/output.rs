@@ -194,6 +194,9 @@ pub struct RepoStatusEntry {
 
 #[derive(Serialize)]
 pub struct DiffOutput {
+    pub workspace: String,
+    pub branch: String,
+    pub workspace_dir: PathBuf,
     pub repos: Vec<RepoDiffEntry>,
 }
 
@@ -209,6 +212,9 @@ pub struct RepoDiffEntry {
 
 #[derive(Serialize)]
 pub struct LogOutput {
+    pub workspace: String,
+    pub branch: String,
+    pub workspace_dir: PathBuf,
     #[serde(skip)]
     pub oneline: bool,
     pub repos: Vec<RepoLogEntry>,
@@ -235,6 +241,7 @@ pub struct LogCommit {
 
 #[derive(Serialize)]
 pub struct ConfigListOutput {
+    #[serde(rename = "settings")]
     pub entries: Vec<ConfigListEntry>,
 }
 
@@ -252,6 +259,9 @@ pub struct ConfigGetOutput {
 
 #[derive(Serialize)]
 pub struct WorkspaceRepoListOutput {
+    pub workspace: String,
+    pub branch: String,
+    pub workspace_dir: PathBuf,
     pub repos: Vec<WorkspaceRepoListEntry>,
 }
 
@@ -264,6 +274,7 @@ pub struct WorkspaceRepoListEntry {
 
 #[derive(Serialize)]
 pub struct ExecOutput {
+    pub workspace: String,
     pub repos: Vec<ExecRepoResult>,
 }
 
@@ -285,6 +296,7 @@ pub struct ExecRepoResult {
 
 #[derive(Serialize)]
 pub struct FetchOutput {
+    pub workspace: String,
     pub repos: Vec<FetchRepoResult>,
 }
 
@@ -335,6 +347,7 @@ pub struct PathOutput {
 
 #[derive(Serialize)]
 pub struct RecoverListOutput {
+    #[serde(rename = "workspaces")]
     pub entries: Vec<crate::gc::GcListEntry>,
     pub retention_days: u32,
 }
@@ -512,6 +525,9 @@ impl StatusOutput {
 impl DiffOutput {
     pub fn sample() -> Self {
         Self {
+            workspace: "my-feature".into(),
+            branch: "my-feature".into(),
+            workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
             repos: vec![RepoDiffEntry {
                 identity: "github.com/acme/api-gateway".into(),
                 shortname: "api-gateway".into(),
@@ -528,6 +544,9 @@ impl DiffOutput {
 impl LogOutput {
     pub fn sample() -> Self {
         Self {
+            workspace: "my-feature".into(),
+            branch: "my-feature".into(),
+            workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
             oneline: false,
             repos: vec![RepoLogEntry {
                 identity: "github.com/acme/api-gateway".into(),
@@ -631,6 +650,9 @@ impl ConfigGetOutput {
 impl WorkspaceRepoListOutput {
     pub fn sample() -> Self {
         Self {
+            workspace: "my-feature".into(),
+            branch: "my-feature".into(),
+            workspace_dir: PathBuf::from("/home/user/dev/workspaces/my-feature"),
             repos: vec![
                 WorkspaceRepoListEntry {
                     identity: "github.com/acme/api-gateway".into(),
@@ -651,6 +673,7 @@ impl WorkspaceRepoListOutput {
 impl ExecOutput {
     pub fn sample() -> Self {
         Self {
+            workspace: "my-feature".into(),
             repos: vec![ExecRepoResult {
                 identity: "github.com/acme/api-gateway".into(),
                 shortname: "api-gateway".into(),
@@ -670,6 +693,7 @@ impl ExecOutput {
 impl FetchOutput {
     pub fn sample() -> Self {
         Self {
+            workspace: "my-feature".into(),
             repos: vec![FetchRepoResult {
                 identity: "github.com/acme/api-gateway".into(),
                 shortname: "api-gateway".into(),
@@ -1648,6 +1672,9 @@ mod tests {
             (
                 "two repos",
                 WorkspaceRepoListOutput {
+                    workspace: "ws".into(),
+                    branch: "ws".into(),
+                    workspace_dir: PathBuf::from("/tmp/ws"),
                     repos: vec![
                         WorkspaceRepoListEntry {
                             identity: "github.com/user/repo-a".into(),
@@ -1662,6 +1689,9 @@ mod tests {
                     ],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
+                    "branch": "ws",
+                    "workspace_dir": "/tmp/ws",
                     "repos": [
                         {
                             "identity": "github.com/user/repo-a",
@@ -1678,8 +1708,13 @@ mod tests {
             ),
             (
                 "empty",
-                WorkspaceRepoListOutput { repos: vec![] },
-                serde_json::json!({ "repos": [] }),
+                WorkspaceRepoListOutput {
+                    workspace: "ws".into(),
+                    branch: "ws".into(),
+                    workspace_dir: PathBuf::from("/tmp/ws"),
+                    repos: vec![],
+                },
+                serde_json::json!({ "workspace": "ws", "branch": "ws", "workspace_dir": "/tmp/ws", "repos": [] }),
             ),
         ];
         for (name, output, want) in cases {
@@ -1773,6 +1808,9 @@ mod tests {
     #[test]
     fn test_json_diff() {
         let output = DiffOutput {
+            workspace: "ws".into(),
+            branch: "ws".into(),
+            workspace_dir: PathBuf::from("/tmp/ws"),
             repos: vec![
                 RepoDiffEntry {
                     identity: "github.com/user/repo-a".into(),
@@ -1853,6 +1891,9 @@ mod tests {
             (
                 "structured commits",
                 LogOutput {
+                    workspace: "ws".into(),
+                    branch: "ws".into(),
+                    workspace_dir: PathBuf::from("/tmp/ws"),
                     oneline: false,
                     repos: vec![RepoLogEntry {
                         identity: "github.com/acme/api-gateway".into(),
@@ -1868,6 +1909,9 @@ mod tests {
                     }],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
+                    "branch": "ws",
+                    "workspace_dir": "/tmp/ws",
                     "repos": [{
                         "identity": "github.com/acme/api-gateway",
                         "shortname": "api-gateway",
@@ -1883,6 +1927,9 @@ mod tests {
             (
                 "raw passthrough",
                 LogOutput {
+                    workspace: "ws".into(),
+                    branch: "ws".into(),
+                    workspace_dir: PathBuf::from("/tmp/ws"),
                     oneline: false,
                     repos: vec![RepoLogEntry {
                         identity: "github.com/acme/api-gateway".into(),
@@ -1894,6 +1941,9 @@ mod tests {
                     }],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
+                    "branch": "ws",
+                    "workspace_dir": "/tmp/ws",
                     "repos": [{
                         "identity": "github.com/acme/api-gateway",
                         "shortname": "api-gateway",
@@ -1906,6 +1956,9 @@ mod tests {
             (
                 "error entry",
                 LogOutput {
+                    workspace: "ws".into(),
+                    branch: "ws".into(),
+                    workspace_dir: PathBuf::from("/tmp/ws"),
                     oneline: false,
                     repos: vec![RepoLogEntry {
                         identity: "github.com/acme/broken".into(),
@@ -1917,6 +1970,9 @@ mod tests {
                     }],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
+                    "branch": "ws",
+                    "workspace_dir": "/tmp/ws",
                     "repos": [{
                         "identity": "github.com/acme/broken",
                         "shortname": "broken",
@@ -1929,10 +1985,13 @@ mod tests {
             (
                 "empty repos",
                 LogOutput {
+                    workspace: "ws".into(),
+                    branch: "ws".into(),
+                    workspace_dir: PathBuf::from("/tmp/ws"),
                     oneline: true,
                     repos: vec![],
                 },
-                serde_json::json!({ "repos": [] }),
+                serde_json::json!({ "workspace": "ws", "branch": "ws", "workspace_dir": "/tmp/ws", "repos": [] }),
             ),
         ];
         for (name, output, want) in cases {
@@ -2056,6 +2115,7 @@ mod tests {
             (
                 "success with captured output",
                 ExecOutput {
+                    workspace: "ws".into(),
                     repos: vec![ExecRepoResult {
                         identity: "github.com/acme/api-gateway".into(),
                         shortname: "api-gateway".into(),
@@ -2069,6 +2129,7 @@ mod tests {
                     }],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
                     "repos": [{
                         "identity": "github.com/acme/api-gateway",
                         "shortname": "api-gateway",
@@ -2084,6 +2145,7 @@ mod tests {
             (
                 "failure without capture",
                 ExecOutput {
+                    workspace: "ws".into(),
                     repos: vec![ExecRepoResult {
                         identity: "github.com/acme/api-gateway".into(),
                         shortname: "api-gateway".into(),
@@ -2097,6 +2159,7 @@ mod tests {
                     }],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
                     "repos": [{
                         "identity": "github.com/acme/api-gateway",
                         "shortname": "api-gateway",
@@ -2110,6 +2173,7 @@ mod tests {
             (
                 "spawn error",
                 ExecOutput {
+                    workspace: "ws".into(),
                     repos: vec![ExecRepoResult {
                         identity: "github.com/acme/api-gateway".into(),
                         shortname: "api-gateway".into(),
@@ -2123,6 +2187,7 @@ mod tests {
                     }],
                 },
                 serde_json::json!({
+                    "workspace": "ws",
                     "repos": [{
                         "identity": "github.com/acme/api-gateway",
                         "shortname": "api-gateway",
@@ -2147,6 +2212,7 @@ mod tests {
             (
                 "all ok",
                 ExecOutput {
+                    workspace: "ws".into(),
                     repos: vec![ExecRepoResult {
                         identity: "r".into(),
                         shortname: "r".into(),
@@ -2164,6 +2230,7 @@ mod tests {
             (
                 "one failure",
                 ExecOutput {
+                    workspace: "ws".into(),
                     repos: vec![
                         ExecRepoResult {
                             identity: "a".into(),
@@ -2191,7 +2258,14 @@ mod tests {
                 },
                 1,
             ),
-            ("empty repos", ExecOutput { repos: vec![] }, 0),
+            (
+                "empty repos",
+                ExecOutput {
+                    workspace: "ws".into(),
+                    repos: vec![],
+                },
+                0,
+            ),
         ];
         for (name, output, want) in cases {
             assert_eq!(exit_code(&Output::Exec(output)), want, "{}", name);

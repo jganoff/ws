@@ -65,7 +65,13 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     };
 
     if identities.is_empty() {
-        return Ok(Output::Fetch(FetchOutput { repos: vec![] }));
+        return Ok(Output::Fetch(FetchOutput {
+            workspace: current_ws
+                .as_ref()
+                .map(|(_, m)| m.name.clone())
+                .unwrap_or_default(),
+            repos: vec![],
+        }));
     }
 
     // Phase 1: Fetch mirrors (network, parallel)
@@ -153,6 +159,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     let output = FetchOutput {
+        workspace: current_ws
+            .as_ref()
+            .map(|(_, m)| m.name.clone())
+            .unwrap_or_default(),
         repos: results
             .into_iter()
             .map(|(id, result)| {
