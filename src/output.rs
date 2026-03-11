@@ -67,10 +67,10 @@ pub fn format_repo_status(
     behind: u32,
     modified: u32,
     has_upstream: bool,
-    wrong_branch: &Option<String>,
+    expected_branch: &Option<String>,
 ) -> String {
     let mut parts = Vec::new();
-    if let Some(expected) = wrong_branch {
+    if let Some(expected) = expected_branch {
         parts.push(format!("not on workspace branch ({})", expected));
     }
     if ahead > 0 {
@@ -188,7 +188,7 @@ pub struct RepoStatusEntry {
     pub error: Option<String>,
     /// Set when an active repo's HEAD is on a different branch than the workspace branch.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub wrong_branch: Option<String>,
+    pub expected_branch: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -488,7 +488,7 @@ impl StatusOutput {
                 status: "2 ahead, 1 modified".into(),
                 files: vec![],
                 error: None,
-                wrong_branch: None,
+                expected_branch: None,
             }],
             root: vec![],
             verbose: false,
@@ -1484,7 +1484,7 @@ mod tests {
     #[test]
     fn test_format_repo_status() {
         let none: Option<String> = None;
-        //                  (name, ahead, behind, modified, has_upstream, wrong_branch, want)
+        //                  (name, ahead, behind, modified, has_upstream, expected_branch, want)
         let cases: Vec<(&str, u32, u32, u32, bool, &Option<String>, &str)> = vec![
             ("clean", 0, 0, 0, true, &none, "clean"),
             ("clean no upstream", 0, 0, 0, false, &none, "clean"),
@@ -1538,9 +1538,9 @@ mod tests {
             ),
             ("one each", 1, 0, 1, true, &none, "1 ahead, 1 modified"),
         ];
-        for (name, ahead, behind, modified, has_upstream, wrong_branch, want) in cases {
+        for (name, ahead, behind, modified, has_upstream, expected_branch, want) in cases {
             assert_eq!(
-                format_repo_status(ahead, behind, modified, has_upstream, wrong_branch),
+                format_repo_status(ahead, behind, modified, has_upstream, expected_branch),
                 want,
                 "{}",
                 name
@@ -1549,7 +1549,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_repo_status_wrong_branch() {
+    fn test_format_repo_status_expected_branch() {
         let wb = Some("jganoff/my-feature".to_string());
         assert_eq!(
             format_repo_status(0, 0, 0, true, &wb),
@@ -1678,7 +1678,7 @@ mod tests {
                     status: "1 ahead, 3 behind, 2 modified".into(),
                     files: vec![" M src/main.rs".into(), "?? new.txt".into()],
                     error: None,
-                    wrong_branch: None,
+                    expected_branch: None,
                 },
                 RepoStatusEntry {
                     name: "repo-b".into(),
@@ -1691,7 +1691,7 @@ mod tests {
                     status: String::new(),
                     files: vec![],
                     error: Some("parse error".into()),
-                    wrong_branch: None,
+                    expected_branch: None,
                 },
             ],
             root: vec![],
@@ -1708,7 +1708,7 @@ mod tests {
         assert_eq!(val["repos"][0]["files"][0], " M src/main.rs");
         assert_eq!(val["repos"][0]["files"][1], "?? new.txt");
         assert!(val["repos"][0].get("error").is_none());
-        assert!(val["repos"][0].get("wrong_branch").is_none());
+        assert!(val["repos"][0].get("expected_branch").is_none());
         // repo-b has empty files → omitted
         assert!(val["repos"][1].get("files").is_none());
         assert_eq!(val["repos"][1]["has_upstream"], false);

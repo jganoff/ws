@@ -103,7 +103,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     status: String::new(),
                     files: vec![],
                     error: Some(e.to_string()),
-                    wrong_branch: None,
+                    expected_branch: None,
                 });
                 continue;
             }
@@ -114,7 +114,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let branch = git::branch_current(&repo_dir).unwrap_or_else(|_| "?".to_string());
 
         // Detect wrong-branch: HEAD differs from workspace branch
-        let wrong_branch = if branch != meta.branch && branch != "?" {
+        let expected_branch = if branch != meta.branch && branch != "?" {
             Some(meta.branch.clone())
         } else {
             None
@@ -127,7 +127,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         let files = git::changed_files(&repo_dir).unwrap_or_default();
         let changed = files.len() as u32;
         let status =
-            output::format_repo_status(ahead, behind, changed, has_upstream, &wrong_branch);
+            output::format_repo_status(ahead, behind, changed, has_upstream, &expected_branch);
 
         repos.push(RepoStatusEntry {
             name: dir_name,
@@ -140,7 +140,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             status,
             files,
             error: None,
-            wrong_branch,
+            expected_branch,
         });
     }
 
