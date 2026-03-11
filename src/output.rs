@@ -235,6 +235,9 @@ pub struct RepoLogEntry {
 #[derive(Serialize, Clone)]
 pub struct LogCommit {
     pub hash: String,
+    pub authored_at: String,
+    /// Unix timestamp — used by renderers for relative time, skipped in JSON.
+    #[serde(skip)]
     pub timestamp: i64,
     pub subject: String,
 }
@@ -554,6 +557,7 @@ impl LogOutput {
                 path: "/home/user/dev/workspaces/my-feature/api-gateway".into(),
                 commits: vec![LogCommit {
                     hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".into(),
+                    authored_at: "2023-11-14T22:13:20+00:00".into(),
                     timestamp: 1700000000,
                     subject: "feat: add billing endpoint".into(),
                 }],
@@ -1000,7 +1004,11 @@ fn render_status_table(v: StatusOutput) -> Result<()> {
         header.push_str(&format!("  ({})", desc));
     }
     println!("{}", header);
-    println!("Created: {}\n", created_age);
+    println!(
+        "Created: {} ({})\n",
+        v.created.format("%Y-%m-%d %H:%M"),
+        created_age
+    );
 
     let mut table = Table::new(
         Box::new(std::io::stdout()),
@@ -1901,6 +1909,7 @@ mod tests {
                         path: "/tmp/ws/api-gateway".into(),
                         commits: vec![LogCommit {
                             hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".into(),
+                            authored_at: "2023-11-14T22:13:20+00:00".into(),
                             timestamp: 1700000000,
                             subject: "feat: add billing".into(),
                         }],
@@ -1918,7 +1927,7 @@ mod tests {
                         "path": "/tmp/ws/api-gateway",
                         "commits": [{
                             "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-                            "timestamp": 1700000000,
+                            "authored_at": "2023-11-14T22:13:20+00:00",
                             "subject": "feat: add billing"
                         }]
                     }]

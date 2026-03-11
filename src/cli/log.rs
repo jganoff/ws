@@ -182,8 +182,12 @@ fn fetch_commits(repo_dir: &Path, range: &str) -> Result<Vec<LogCommit>> {
             continue;
         }
         let timestamp = parts[1].parse::<i64>().unwrap_or(0);
+        let authored_at = chrono::DateTime::from_timestamp(timestamp, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default();
         commits.push(LogCommit {
             hash: parts[0].to_string(),
+            authored_at,
             timestamp,
             subject: parts[2].to_string(),
         });

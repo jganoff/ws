@@ -158,7 +158,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
       "commits": [
         {
           "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-          "timestamp": 1700000000,
+          "authored_at": "2023-11-14T22:13:20+00:00",
           "subject": "feat: add billing endpoint"
         }
       ]
