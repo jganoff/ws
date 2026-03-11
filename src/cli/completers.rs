@@ -79,12 +79,18 @@ pub fn complete_config_keys() -> Vec<CompletionCandidate> {
         CompletionCandidate::new("experimental"),
     ];
 
-    // experimental.<feature> keys
-    for feature in crate::config::EXPERIMENTAL_FEATURES {
-        keys.push(CompletionCandidate::new(format!(
-            "experimental.{}",
-            feature
-        )));
+    // experimental.<feature> keys — only visible when experimental gate is on
+    if let Ok(paths) = Paths::resolve() {
+        if let Ok(cfg) = Config::load_from(&paths.config_path) {
+            if cfg.experimental.as_ref().is_some_and(|e| e.enabled) {
+                for feature in crate::config::EXPERIMENTAL_FEATURES {
+                    keys.push(CompletionCandidate::new(format!(
+                        "experimental.{}",
+                        feature
+                    )));
+                }
+            }
+        }
     }
 
     // language-integrations.<name> keys
