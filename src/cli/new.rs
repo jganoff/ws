@@ -339,6 +339,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     Ok(Output::Mutation(
         MutationOutput::new(format!("Workspace created: {}", ws_dir.display()))
-            .with_duration(duration_ms),
+            .with_duration(duration_ms)
+            .with_workspace(ws_name, ws_dir.display().to_string(), &branch),
     ))
 }

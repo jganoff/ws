@@ -42,5 +42,16 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         ));
     }
 
-    Ok(Output::Mutation(MutationOutput::new(lines.join("\n"))))
+    let new_dir = workspace::dir(&paths.workspaces_dir, new_name);
+    let new_branch = results
+        .first()
+        .map(|r| r.new_branch.as_str())
+        .unwrap_or(new_name);
+    Ok(Output::Mutation(
+        MutationOutput::new(lines.join("\n")).with_workspace(
+            new_name,
+            new_dir.display().to_string(),
+            new_branch,
+        ),
+    ))
 }

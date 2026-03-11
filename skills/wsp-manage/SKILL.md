@@ -93,7 +93,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
       "name": "my-feature",
       "branch": "my-feature",
       "repo_count": 2,
-      "path": "~/dev/workspaces/my-feature",
+      "path": "/home/user/dev/workspaces/my-feature",
       "description": "migrating billing to stripe v3",
       "created": "2026-03-01T10:00:00+00:00",
       "last_used": "2026-03-06T15:30:00+00:00",

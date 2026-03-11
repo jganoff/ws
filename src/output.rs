@@ -320,6 +320,12 @@ pub struct MutationOutput {
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 impl MutationOutput {
@@ -329,6 +335,9 @@ impl MutationOutput {
             message: message.into(),
             duration_ms: None,
             hint: None,
+            workspace: None,
+            path: None,
+            branch: None,
         }
     }
 
@@ -339,6 +348,18 @@ impl MutationOutput {
 
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
+        self
+    }
+
+    pub fn with_workspace(
+        mut self,
+        name: impl Into<String>,
+        path: impl Into<String>,
+        branch: impl Into<String>,
+    ) -> Self {
+        self.workspace = Some(name.into());
+        self.path = Some(path.into());
+        self.branch = Some(branch.into());
         self
     }
 }
@@ -485,7 +506,7 @@ impl WorkspaceListOutput {
                 name: "my-feature".into(),
                 branch: "my-feature".into(),
                 repo_count: 2,
-                path: "~/dev/workspaces/my-feature".into(),
+                path: "/home/user/dev/workspaces/my-feature".into(),
                 description: Some("migrating billing to stripe v3".into()),
                 created: "2026-03-01T10:00:00+00:00".into(),
                 last_used: Some("2026-03-06T15:30:00+00:00".into()),
@@ -716,6 +737,9 @@ impl MutationOutput {
             message: "Registered github.com/acme/api-gateway".into(),
             duration_ms: None,
             hint: None,
+            workspace: None,
+            path: None,
+            branch: None,
         }
     }
 }
