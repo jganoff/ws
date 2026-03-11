@@ -18,15 +18,22 @@ pub fn cmd() -> Command {
         .about("Show git diff across workspace repos [read-only]")
         .long_about(
             "Show git diff across workspace repos [read-only].\n\n\
-             Runs `git diff` in each repo and aggregates the output. Extra arguments after \
-             `--` are forwarded to git diff (e.g., `wsp diff -- --staged`).",
+             Runs `git diff` in each repo and aggregates the output. By default, diffs \
+             against the merge-base with the upstream branch so only changes introduced \
+             by this workspace branch are shown.\n\n\
+             Extra arguments after `--` are forwarded to git diff:\n\n  \
+             wsp diff -- --staged          # staged changes only\n  \
+             wsp diff -- --name-only       # list changed filenames\n  \
+             wsp diff -- --stat            # diffstat summary\n  \
+             wsp diff -- -- path/to/file   # diff a specific file",
         )
         .arg(Arg::new("workspace").add(ArgValueCandidates::new(completers::complete_workspaces)))
         .arg(
             Arg::new("args")
                 .num_args(1..)
                 .last(true)
-                .allow_hyphen_values(true),
+                .allow_hyphen_values(true)
+                .help("Extra args forwarded to git diff (e.g., -- --staged, -- --name-only)"),
         )
 }
 
