@@ -105,7 +105,25 @@ fn write_posix(w: &mut dyn Write, bin_str: &str, wsp_root: &str, shell: &str) ->
          \n"
     )?;
 
-    writeln!(w, "source <(COMPLETE={shell} '{bin_esc}')")?;
+    if shell == "zsh" {
+        // Guard against compdef not being available yet (compinit not loaded).
+        // Clap's generated completions call `compdef` at the end, which fails
+        // if compinit hasn't run. Define a temporary no-op stub, source the
+        // completions, then remove the stub so compinit can define the real one.
+        writeln!(w, "if ! (( $+functions[compdef] )); then")?;
+        writeln!(w, "  compdef() {{ :; }}")?;
+        writeln!(w, "  source <(COMPLETE={shell} '{bin_esc}')")?;
+        writeln!(w, "  unfunction compdef")?;
+        writeln!(
+            w,
+            "  echo >&2 'wsp: compinit not loaded — tab completions disabled. Add \"autoload -Uz compinit && compinit\" before eval \"$(wsp completion zsh)\" in your .zshrc'"
+        )?;
+        writeln!(w, "else")?;
+        writeln!(w, "  source <(COMPLETE={shell} '{bin_esc}')")?;
+        writeln!(w, "fi")?;
+    } else {
+        writeln!(w, "source <(COMPLETE={shell} '{bin_esc}')")?;
+    }
 
     Ok(())
 }
@@ -408,6 +426,32 @@ mod tests {
             out.contains(r"COMPLETE=fish '/opt/it\'s here/wsp' | source"),
             "fish COMPLETE single quote must be escaped: {}",
             out
+        );
+    }
+
+    #[test]
+    fn test_zsh_compdef_guard() {
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh"));
+        assert!(
+            out.contains("if ! (( $+functions[compdef] ))"),
+            "zsh output should guard against missing compdef"
+        );
+        assert!(
+            out.contains("unfunction compdef"),
+            "zsh output should clean up stub compdef"
+        );
+        assert!(
+            out.contains("compinit not loaded"),
+            "zsh output should warn when compinit is missing"
+        );
+    }
+
+    #[test]
+    fn test_bash_no_compdef_guard() {
+        let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "bash"));
+        assert!(
+            !out.contains("compdef"),
+            "bash output should not have compdef guard"
         );
     }
 }
