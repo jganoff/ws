@@ -1,5 +1,5 @@
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use clap::{ArgMatches, Command};
@@ -164,8 +164,8 @@ fn step_shell_integration() -> Result<()> {
         }
     };
 
-    let rc = match rc_file(shell) {
-        Some(p) => p,
+    let home = match std::env::var("HOME").ok().filter(|h| !h.is_empty()) {
+        Some(h) => PathBuf::from(h),
         None => {
             eprintln!("Shell integration:");
             eprintln!("  $HOME is not set, cannot determine rc file");
@@ -174,18 +174,17 @@ fn step_shell_integration() -> Result<()> {
         }
     };
 
-    // Check if already configured
-    if rc.exists() {
-        let contents = std::fs::read_to_string(&rc).unwrap_or_default();
-        if contents.contains("wsp completion") {
-            eprintln!(
-                "  \u{2713} shell integration already configured in {}",
-                rc.display()
-            );
-            eprintln!();
-            return Ok(());
-        }
+    // Check all common rc files for existing shell integration
+    if let Some(found_in) = shell_integration_found(&home, shell) {
+        eprintln!(
+            "  \u{2713} shell integration already configured in {}",
+            found_in.display()
+        );
+        eprintln!();
+        return Ok(());
     }
+
+    let rc = primary_rc_file(&home, shell);
 
     eprintln!("Shell integration enables tab completion and workspace detection.");
     eprintln!("Detected shell: {}", shell);
@@ -322,15 +321,14 @@ fn print_non_interactive_guide(paths: &Paths) -> Result<()> {
     }
 
     if let Some(shell) = detect_shell() {
-        let rc = match rc_file(shell) {
-            Some(p) => p,
-            None => return Ok(()),
-        };
-        let already = rc.exists()
-            && std::fs::read_to_string(&rc)
-                .unwrap_or_default()
-                .contains("wsp completion");
-        if !already {
+        let home = std::env::var("HOME")
+            .ok()
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from);
+        if let Some(ref home) = home
+            && shell_integration_found(home, shell).is_none()
+        {
+            let rc = primary_rc_file(home, shell);
             let eval_line = match shell {
                 "fish" => "wsp completion fish | source".to_string(),
                 _ => format!("eval \"$(wsp completion {})\"", shell),
@@ -358,17 +356,45 @@ fn detect_shell() -> Option<&'static str> {
     }
 }
 
-fn rc_file(shell: &str) -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
-    Some(match shell {
-        "zsh" => PathBuf::from(&home).join(".zshrc"),
-        "bash" => PathBuf::from(&home).join(".bashrc"),
-        "fish" => PathBuf::from(&home)
-            .join(".config")
-            .join("fish")
-            .join("config.fish"),
+/// All rc files to check for existing shell integration, per shell.
+fn rc_files(home: &Path, shell: &str) -> Vec<PathBuf> {
+    match shell {
+        "zsh" => vec![
+            home.join(".zshrc"),
+            home.join(".zprofile"),
+            home.join(".zshenv"),
+        ],
+        "bash" => vec![
+            home.join(".bashrc"),
+            home.join(".bash_profile"),
+            home.join(".profile"),
+        ],
+        "fish" => vec![home.join(".config").join("fish").join("config.fish")],
+        _ => vec![],
+    }
+}
+
+/// The primary rc file to append to for a given shell.
+fn primary_rc_file(home: &Path, shell: &str) -> PathBuf {
+    match shell {
+        "zsh" => home.join(".zshrc"),
+        "bash" => home.join(".bashrc"),
+        "fish" => home.join(".config").join("fish").join("config.fish"),
         _ => unreachable!(),
-    })
+    }
+}
+
+/// Check all common rc files for `wsp completion`. Returns the path where found.
+fn shell_integration_found(home: &Path, shell: &str) -> Option<PathBuf> {
+    for path in rc_files(home, shell) {
+        if path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&path)
+            && contents.contains("wsp completion")
+        {
+            return Some(path);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -403,7 +429,8 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_file() {
+    fn test_primary_rc_file() {
+        let home = Path::new("/home/user");
         let cases = vec![
             ("zsh", ".zshrc"),
             ("bash", ".bashrc"),
@@ -411,16 +438,44 @@ mod tests {
         ];
 
         for (shell, suffix) in cases {
-            if let Some(rc) = rc_file(shell) {
-                assert!(
-                    rc.to_string_lossy().ends_with(suffix),
-                    "rc_file({}) = {}, expected to end with {}",
-                    shell,
-                    rc.display(),
-                    suffix
-                );
-            }
-            // If $HOME is unset, rc_file returns None — that's fine
+            let rc = primary_rc_file(home, shell);
+            assert!(
+                rc.to_string_lossy().ends_with(suffix),
+                "primary_rc_file({}) = {}, expected to end with {}",
+                shell,
+                rc.display(),
+                suffix
+            );
         }
+    }
+
+    #[test]
+    fn test_rc_files_covers_all_common_locations() {
+        let home = Path::new("/home/user");
+
+        let zsh_files = rc_files(home, "zsh");
+        assert!(zsh_files.iter().any(|p| p.ends_with(".zshrc")));
+        assert!(zsh_files.iter().any(|p| p.ends_with(".zprofile")));
+        assert!(zsh_files.iter().any(|p| p.ends_with(".zshenv")));
+
+        let bash_files = rc_files(home, "bash");
+        assert!(bash_files.iter().any(|p| p.ends_with(".bashrc")));
+        assert!(bash_files.iter().any(|p| p.ends_with(".bash_profile")));
+        assert!(bash_files.iter().any(|p| p.ends_with(".profile")));
+    }
+
+    #[test]
+    fn test_shell_integration_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+
+        // No rc files → not found
+        assert!(shell_integration_found(home, "zsh").is_none());
+
+        // Write wsp completion to .zprofile (not .zshrc)
+        std::fs::write(home.join(".zprofile"), "eval \"$(wsp completion zsh)\"\n").unwrap();
+        let found = shell_integration_found(home, "zsh");
+        assert!(found.is_some());
+        assert!(found.unwrap().ends_with(".zprofile"));
     }
 }

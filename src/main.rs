@@ -19,18 +19,18 @@ mod workspace;
 mod testutil;
 
 use std::process;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap_complete::CompleteEnv;
 
 fn main() {
     CompleteEnv::with_factory(cli::build_cli).complete();
 
-    let interrupted = Arc::new(AtomicBool::new(false));
-    let i = interrupted.clone();
     let _ = ctrlc::set_handler(move || {
-        i.store(true, Ordering::SeqCst);
+        // Exit immediately on Ctrl-C. ctrlc runs handlers in a normal thread
+        // context (sigwait-based), so process::exit is safe here. Child processes
+        // (e.g. git clone during exec) receive SIGINT independently from the
+        // terminal and terminate on their own.
+        process::exit(130);
     });
 
     let mut app = cli::build_cli();
@@ -74,9 +74,6 @@ fn main() {
             }
         }
         Err(err) => {
-            if interrupted.load(Ordering::SeqCst) {
-                process::exit(130);
-            }
             render_error(err, json);
             process::exit(1);
         }
