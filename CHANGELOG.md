@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-03-12
+
+### Features
+
+- *(skill)* Add wsp-new-feature skill for creating feature workspaces
+- *(cli)* Add `wsp setup` interactive onboarding wizard
+
+### Bug Fixes
+
+- *(setup)* Exit immediately on Ctrl-C, check all shell rc files
+- *(setup)* Remove SSH/HTTPS prompt, default to SSH
+
+### Refactor
+
+- *(setup)* Replace repo import with "what's next" guide
+
 ## [0.10.0] - 2026-03-12
 
 ### Features
