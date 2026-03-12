@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::agentmd;
 use crate::config::{self, Paths};
+use crate::filelock;
 use crate::gc;
 use crate::git;
 use crate::giturl;
@@ -237,7 +238,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     check_template_repos_parseable(paths, &mut checks);
 
     // G8. Template repos registered (have mirrors)
-    check_template_repos_registered(paths, &cfg, &mut checks);
+    check_template_repos_registered(paths, &cfg, fix, &mut checks, &mut fixed);
 
     // G10. Global wspignore defaults
     check_wspignore_defaults(paths, fix, &mut checks, &mut fixed);
@@ -262,16 +263,22 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         check_stale_dirs_map(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
 
         // W12. Unregistered repos — workspace repos not in global registry
-        check_unregistered_repos(&meta, &cfg, &ws_scope, &mut checks);
+        check_unregistered_repos(
+            &ws_dir,
+            &meta,
+            &cfg,
+            paths,
+            &ws_scope,
+            fix,
+            &mut checks,
+            &mut fixed,
+        );
 
         // W9. AGENTS.md / CLAUDE.md validity
         check_agents_md_valid(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
 
         // W5. Missing dirs map — collision disambiguation needed but missing
         check_missing_dirs_map(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
-
-        // W6. Orphaned clone dirs — directories in workspace root not in metadata
-        check_orphaned_clone_dirs(&ws_dir, &meta, paths, &ws_scope, &mut checks);
 
         // W11. go.work validity
         check_go_work_valid(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
@@ -321,15 +328,6 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
             // W7. In-progress git operation
             check_in_progress_op(&info.clone_dir, &info.dir_name, &scope, &mut checks);
-
-            // W8. Clone on workspace branch
-            check_clone_branch(
-                &info.clone_dir,
-                &info.dir_name,
-                &meta.branch,
-                &scope,
-                &mut checks,
-            );
 
             // Origin URL matches registered URL
             let clone_url = git::remote_get_url(&info.clone_dir, "origin")
@@ -413,8 +411,13 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                         check: "identity-match".into(),
                         status: CheckStatus::Warn,
                         message: format!(
-                            "{}: origin URL resolves to {} but .wsp.yaml says {}",
-                            info.dir_name, clone_identity, info.identity
+                            "{}: origin URL resolves to {} but .wsp.yaml says {} — \
+                             remove and re-add the repo: `wsp repo rm {}` then `wsp repo add {}`",
+                            info.dir_name,
+                            clone_identity,
+                            info.identity,
+                            info.dir_name,
+                            clone_identity
                         ),
                         fixable: false,
                         details: Some(serde_json::json!({
@@ -425,6 +428,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                     eprintln!(
                         "  ⚠ {}: identity mismatch (origin={}, metadata={})",
                         info.dir_name, clone_identity, info.identity
+                    );
+                    eprintln!(
+                        "      fix: `wsp repo rm {}` then `wsp repo add {}`",
+                        info.dir_name, clone_identity
                     );
                     continue;
                 }
@@ -902,53 +909,28 @@ fn check_in_progress_op(
     checks: &mut Vec<DoctorCheck>,
 ) {
     if let Some(op) = git::in_progress_op(clone_dir) {
-        let op_name = match op {
-            git::InProgressOp::Rebase => "rebase",
-            git::InProgressOp::Merge => "merge",
+        let (op_name, hint) = match op {
+            git::InProgressOp::Rebase => (
+                "rebase",
+                "run `git rebase --continue` or `git rebase --abort`",
+            ),
+            git::InProgressOp::Merge => {
+                ("merge", "run `git merge --continue` or `git merge --abort`")
+            }
         };
         checks.push(DoctorCheck {
             scope: scope.into(),
             check: "in-progress-git-op".into(),
             status: CheckStatus::Warn,
-            message: format!("{}: interrupted {} in progress", dir_name, op_name),
+            message: format!(
+                "{}: interrupted {} in progress — {}",
+                dir_name, op_name, hint
+            ),
             fixable: false,
-            details: Some(serde_json::json!({ "operation": op_name })),
+            details: Some(serde_json::json!({ "operation": op_name, "hint": hint })),
         });
         eprintln!("  ⚠ {}: interrupted {} in progress", dir_name, op_name);
-    }
-}
-
-/// W8. Clone on workspace branch — repo not on expected branch.
-fn check_clone_branch(
-    clone_dir: &std::path::Path,
-    dir_name: &str,
-    workspace_branch: &str,
-    scope: &str,
-    checks: &mut Vec<DoctorCheck>,
-) {
-    match git::branch_current(clone_dir) {
-        Ok(current) if current != workspace_branch => {
-            checks.push(DoctorCheck {
-                scope: scope.into(),
-                check: "clone-on-workspace-branch".into(),
-                status: CheckStatus::Warn,
-                message: format!(
-                    "{}: on branch {:?}, expected {:?}",
-                    dir_name, current, workspace_branch
-                ),
-                fixable: false,
-                details: Some(serde_json::json!({
-                    "current_branch": current,
-                    "workspace_branch": workspace_branch,
-                })),
-            });
-            eprintln!(
-                "  ⚠ {}: on branch {:?}, expected {:?}",
-                dir_name, current, workspace_branch
-            );
-        }
-        Ok(_) => {}  // on correct branch, no check emitted
-        Err(_) => {} // detached HEAD or other issue, skip
+        eprintln!("      {}", hint);
     }
 }
 
@@ -1111,11 +1093,16 @@ fn check_stale_dirs_map(
 }
 
 /// W12. Unregistered repos — workspace repos not in global registry.
+#[allow(clippy::too_many_arguments)]
 fn check_unregistered_repos(
+    ws_dir: &std::path::Path,
     meta: &workspace::Metadata,
     cfg: &config::Config,
+    paths: &Paths,
     ws_scope: &str,
+    fix: bool,
     checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
 ) {
     let unregistered: Vec<&str> = meta
         .repos
@@ -1135,6 +1122,99 @@ fn check_unregistered_repos(
         });
         eprintln!("  ✓ all workspace repos are in global registry");
     } else {
+        let fixable = true;
+        if fix {
+            // Collect identity → URL from clone origins, cloning mirrors as needed
+            let mut to_register: Vec<(String, String)> = Vec::new();
+            let mut clone_failures: Vec<String> = Vec::new();
+            for identity in &unregistered {
+                let dir_name = match meta.dir_name(identity) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                let clone_dir = ws_dir.join(&dir_name);
+                if let Ok(url) = git::remote_get_url(&clone_dir, "origin") {
+                    let url = url.trim().to_string();
+                    if !url.is_empty() {
+                        // Ensure mirror exists before registering
+                        if let Ok(parsed) = giturl::parse(&url)
+                            && !mirror::exists(&paths.mirrors_dir, &parsed)
+                        {
+                            eprintln!("  cloning mirror for {}...", identity);
+                            if let Err(e) = mirror::clone(&paths.mirrors_dir, &parsed, &url) {
+                                clone_failures.push(format!("{}: {}", identity, e));
+                                continue;
+                            }
+                        }
+                        to_register.push((identity.to_string(), url));
+                    }
+                }
+            }
+
+            if !clone_failures.is_empty() {
+                checks.push(DoctorCheck {
+                    scope: ws_scope.into(),
+                    check: "unregistered-repos".into(),
+                    status: CheckStatus::Warn,
+                    message: format!(
+                        "{} workspace repo(s) failed to clone mirrors",
+                        clone_failures.len()
+                    ),
+                    fixable,
+                    details: Some(serde_json::json!({ "failures": clone_failures })),
+                });
+                eprintln!(
+                    "  ⚠ {} workspace repo(s) failed to clone mirrors",
+                    clone_failures.len()
+                );
+                if to_register.is_empty() {
+                    return;
+                }
+            }
+
+            if !to_register.is_empty() {
+                match filelock::with_config(&paths.config_path, |locked_cfg| {
+                    for (identity, url) in &to_register {
+                        if !locked_cfg.repos.contains_key(identity) {
+                            locked_cfg.repos.insert(
+                                identity.clone(),
+                                config::RepoEntry {
+                                    url: url.clone(),
+                                    added: chrono::Utc::now(),
+                                },
+                            );
+                        }
+                    }
+                    Ok(())
+                }) {
+                    Ok(_) => {
+                        checks.push(DoctorCheck {
+                            scope: ws_scope.into(),
+                            check: "unregistered-repos".into(),
+                            status: CheckStatus::Ok,
+                            message: format!("registered {} workspace repo(s)", to_register.len()),
+                            fixable,
+                            details: None,
+                        });
+                        eprintln!("  ✓ registered {} workspace repo(s)", to_register.len());
+                        *fixed += 1;
+                        return;
+                    }
+                    Err(e) => {
+                        checks.push(DoctorCheck {
+                            scope: ws_scope.into(),
+                            check: "unregistered-repos".into(),
+                            status: CheckStatus::Warn,
+                            message: format!("failed to register workspace repos: {}", e),
+                            fixable,
+                            details: None,
+                        });
+                        eprintln!("  ⚠ failed to register workspace repos: {}", e);
+                        return;
+                    }
+                }
+            }
+        }
         checks.push(DoctorCheck {
             scope: ws_scope.into(),
             check: "unregistered-repos".into(),
@@ -1143,7 +1223,7 @@ fn check_unregistered_repos(
                 "{} workspace repos not in global registry",
                 unregistered.len()
             ),
-            fixable: false,
+            fixable,
             details: Some(serde_json::json!({ "identities": unregistered })),
         });
         eprintln!(
@@ -1481,11 +1561,19 @@ fn check_template_repos_parseable(paths: &Paths, checks: &mut Vec<DoctorCheck>) 
             scope: "global".into(),
             check: "template-repos-parseable".into(),
             status: CheckStatus::Warn,
-            message: format!("{} template repo URL(s) failed to parse", bad.len()),
+            message: format!(
+                "{} template repo URL(s) failed to parse — \
+                 edit with `wsp template repo <name> add/rm`",
+                bad.len()
+            ),
             fixable: false,
             details: Some(serde_json::json!({ "invalid_urls": bad })),
         });
         eprintln!("  ⚠ {} template repo URL(s) failed to parse", bad.len());
+        for b in &bad {
+            eprintln!("      {}", b);
+        }
+        eprintln!("      fix: `wsp template repo <name> add/rm`");
     }
 }
 
@@ -1493,7 +1581,9 @@ fn check_template_repos_parseable(paths: &Paths, checks: &mut Vec<DoctorCheck>) 
 fn check_template_repos_registered(
     paths: &Paths,
     cfg: &config::Config,
+    fix: bool,
     checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
 ) {
     let names = match template::list(&paths.templates_dir) {
         Ok(n) => n,
@@ -1503,14 +1593,17 @@ fn check_template_repos_registered(
         return;
     }
 
-    let mut unregistered = Vec::new();
+    // Collect unregistered repos with their parsed URL info for fixing
+    let mut unregistered: Vec<(String, giturl::Parsed, String)> = Vec::new();
+    let mut unregistered_labels = Vec::new();
     for name in &names {
         if let Ok(tmpl) = template::load(&paths.templates_dir, name) {
             for repo in &tmpl.repos {
                 if let Ok(parsed) = giturl::parse(&repo.url) {
                     let identity = parsed.identity();
                     if !cfg.repos.contains_key(&identity) {
-                        unregistered.push(format!("{}:{}", name, identity));
+                        unregistered_labels.push(format!("{}:{}", name, identity));
+                        unregistered.push((identity, parsed, repo.url.clone()));
                     }
                 }
             }
@@ -1528,16 +1621,90 @@ fn check_template_repos_registered(
         });
         eprintln!("  ✓ all template repos have mirrors");
     } else {
+        let fixable = true;
+        if fix {
+            // Clone missing mirrors
+            let mut clone_failures = Vec::new();
+            for (identity, parsed, url) in &unregistered {
+                if !mirror::exists(&paths.mirrors_dir, parsed) {
+                    eprintln!("  cloning {}...", url);
+                    if let Err(e) = mirror::clone(&paths.mirrors_dir, parsed, url) {
+                        clone_failures.push(format!("{}: {}", identity, e));
+                    }
+                }
+            }
+
+            if !clone_failures.is_empty() {
+                checks.push(DoctorCheck {
+                    scope: "global".into(),
+                    check: "template-repos-registered".into(),
+                    status: CheckStatus::Warn,
+                    message: format!(
+                        "{} template repo(s) failed to clone mirrors",
+                        clone_failures.len()
+                    ),
+                    fixable,
+                    details: Some(serde_json::json!({ "failures": clone_failures })),
+                });
+                eprintln!(
+                    "  ⚠ {} template repo(s) failed to clone mirrors",
+                    clone_failures.len()
+                );
+                return;
+            }
+
+            // Register under lock
+            let to_register: Vec<(String, String)> = unregistered
+                .iter()
+                .map(|(id, _, url)| (id.clone(), url.clone()))
+                .collect();
+            match filelock::with_config(&paths.config_path, |locked_cfg| {
+                for (identity, url) in &to_register {
+                    if !locked_cfg.repos.contains_key(identity) {
+                        locked_cfg.repos.insert(
+                            identity.clone(),
+                            config::RepoEntry {
+                                url: url.clone(),
+                                added: chrono::Utc::now(),
+                            },
+                        );
+                    }
+                }
+                Ok(())
+            }) {
+                Ok(_) => {
+                    checks.push(DoctorCheck {
+                        scope: "global".into(),
+                        check: "template-repos-registered".into(),
+                        status: CheckStatus::Ok,
+                        message: format!("registered {} template repo(s)", unregistered.len()),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!("  ✓ registered {} template repo(s)", unregistered.len());
+                    *fixed += 1;
+                }
+                Err(e) => {
+                    checks.push(DoctorCheck {
+                        scope: "global".into(),
+                        check: "template-repos-registered".into(),
+                        status: CheckStatus::Warn,
+                        message: format!("failed to register template repos: {}", e),
+                        fixable,
+                        details: None,
+                    });
+                    eprintln!("  ⚠ failed to register template repos: {}", e);
+                }
+            }
+            return;
+        }
         checks.push(DoctorCheck {
             scope: "global".into(),
             check: "template-repos-registered".into(),
             status: CheckStatus::Warn,
-            message: format!(
-                "{} template repo(s) not in registry (mirrors will be created on `wsp new -t`)",
-                unregistered.len()
-            ),
-            fixable: false,
-            details: Some(serde_json::json!({ "unregistered": unregistered })),
+            message: format!("{} template repo(s) not in registry", unregistered.len()),
+            fixable,
+            details: Some(serde_json::json!({ "unregistered": unregistered_labels })),
         });
         eprintln!(
             "  ⚠ {} template repo(s) not in registry",
@@ -1761,54 +1928,6 @@ fn check_missing_dirs_map(
             })),
         });
         eprintln!("  ⚠ dirs collision map out of sync");
-    }
-}
-
-/// W6. Orphaned clone dirs — directories in workspace root not in metadata.
-fn check_orphaned_clone_dirs(
-    ws_dir: &std::path::Path,
-    meta: &workspace::Metadata,
-    paths: &Paths,
-    ws_scope: &str,
-    checks: &mut Vec<DoctorCheck>,
-) {
-    let ignore_patterns = workspace::load_wspignore(paths.data_dir(), ws_dir);
-    let problems = match workspace::check_root_content(ws_dir, meta) {
-        Ok(p) => p,
-        Err(_) => return,
-    };
-
-    // Filter out ignored paths
-    let unignored: Vec<_> = problems
-        .iter()
-        .filter(|p| !workspace::is_ignored(&p.path, &ignore_patterns))
-        .collect();
-
-    if unignored.is_empty() {
-        checks.push(DoctorCheck {
-            scope: ws_scope.into(),
-            check: "orphaned-clone-dirs".into(),
-            status: CheckStatus::Ok,
-            message: "workspace root is clean".into(),
-            fixable: false,
-            details: None,
-        });
-        eprintln!("  ✓ workspace root is clean");
-    } else {
-        let paths_list: Vec<&str> = unignored.iter().map(|p| p.path.as_str()).collect();
-        checks.push(DoctorCheck {
-            scope: ws_scope.into(),
-            check: "orphaned-clone-dirs".into(),
-            status: CheckStatus::Warn,
-            message: format!("{} unexpected item(s) in workspace root", unignored.len()),
-            fixable: false,
-            details: Some(serde_json::json!({ "paths": paths_list })),
-        });
-        eprintln!(
-            "  ⚠ {} unexpected item(s) in workspace root: {}",
-            unignored.len(),
-            paths_list.join(", ")
-        );
     }
 }
 
@@ -2559,6 +2678,11 @@ mod tests {
 
     #[test]
     fn unregistered_repos_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        fs::create_dir_all(&ws_dir).unwrap();
+        let paths = test_paths(tmp.path());
+
         let meta = workspace::Metadata {
             version: 0,
             name: "test".into(),
@@ -2585,11 +2709,22 @@ mod tests {
         };
 
         let mut checks = Vec::new();
-        check_unregistered_repos(&meta, &cfg, "workspace/test", &mut checks);
+        let mut fixed = 0;
+        check_unregistered_repos(
+            &ws_dir,
+            &meta,
+            &cfg,
+            &paths,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].check, "unregistered-repos");
         assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
     }
 
     #[test]
@@ -3060,50 +3195,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // W8. clone-on-workspace-branch
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn clone_on_wrong_branch() {
-        let (clone_dir, _source, _ct, _st) = crate::testutil::setup_clone_repo();
-        // setup_clone_repo checks out "feature" branch
-        let current = git::branch_current(&clone_dir).unwrap();
-        assert_eq!(current, "feature");
-
-        let mut checks = Vec::new();
-        check_clone_branch(
-            &clone_dir,
-            "repo",
-            "my-workspace-branch",
-            "workspace/test/repo",
-            &mut checks,
-        );
-
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].check, "clone-on-workspace-branch");
-        assert_eq!(checks[0].status, CheckStatus::Warn);
-        assert!(checks[0].message.contains("feature"));
-        assert!(checks[0].message.contains("my-workspace-branch"));
-    }
-
-    #[test]
-    fn clone_on_correct_branch() {
-        let (clone_dir, _source, _ct, _st) = crate::testutil::setup_clone_repo();
-
-        let mut checks = Vec::new();
-        check_clone_branch(
-            &clone_dir,
-            "repo",
-            "feature", // matches what setup_clone_repo creates
-            "workspace/test/repo",
-            &mut checks,
-        );
-
-        // Correct branch → no check emitted
-        assert!(checks.is_empty());
-    }
-
-    // -----------------------------------------------------------------------
     // W3. legacy-ref-field (fix path)
     // -----------------------------------------------------------------------
 
@@ -3365,6 +3456,11 @@ mod tests {
 
     #[test]
     fn unregistered_repos_all_registered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = tmp.path().join("ws");
+        fs::create_dir_all(&ws_dir).unwrap();
+        let paths = test_paths(tmp.path());
+
         let meta = test_metadata(
             "test",
             "test/branch",
@@ -3382,7 +3478,17 @@ mod tests {
         };
 
         let mut checks = Vec::new();
-        check_unregistered_repos(&meta, &cfg, "workspace/test", &mut checks);
+        let mut fixed = 0;
+        check_unregistered_repos(
+            &ws_dir,
+            &meta,
+            &cfg,
+            &paths,
+            "workspace/test",
+            false,
+            &mut checks,
+            &mut fixed,
+        );
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Ok);
@@ -3658,7 +3764,8 @@ mod tests {
         };
 
         let mut checks = Vec::new();
-        check_template_repos_registered(&paths, &cfg, &mut checks);
+        let mut fixed = 0;
+        check_template_repos_registered(&paths, &cfg, false, &mut checks, &mut fixed);
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Ok);
@@ -3685,10 +3792,12 @@ mod tests {
         let cfg = config::Config::default(); // No repos registered
 
         let mut checks = Vec::new();
-        check_template_repos_registered(&paths, &cfg, &mut checks);
+        let mut fixed = 0;
+        check_template_repos_registered(&paths, &cfg, false, &mut checks, &mut fixed);
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert!(checks[0].fixable);
         assert!(checks[0].message.contains("not in registry"));
     }
 
@@ -3855,52 +3964,6 @@ mod tests {
             "expected value mismatch message, got: {}",
             checks[0].message
         );
-    }
-
-    // -----------------------------------------------------------------------
-    // W6. orphaned-clone-dirs
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn orphaned_clone_dirs_clean() {
-        let tmp = tempfile::tempdir().unwrap();
-        let ws_dir = tmp.path().join("ws");
-        let meta = test_metadata(
-            "test",
-            "test/branch",
-            std::collections::BTreeMap::from([("github.com/acme/repo".into(), None)]),
-        );
-        create_workspace_on_disk(&ws_dir, &meta);
-
-        // Create the expected repo dir
-        fs::create_dir_all(ws_dir.join("repo")).unwrap();
-
-        let paths = test_paths(tmp.path());
-        let mut checks = Vec::new();
-        check_orphaned_clone_dirs(&ws_dir, &meta, &paths, "workspace/test", &mut checks);
-
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].check, "orphaned-clone-dirs");
-        assert_eq!(checks[0].status, CheckStatus::Ok);
-    }
-
-    #[test]
-    fn orphaned_clone_dirs_detected() {
-        let tmp = tempfile::tempdir().unwrap();
-        let ws_dir = tmp.path().join("ws");
-        let meta = test_metadata("test", "test/branch", std::collections::BTreeMap::new());
-        create_workspace_on_disk(&ws_dir, &meta);
-
-        // Create an unexpected directory
-        fs::create_dir_all(ws_dir.join("stray-dir")).unwrap();
-
-        let paths = test_paths(tmp.path());
-        let mut checks = Vec::new();
-        check_orphaned_clone_dirs(&ws_dir, &meta, &paths, "workspace/test", &mut checks);
-
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].status, CheckStatus::Warn);
-        assert!(checks[0].message.contains("unexpected"));
     }
 
     // -----------------------------------------------------------------------
