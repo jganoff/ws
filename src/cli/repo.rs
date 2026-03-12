@@ -421,16 +421,17 @@ pub fn run_remove(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let entry = &snapshot.repos[&identity];
     let parsed = giturl::parse(&entry.url)?;
 
-    // Phase 2: remove mirror (no lock held)
-    eprintln!("Removing mirror for {}...", identity);
-    mirror::remove(&paths.mirrors_dir, &parsed)
-        .map_err(|e| anyhow::anyhow!("removing mirror: {}", e))?;
-
-    // Phase 3: unregister under lock (fast)
+    // Phase 2: unregister under lock (fast) — before mirror deletion so that
+    // a crash between phases leaves config clean rather than orphaned.
     filelock::with_config(&paths.config_path, |cfg| {
         cfg.repos.remove(&identity);
         Ok(())
     })?;
+
+    // Phase 3: remove mirror (no lock held, idempotent — tolerates already-removed)
+    eprintln!("Removing mirror for {}...", identity);
+    mirror::remove(&paths.mirrors_dir, &parsed)
+        .map_err(|e| anyhow::anyhow!("removing mirror: {}", e))?;
 
     Ok(Output::Mutation(MutationOutput::new(format!(
         "Removed {}",

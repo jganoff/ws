@@ -27,8 +27,11 @@ pub fn fetch(mirrors_dir: &Path, parsed: &Parsed) -> Result<()> {
 
 pub fn remove(mirrors_dir: &Path, parsed: &Parsed) -> Result<()> {
     let d = dir(mirrors_dir, parsed);
-    fs::remove_dir_all(d)?;
-    Ok(())
+    match fs::remove_dir_all(d) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub fn exists(mirrors_dir: &Path, parsed: &Parsed) -> bool {

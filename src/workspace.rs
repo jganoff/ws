@@ -200,10 +200,16 @@ pub fn create(
 
     let ws_dir = dir(&paths.workspaces_dir, name);
     if ws_dir.exists() {
-        bail!("workspace {:?} already exists", name);
+        // Allow resuming a partial workspace (dir exists but no valid metadata).
+        // A previous `wsp new` may have crashed mid-clone, leaving a partial dir.
+        let meta_path = ws_dir.join(METADATA_FILE);
+        if meta_path.exists() {
+            bail!("workspace {:?} already exists", name);
+        }
+        eprintln!("Resuming partial workspace creation for {:?}...", name);
+    } else {
+        fs::create_dir_all(&ws_dir)?;
     }
-
-    fs::create_dir_all(&ws_dir)?;
 
     match create_inner(&CreateInnerOpts {
         mirrors_dir: &paths.mirrors_dir,
@@ -217,8 +223,13 @@ pub fn create(
     }) {
         Ok(()) => Ok(()),
         Err(e) => {
-            // Clean up workspace dir on failure (best-effort)
-            let _ = fs::remove_dir_all(&ws_dir);
+            // Clean up workspace dir on failure (best-effort), but only if
+            // the metadata was never written (partial state). If metadata
+            // exists, the workspace is valid enough to keep.
+            let meta_path = ws_dir.join(METADATA_FILE);
+            if !meta_path.exists() {
+                let _ = fs::remove_dir_all(&ws_dir);
+            }
             Err(e)
         }
     }
@@ -265,20 +276,35 @@ fn create_inner(opts: &CreateInnerOpts) -> Result<()> {
 
     for identity in opts.repo_refs.keys() {
         let dn = meta.dir_name(identity)?;
+        let dest = opts.ws_dir.join(&dn);
         let upstream = opts
             .upstream_urls
             .get(identity)
             .map(|s| s.as_str())
             .unwrap_or("");
-        clone_from_mirror(
-            opts.mirrors_dir,
-            opts.ws_dir,
-            identity,
-            &dn,
-            opts.branch,
-            upstream,
-        )
-        .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
+
+        if dest.exists() {
+            // Adopt existing directory (resume after partial failure).
+            // Same checks as add_repos: validate identity, propagate refs,
+            // and prompt about URL/branch mismatches.
+            validate_existing_dir(&dest, identity)?;
+            propagate_mirror_refs(opts.mirrors_dir, &dest, identity)?;
+            if !upstream.is_empty() {
+                prompt_origin_url_for_adopt(&dest, upstream)?;
+            }
+            prompt_branch_for_adopt(&dest, opts.branch)?;
+            eprintln!("  adopted existing directory {}/", dn);
+        } else {
+            clone_from_mirror(
+                opts.mirrors_dir,
+                opts.ws_dir,
+                identity,
+                &dn,
+                opts.branch,
+                upstream,
+            )
+            .map_err(|e| anyhow::anyhow!("cloning repo {}: {}", identity, e))?;
+        }
     }
 
     save_metadata(opts.ws_dir, &meta)?;
@@ -286,8 +312,17 @@ fn create_inner(opts: &CreateInnerOpts) -> Result<()> {
 }
 
 /// Validate that an existing directory can be adopted as a managed repo.
-/// Checks that it is a git repo, has an origin remote, and its URL matches the expected identity.
+/// Checks that it is not a symlink, is a git repo, has an origin remote, and its URL
+/// matches the expected identity.
 fn validate_existing_dir(dir: &Path, expected_identity: &str) -> Result<()> {
+    // Refuse symlinks to prevent adoption of attacker-controlled directories
+    let meta = fs::symlink_metadata(dir)?;
+    if meta.file_type().is_symlink() {
+        bail!(
+            "directory {:?} is a symlink (refusing to adopt)",
+            dir.file_name().unwrap_or_default()
+        );
+    }
     if !dir.join(".git").exists() {
         bail!(
             "directory {:?} exists but is not a git repository",
