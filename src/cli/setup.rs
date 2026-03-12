@@ -226,11 +226,6 @@ fn step_shell_integration() -> Result<()> {
 fn step_register_repos(paths: &Paths) -> Result<()> {
     eprintln!("Register repos so `wsp new` can clone them.");
 
-    // Ask once whether to use HTTPS (default: SSH)
-    eprint!("Use HTTPS URLs instead of SSH? [y/N]: ");
-    let input = read_prompt()?;
-    let use_https = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
-
     let mut first = true;
     loop {
         if first {
@@ -247,7 +242,7 @@ fn step_register_repos(paths: &Paths) -> Result<()> {
             break;
         }
 
-        import_org(paths, owner, use_https);
+        import_org(paths, owner);
         eprintln!();
     }
 
@@ -255,10 +250,10 @@ fn step_register_repos(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-fn import_org(paths: &Paths, owner: &str, use_https: bool) {
+fn import_org(paths: &Paths, owner: &str) {
     eprintln!("  Importing from github.com/{}...", owner);
 
-    match super::repo::gh_list_repos(owner, use_https) {
+    match super::repo::gh_list_repos(owner, false) {
         Ok(repos) => {
             if repos.is_empty() {
                 eprintln!("  no repos found for {}", owner);
