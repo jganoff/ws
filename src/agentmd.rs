@@ -76,6 +76,13 @@ fn build_marked_section(metadata: &Metadata) -> String {
          - The workspace directory is the single source of truth for all repos.\n",
     );
 
+    s.push_str("\n## Per-Repo Conventions\n\n");
+    s.push_str(
+        "Each repo may have its own `CLAUDE.md` or `AGENTS.md` with build commands, \
+         architecture notes, and file conventions. Always check those before creating \
+         new files or making assumptions about project structure.\n",
+    );
+
     s.push_str("\n## Quick Reference\n\n");
     s.push_str("```bash\n");
     s.push_str("wsp st                  # status across all repos\n");
@@ -90,6 +97,12 @@ fn build_marked_section(metadata: &Metadata) -> String {
     );
     s.push_str(
         "Or report manually at <https://github.com/jganoff/wsp/issues> with the output of `wsp --version`, `uname -srm`, and `wsp st --json`.\n",
+    );
+    s.push_str("\n## Feedback Loop\n\n");
+    s.push_str(
+        "When you encounter friction with any tool in this workspace (wsp, build scripts, \
+         CI, tasks), suggest filing an issue on the relevant repo. Don't silently work \
+         around problems — surface them.\n",
     );
     s.push_str(MARKER_END);
     s.push('\n');
@@ -432,10 +445,12 @@ mod tests {
                     "| Repo | Directory |",
                     "## Workspace Boundary",
                     "Only read and edit files within this workspace directory",
+                    "## Per-Repo Conventions",
                     "## Quick Reference",
                     "## Troubleshooting",
                     "/wsp-report",
                     "https://github.com/jganoff/wsp/issues",
+                    "## Feedback Loop",
                 ],
             },
         ];
