@@ -133,22 +133,6 @@ impl Template {
 // Source classification
 // ---------------------------------------------------------------------------
 
-/// Classifies a user-provided source string into a name or file path.
-/// Unambiguous because template names cannot contain `/`, `\`, or end in `.yaml`.
-#[derive(Debug, PartialEq)]
-pub enum TemplateSource {
-    Name(String),
-    FilePath(PathBuf),
-}
-
-pub fn classify_source(source: &str) -> TemplateSource {
-    if source.contains('/') || source.contains('\\') || source.ends_with(".yaml") {
-        TemplateSource::FilePath(PathBuf::from(source))
-    } else {
-        TemplateSource::Name(source.to_string())
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Name validation
 // ---------------------------------------------------------------------------
@@ -1007,53 +991,6 @@ mod tests {
         for tc in cases {
             let result = validate_name(tc.input);
             assert_eq!(result.is_err(), tc.want_err, "case: {}", tc.name);
-        }
-    }
-
-    #[test]
-    fn classify_source_cases() {
-        struct Case {
-            name: &'static str,
-            input: &'static str,
-            want: TemplateSource,
-        }
-
-        let cases = vec![
-            Case {
-                name: "plain name",
-                input: "backend",
-                want: TemplateSource::Name("backend".into()),
-            },
-            Case {
-                name: "name with hyphens",
-                input: "my-team-backend",
-                want: TemplateSource::Name("my-team-backend".into()),
-            },
-            Case {
-                name: "relative file path",
-                input: "./backend.wsp.yaml",
-                want: TemplateSource::FilePath("./backend.wsp.yaml".into()),
-            },
-            Case {
-                name: "absolute file path",
-                input: "/tmp/backend.yaml",
-                want: TemplateSource::FilePath("/tmp/backend.yaml".into()),
-            },
-            Case {
-                name: "file ending in .yaml",
-                input: "backend.yaml",
-                want: TemplateSource::FilePath("backend.yaml".into()),
-            },
-            Case {
-                name: "file with slash no extension",
-                input: "path/to/template",
-                want: TemplateSource::FilePath("path/to/template".into()),
-            },
-        ];
-
-        for tc in cases {
-            let got = classify_source(tc.input);
-            assert_eq!(got, tc.want, "case: {}", tc.name);
         }
     }
 

@@ -39,7 +39,7 @@ pub fn cmd() -> Command {
             Arg::new("template")
                 .short('t')
                 .long("template")
-                .help("Create from a template (name or file path)")
+                .help("Create from a template")
                 .add(ArgValueCandidates::new(completers::complete_templates)),
         )
         .arg(
@@ -100,24 +100,9 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let mut created_from: Option<String> = None;
     let mut loaded_template: Option<template::Template> = None;
 
-    // Add repos from template (name or file path for backward compat)
+    // Add repos from template name
     if let Some(source) = template_source {
-        let classification = template::classify_source(source);
-        let is_file = matches!(&classification, template::TemplateSource::FilePath(_));
-        if is_file {
-            eprintln!(
-                "warning: passing file paths to -t is deprecated; use `wsp template import <file>` first, then -t <name>"
-            );
-        }
-        let tmpl = match classification {
-            template::TemplateSource::FilePath(path) => template::load_from_file(&path)?,
-            template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
-        };
-
-        // Show what an external file includes before applying
-        if is_file {
-            tmpl.print_customizations();
-        }
+        let tmpl = template::load(&paths.templates_dir, source)?;
 
         // Auto-register unknown repos from template
         template::auto_register(&tmpl, &mut cfg, paths)?;

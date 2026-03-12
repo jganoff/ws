@@ -35,7 +35,7 @@ pub fn cmd() -> Command {
             Arg::new("template")
                 .short('t')
                 .long("template")
-                .help("Add repos from a template (name or file path)")
+                .help("Add repos from a template")
                 .add(ArgValueCandidates::new(completers::complete_templates)),
         )
         .arg(
@@ -66,10 +66,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
     // Add repos from template (-t)
     if let Some(source) = template_source {
-        let tmpl = match template::classify_source(source) {
-            template::TemplateSource::FilePath(path) => template::load_from_file(&path)?,
-            template::TemplateSource::Name(name) => template::load(&paths.templates_dir, &name)?,
-        };
+        let tmpl = template::load(&paths.templates_dir, source)?;
         template::auto_register(&tmpl, &mut cfg, paths)?;
         let tmpl_identities = tmpl.identities()?;
         for id in tmpl_identities {

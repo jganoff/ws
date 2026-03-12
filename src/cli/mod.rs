@@ -66,23 +66,6 @@ pub fn build_cli() -> Command {
         .subcommand(fetch::cmd())
         .subcommand(repo_list::cmd());
 
-    // Hidden backward-compat alias: `wsp setup <noun>` dispatches to
-    // the new top-level nouns with a deprecation warning.
-    let setup = Command::new("setup")
-        .about("Deprecated: use top-level registry/config/completion commands")
-        .hide(true)
-        .subcommand_required(true)
-        .subcommand(
-            Command::new("repo")
-                .about("Manage registered repositories")
-                .subcommand_required(true)
-                .subcommand(repo::add_cmd())
-                .subcommand(repo::list_cmd())
-                .subcommand(repo::rm_cmd()),
-        )
-        .subcommand(cfg::cmd())
-        .subcommand(completion::cmd());
-
     #[allow(unused_mut)]
     let mut cli = Command::new("wsp")
         .disable_help_subcommand(true)
@@ -119,16 +102,14 @@ pub fn build_cli() -> Command {
         .subcommand(describe::cmd())
         // Workspace-scoped repo commands
         .subcommand(repo_ws)
-        // Admin commands (promoted from `wsp setup`)
+        // Admin commands
         .subcommand(registry::cmd())
         .subcommand(template::cmd())
         .subcommand(cfg::cmd())
         .subcommand(doctor::cmd())
         .subcommand(completion::cmd())
         // Help with topic support
-        .subcommand(help::cmd())
-        // Hidden backward-compat
-        .subcommand(setup);
+        .subcommand(help::cmd());
 
     #[cfg(feature = "codegen")]
     {
@@ -175,9 +156,6 @@ fn build_categorized_help(cli: &Command) -> String {
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
     match matches.subcommand() {
-        // --- Backward-compat: `wsp setup` dispatches with deprecation warnings ---
-        Some(("setup", sub)) => dispatch_setup(sub, paths),
-
         // --- Workspace-scoped repo commands ---
         Some(("repo", sub)) => match sub.subcommand() {
             Some(("add", m)) => add::run(m, paths),
@@ -225,32 +203,6 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
                 }
                 Ok(output)
             }
-        }
-        _ => unreachable!(),
-    }
-}
-
-/// Dispatch `wsp setup <noun>` with deprecation warnings on stderr.
-fn dispatch_setup(sub: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
-    match sub.subcommand() {
-        Some(("repo", sub2)) => {
-            eprintln!("warning: `wsp setup repo` is deprecated, use `wsp registry` instead");
-            match sub2.subcommand() {
-                Some(("add", m)) => repo::run_add(m, paths),
-                Some(("ls", m)) => repo::run_list(m, paths),
-                Some(("rm", m)) => repo::run_remove(m, paths),
-                _ => unreachable!(),
-            }
-        }
-        Some(("config", sub2)) => {
-            eprintln!("warning: `wsp setup config` is deprecated, use `wsp config` instead");
-            cfg::dispatch(sub2, paths)
-        }
-        Some(("completion", m)) => {
-            eprintln!(
-                "warning: `wsp setup completion` is deprecated, use `wsp completion` instead"
-            );
-            completion::run(m, paths)
         }
         _ => unreachable!(),
     }
