@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-03-12
+
+### Features
+
+- *(template)* Add rename command and fix group migration
+- Remove deprecated group feature [**breaking**]
+- *(doctor)* Add diagnostic command for workspace and global state
+- *(doctor)* Expand check catalog with 11 new diagnostics
+- *(doctor)* Add remaining checks (G3, G5-G8, W5-W6, W10-W11, W13)
+- *(config)* Add experimental features gate
+- *(completion)* Add experimental shell hooks for tmux title and prompt
+- *(config)* Add shell completions for config keys and values
+- *(config)* Add post-set hints and doctor check for unknown experimental keys
+- *(recover)* Add show command, expiration info, and gc improvements
+- *(completion)* Add shell completions for help topics and commands
+- *(cli)* Default to ls when subcommand group is called bare
+- *(new)* Implicitly copy repos from current workspace
+- *(output)* ISO timestamps in log JSON and relative time in status
+- *(output)* Structured mutations and absolute paths in samples
+- *(agentmd)* Add per-repo conventions and feedback loop sections
+- *(shell)* Refactor tmux integration to use rename-window
+
+### Bug Fixes
+
+- *(workspace)* Handle empty repos in clone_from_mirror
+- *(doctor)* Address code review findings for Phase 3 checks
+- *(completion)* Guard against missing compinit in zsh
+- *(completion)* Hide experimental feature flags when gate is off
+- *(doctor)* Enforce "warnings must have fixes" design rule
+- Make wsp new and repo rm idempotent
+
+### Refactor
+
+- *(output)* Rename wrong_branch to expected_branch in JSON
+- *(output)* Standardize repo field names and add path to JSON
+- *(output)* Add workspace context to JSON and rename top-level keys
+- *(cli)* Remove deprecated wsp setup command and -t file paths
+
+### Documentation
+
+- Remove stale -g/--group reference from templates design doc
+- Add compdef guard and CLAUDE.md symlink notes to CLAUDE.md
+- *(help)* Add config guide with all keys and defaults
+- *(diff)* Document git arg passthrough with examples
+- Add output struct gotcha to CLAUDE.md
+- Add shell startup resilience convention to CLAUDE.md
+- Add "operations are resumable" safety tenet, remove transaction journal
+
+### Testing
+
+- *(doctor)* Comprehensive coverage for all check detection and fix paths
+
 ## [0.9.2] - 2026-03-09
 
 ### Bug Fixes
