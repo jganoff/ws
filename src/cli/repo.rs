@@ -173,6 +173,18 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         bail!("no repos matched");
     }
 
+    let no_discover = matches.get_flag("no-discover");
+    let result = import_repos(paths, &filtered, no_discover)?;
+    Ok(Output::Import(result))
+}
+
+/// Clone and register a list of repos using the three-phase lock pattern.
+/// Reused by `wsp repo add --from` and `wsp setup`.
+pub(crate) fn import_repos(
+    paths: &Paths,
+    repos: &[(String, String)],
+    no_discover: bool,
+) -> Result<ImportOutput> {
     // Phase 1: snapshot current config to know which repos to skip (fast lock)
     let snapshot = filelock::read_config(&paths.config_path)?;
     let existing_identities: std::collections::HashSet<String> =
@@ -187,7 +199,7 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let mut skipped = Vec::new();
     let mut failed = Vec::new();
 
-    for (name, url) in &filtered {
+    for (name, url) in repos {
         let parsed = match giturl::parse(url) {
             Ok(p) => p,
             Err(e) => {
@@ -255,7 +267,6 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     // Template discovery: scan newly registered bare mirrors for .wsp.yaml files
-    let no_discover = matches.get_flag("no-discover");
     if !no_discover && !registered.is_empty() {
         let mut all_discovered = Vec::new();
         for identity in &registered {
@@ -271,11 +282,11 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         }
     }
 
-    Ok(Output::Import(ImportOutput {
+    Ok(ImportOutput {
         registered,
         skipped,
         failed,
-    }))
+    })
 }
 
 fn parse_from_arg(from: &str) -> Result<(String, String)> {
@@ -312,7 +323,7 @@ fn parse_from_arg(from: &str) -> Result<(String, String)> {
     Ok((host, owner))
 }
 
-fn gh_list_repos(owner: &str, use_https: bool) -> Result<Vec<(String, String)>> {
+pub(crate) fn gh_list_repos(owner: &str, use_https: bool) -> Result<Vec<(String, String)>> {
     let limit = 1000;
     let output = std::process::Command::new("gh")
         .args([

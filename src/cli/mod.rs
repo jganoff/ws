@@ -19,6 +19,7 @@ pub mod remove;
 pub mod rename;
 pub mod repo;
 pub mod repo_list;
+pub mod setup;
 pub mod skill;
 pub mod status;
 pub mod sync;
@@ -26,7 +27,7 @@ pub mod template;
 
 use clap::{Arg, ArgMatches, Command};
 
-use crate::config::Paths;
+use crate::config::{self, Paths};
 use crate::output::Output;
 use crate::workspace;
 
@@ -43,6 +44,7 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     (
         "Admin",
         &[
+            "setup",
             "registry",
             "template",
             "config",
@@ -103,6 +105,7 @@ pub fn build_cli() -> Command {
         // Workspace-scoped repo commands
         .subcommand(repo_ws)
         // Admin commands
+        .subcommand(setup::cmd())
         .subcommand(registry::cmd())
         .subcommand(template::cmd())
         .subcommand(cfg::cmd())
@@ -186,6 +189,7 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
         Some(("config", sub)) => cfg::dispatch(sub, paths),
         Some(("doctor", m)) => doctor::run(m, paths),
         Some(("completion", m)) => completion::run(m, paths),
+        Some(("setup", m)) => setup::run(m, paths),
 
         // --- Dev-only codegen ---
         #[cfg(feature = "codegen")]
@@ -198,8 +202,19 @@ pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> anyhow::Result<Output> {
             } else {
                 let mut output = list::run(matches, paths)?;
                 if let Output::WorkspaceList(ref mut wl) = output {
-                    wl.hint =
-                        Some("Not in a workspace. Use `wsp cd <name>` to enter one.".to_string());
+                    // Cheap first-run check: no config file means wsp has never been configured.
+                    // If the file exists, load it to check if anything is actually set.
+                    let is_first_run = if !paths.config_path.exists() {
+                        true
+                    } else {
+                        let cfg = config::Config::load_from(&paths.config_path)?;
+                        cfg.branch_prefix.is_none() && cfg.repos.is_empty()
+                    };
+                    wl.hint = Some(if is_first_run {
+                        "New to wsp? Run `wsp setup` to get started.".to_string()
+                    } else {
+                        "Not in a workspace. Use `wsp cd <name>` to enter one.".to_string()
+                    });
                 }
                 Ok(output)
             }
