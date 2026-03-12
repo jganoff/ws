@@ -180,7 +180,7 @@ fn run_add_from(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 
 /// Clone and register a list of repos using the three-phase lock pattern.
 /// Reused by `wsp repo add --from` and `wsp setup`.
-pub(crate) fn import_repos(
+fn import_repos(
     paths: &Paths,
     repos: &[(String, String)],
     no_discover: bool,
@@ -323,7 +323,7 @@ fn parse_from_arg(from: &str) -> Result<(String, String)> {
     Ok((host, owner))
 }
 
-pub(crate) fn gh_list_repos(owner: &str, use_https: bool) -> Result<Vec<(String, String)>> {
+fn gh_list_repos(owner: &str, use_https: bool) -> Result<Vec<(String, String)>> {
     let limit = 1000;
     let output = std::process::Command::new("gh")
         .args([

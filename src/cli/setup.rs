@@ -28,9 +28,8 @@ pub fn cmd() -> Command {
         .long_about(
             "Interactive first-time setup.\n\n\
              Walks through configuring wsp for first use: checks dependencies, sets \
-             branch prefix, configures shell integration, and imports repos from GitHub. \
-             Idempotent — skips steps that are already configured. Re-run anytime to \
-             fill in missing pieces.",
+             branch prefix, and configures shell integration. Idempotent — skips steps \
+             that are already configured. Re-run anytime to fill in missing pieces.",
         )
 }
 
@@ -43,7 +42,7 @@ pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     eprintln!();
 
     // Step 1: Check tools on PATH
-    let has_gh = check_tools()?;
+    check_tools()?;
 
     // Step 2: Branch prefix
     step_branch_prefix(paths)?;
@@ -51,20 +50,14 @@ pub fn run(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     // Step 3: Shell integration
     step_shell_integration()?;
 
-    // Step 4: Register repos (skip if gh not found)
-    if has_gh {
-        step_register_repos(paths)?;
-    }
-
-    // Step 5: Workflow guide
-    print_workflow_guide();
+    // Step 4: What's next
+    print_next_steps();
 
     Ok(Output::None)
 }
 
-/// Check required and optional tools. Returns true if `gh` is available.
-/// Bails if `git` is missing.
-fn check_tools() -> Result<bool> {
+/// Check required and optional tools. Bails if `git` is missing.
+fn check_tools() -> Result<()> {
     eprintln!("Checking dependencies...");
 
     // git — hard requirement
@@ -88,25 +81,23 @@ fn check_tools() -> Result<bool> {
         bail!("git is required but not found on PATH");
     }
 
-    // gh — optional
-    let has_gh = match std::process::Command::new("gh").arg("--version").output() {
+    // gh — optional, useful for bulk import
+    match std::process::Command::new("gh").arg("--version").output() {
         Ok(out) if out.status.success() => {
             let raw = String::from_utf8_lossy(&out.stdout);
             let first_line = raw.lines().next().unwrap_or("");
             let version = first_line.strip_prefix("gh version ").unwrap_or(first_line);
             let version = version.split_whitespace().next().unwrap_or(version);
             eprintln!("  \u{2713} gh {}", version);
-            true
         }
         _ => {
-            eprintln!("  \u{2717} gh \u{2014} not found (optional, needed for repo import)");
+            eprintln!("  \u{2717} gh \u{2014} not found (optional, enables bulk repo import)");
             eprintln!("    Install: https://cli.github.com");
-            false
         }
     };
 
     eprintln!();
-    Ok(has_gh)
+    Ok(())
 }
 
 /// Prompt for branch prefix if not already set.
@@ -222,85 +213,27 @@ fn step_shell_integration() -> Result<()> {
     Ok(())
 }
 
-/// Import repos from GitHub orgs interactively.
-fn step_register_repos(paths: &Paths) -> Result<()> {
-    eprintln!("Register repos so `wsp new` can clone them.");
-
-    let mut first = true;
-    loop {
-        if first {
-            eprint!("GitHub org or user to import from (blank to skip): ");
-            first = false;
-        } else {
-            eprint!("Another org? (blank to finish): ");
-        }
-
-        let input = read_prompt()?;
-        let owner = input.trim();
-
-        if owner.is_empty() {
-            break;
-        }
-
-        import_org(paths, owner);
-        eprintln!();
-    }
-
+/// Print concrete next steps after setup completes.
+fn print_next_steps() {
+    eprintln!("Setup complete!");
     eprintln!();
-    Ok(())
-}
-
-fn import_org(paths: &Paths, owner: &str) {
-    eprintln!("  Importing from github.com/{}...", owner);
-
-    match super::repo::gh_list_repos(owner, false) {
-        Ok(repos) => {
-            if repos.is_empty() {
-                eprintln!("  no repos found for {}", owner);
-                return;
-            }
-            match super::repo::import_repos(paths, &repos, true) {
-                Ok(result) => {
-                    let mut parts = Vec::new();
-                    let reg = result.registered.len();
-                    let skip = result.skipped.len();
-                    let fail = result.failed.len();
-                    if reg > 0 {
-                        parts.push(format!("{} registered", reg));
-                    }
-                    if skip > 0 {
-                        parts.push(format!("{} already registered", skip));
-                    }
-                    if fail > 0 {
-                        parts.push(format!("{} failed", fail));
-                    }
-                    eprintln!("  \u{2713} {}", parts.join(", "));
-                }
-                Err(e) => {
-                    eprintln!("  error: {}", e);
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("  error listing repos: {}", e);
-        }
-    }
-}
-
-/// Print workflow guide with example commands.
-fn print_workflow_guide() {
-    eprintln!("You're all set! Here's the typical workflow:");
+    eprintln!(
+        "\u{2500}\u{2500} What's next \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"
+    );
     eprintln!();
-    eprintln!("  wsp new my-feature <repo>        # create workspace with repos");
-    eprintln!("  # cd into the workspace automatically");
-    eprintln!("  # hack, iterate with Claude or your editor");
-    eprintln!("  wsp st                           # check status across all repos");
-    eprintln!("  wsp diff                         # review changes");
-    eprintln!("  git push                         # push branch for PR");
-    eprintln!("  wsp rm my-feature                # clean up after merge");
+    eprintln!("  1. Register repos you work with:");
+    eprintln!("     wsp repo add https://github.com/jganoff/wsp.git");
     eprintln!();
-    eprintln!("Create your first workspace:");
-    eprintln!("  wsp new my-feature");
+    eprintln!("  2. Create your first workspace:");
+    eprintln!("     wsp new my-feature wsp");
+    eprintln!();
+    eprintln!("  3. Work normally, then clean up:");
+    eprintln!("     wsp st                        # status across repos");
+    eprintln!("     wsp diff                      # review changes");
+    eprintln!("     git push                      # push for PR");
+    eprintln!("     wsp rm my-feature             # clean up after merge");
+    eprintln!();
+    eprintln!("  Tip: bulk-import from GitHub with `wsp repo add --from github.com/<org> --all`");
 }
 
 /// Non-interactive mode: print what needs to be done without prompting.
@@ -332,7 +265,7 @@ fn print_non_interactive_guide(paths: &Paths) -> Result<()> {
         }
     }
 
-    eprintln!("  wsp repo add --from github.com/<org> --all");
+    eprintln!("  wsp repo add https://github.com/jganoff/wsp.git");
     eprintln!("  wsp new my-feature");
 
     Ok(())
