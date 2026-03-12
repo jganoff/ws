@@ -4,29 +4,6 @@ Prioritized feature plan for wsp, organized by shipping priority.
 
 ## P1 — Adoption
 
-### Transaction Journal
-
-**Complexity:** Small-Medium
-
-Record multi-repo operation progress so partial failures are visible and recoverable. Before `wsp sync` touches 5 repos, write a journal. As each completes, update its entry. If wsp crashes or is interrupted, the journal survives for `wsp doctor` to read.
-
-```
-# .wsp.yaml.journal (transient, deleted on clean completion)
-operation: sync
-started: 2026-03-04T10:00:00Z
-repos:
-  api-gateway: ok
-  user-service: ok
-  proto: failed (conflict in src/auth.rs)
-  billing: pending
-  payments: pending
-```
-
-- [ ] Write journal before multi-repo operations (`sync`, `rm`, `repo add`)
-- [ ] Update per-repo status as operations complete
-- [ ] Delete journal on clean completion
-- [ ] `wsp doctor` reads stale journals and reports/retries
-
 ### PR Awareness
 
 **Complexity:** Small-Medium
