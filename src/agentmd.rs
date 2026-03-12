@@ -10,6 +10,7 @@ pub const MARKER_BEGIN: &str = "<!-- wsp:begin -->";
 pub const MARKER_END: &str = "<!-- wsp:end -->";
 const SKILL_CONTENT: &str = include_str!("../skills/wsp-manage/SKILL.md");
 const REPORT_SKILL_CONTENT: &str = include_str!("../skills/wsp-report/SKILL.md");
+const NEW_FEATURE_SKILL_CONTENT: &str = include_str!("../skills/wsp-new-feature/SKILL.md");
 
 /// Generate or update AGENTS.md, CLAUDE.md symlink, and workspace skill.
 pub fn update(ws_dir: &Path, metadata: &Metadata) -> Result<()> {
@@ -91,6 +92,11 @@ fn build_marked_section(metadata: &Metadata) -> String {
     s.push_str("wsp repo rm <repo>      # remove repo from workspace\n");
     s.push_str("wsp exec <name> -- cmd  # run command in each repo\n");
     s.push_str("```\n");
+    s.push_str("\n## New Features\n\n");
+    s.push_str(
+        "To start a new feature, use the **/wsp-new-feature** skill to create a wsp workspace.\n",
+    );
+
     s.push_str("\n## Troubleshooting\n\n");
     s.push_str(
         "If you encounter a wsp issue, use the **/wsp-report** skill to gather diagnostics and file a GitHub issue.\n\n",
@@ -247,6 +253,11 @@ fn install_skill(ws_dir: &Path) -> Result<()> {
     fs::create_dir_all(&report_dir).context("creating wsp-report skill directory")?;
     fs::write(report_dir.join("SKILL.md"), REPORT_SKILL_CONTENT)
         .context("writing wsp-report SKILL.md")?;
+
+    let new_feature_dir = ws_dir.join(".claude/skills/wsp-new-feature");
+    fs::create_dir_all(&new_feature_dir).context("creating wsp-new-feature skill directory")?;
+    fs::write(new_feature_dir.join("SKILL.md"), NEW_FEATURE_SKILL_CONTENT)
+        .context("writing wsp-new-feature SKILL.md")?;
 
     Ok(())
 }
@@ -447,6 +458,8 @@ mod tests {
                     "Only read and edit files within this workspace directory",
                     "## Per-Repo Conventions",
                     "## Quick Reference",
+                    "## New Features",
+                    "/wsp-new-feature",
                     "## Troubleshooting",
                     "/wsp-report",
                     "https://github.com/jganoff/wsp/issues",
@@ -516,6 +529,11 @@ mod tests {
         assert!(report_skill.exists());
         let skill = fs::read_to_string(&report_skill).unwrap();
         assert!(skill.contains("wsp-report"));
+
+        let new_feature_skill = ws_dir.join(".claude/skills/wsp-new-feature/SKILL.md");
+        assert!(new_feature_skill.exists());
+        let skill = fs::read_to_string(&new_feature_skill).unwrap();
+        assert!(skill.contains("wsp-new-feature"));
     }
 
     #[test]
