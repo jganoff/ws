@@ -100,17 +100,22 @@ pub fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("workspace name cannot be empty");
     }
-    if name.contains('\0') {
-        bail!("workspace name cannot contain null bytes");
-    }
-    if name.contains('/') || name.contains('\\') {
-        bail!("workspace name {:?} cannot contain path separators", name);
-    }
     if name.starts_with('-') {
         bail!("workspace name {:?} cannot start with a dash", name);
     }
     if name.starts_with('.') {
         bail!("workspace name {:?} cannot start with a dot", name);
+    }
+    // Allow only safe characters — workspace names become directory names, git branch
+    // names, and are interpolated into shell hooks (e.g. tmux rename-window).
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        bail!(
+            "workspace name {:?} contains invalid characters (allowed: a-z, A-Z, 0-9, dash, underscore, dot)",
+            name
+        );
     }
     Ok(())
 }
@@ -2326,6 +2331,8 @@ mod tests {
         let cases = vec![
             ("valid", "my-feature", false),
             ("valid with dots", "fix.bug", false),
+            ("valid with underscore", "my_feature", false),
+            ("valid uppercase", "My-Feature", false),
             ("empty", "", true),
             ("forward slash", "a/b", true),
             ("backslash", "a\\b", true),
@@ -2336,6 +2343,15 @@ mod tests {
             ("dot prefix", ".hidden", true),
             ("dot prefix config", ".config", true),
             ("null byte", "bad\0name", true),
+            ("space", "my feature", true),
+            ("dollar sign", "test$var", true),
+            ("backtick", "test`cmd`", true),
+            ("command substitution", "test$(whoami)", true),
+            ("single quote", "it's", true),
+            ("double quote", "say\"hi\"", true),
+            ("semicolon", "a;b", true),
+            ("pipe", "a|b", true),
+            ("ampersand", "a&b", true),
         ];
         for (name, input, want_err) in cases {
             let result = validate_name(input);

@@ -135,13 +135,17 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     });
     if exp_enabled {
         for feature in config::EXPERIMENTAL_FEATURES {
-            let enabled = exp
-                .and_then(|e| e.features.get(*feature))
-                .copied()
-                .unwrap_or(false);
+            let value = if *feature == "shell-tmux" {
+                exp.and_then(|e| e.shell_tmux_mode())
+                    .unwrap_or("false")
+                    .to_string()
+            } else {
+                exp.is_some_and(|e| e.is_feature_enabled(feature))
+                    .to_string()
+            };
             entries.push(ConfigListEntry {
                 key: format!("experimental.{}", feature),
-                value: enabled.to_string(),
+                value,
             });
         }
     }
@@ -200,6 +204,17 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
                 value: Some(enabled.to_string()),
+            }))
+        }
+        "experimental.shell-tmux" => {
+            let mode = cfg
+                .experimental
+                .as_ref()
+                .and_then(|e| e.shell_tmux_mode())
+                .unwrap_or("false");
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: Some(mode.to_string()),
             }))
         }
         k if k.starts_with("experimental.") => {
@@ -360,6 +375,37 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             };
             (format!("experimental = {}", enabled), Some(hint.into()))
         }
+        "experimental.shell-tmux" => {
+            if !config::SHELL_TMUX_VALUES.contains(&value.as_str()) {
+                bail!(
+                    "shell-tmux must be one of: {}",
+                    config::SHELL_TMUX_VALUES.join(", ")
+                );
+            }
+            let val = if value == "false" {
+                config::ExperimentalValue::Bool(false)
+            } else {
+                config::ExperimentalValue::String(value.clone())
+            };
+            let is_enabled = val.is_truthy();
+            filelock::with_config(&paths.config_path, |cfg| {
+                let exp = cfg
+                    .experimental
+                    .get_or_insert_with(config::ExperimentalConfig::default);
+                if is_enabled {
+                    exp.enabled = true;
+                }
+                exp.features.insert("shell-tmux".into(), val.clone());
+                // Remove deprecated key if present
+                exp.features.remove("shell-tmux-title");
+                Ok(())
+            })?;
+            let msg = format!("experimental.shell-tmux = {}", value);
+            (
+                msg,
+                config_set_hint_for_experimental("shell-tmux", is_enabled),
+            )
+        }
         k if k.starts_with("experimental.") => {
             let feature = &k["experimental.".len()..];
             if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
@@ -381,7 +427,8 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 if enabled {
                     exp.enabled = true;
                 }
-                exp.features.insert(feature.clone(), enabled);
+                exp.features
+                    .insert(feature.clone(), config::ExperimentalValue::Bool(enabled));
                 Ok(())
             })?;
             let msg = if enabled {
@@ -416,7 +463,7 @@ fn config_set_hint_for_experimental(feature: &str, enabled: bool) -> Option<Stri
         return None;
     }
     match feature {
-        "shell-prompt" | "shell-tmux-title" => {
+        "shell-prompt" | "shell-tmux" => {
             Some("re-source your shell to activate: eval \"$(wsp completion zsh)\"".into())
         }
         _ => None,
@@ -531,6 +578,10 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             filelock::with_config(&paths.config_path, |cfg| {
                 if let Some(ref mut exp) = cfg.experimental {
                     exp.features.remove(&feature);
+                    // Also remove deprecated key when unsetting shell-tmux
+                    if feature == "shell-tmux" {
+                        exp.features.remove("shell-tmux-title");
+                    }
                 }
                 Ok(())
             })?;
@@ -597,7 +648,7 @@ mod tests {
             ("git_config.push.default", "current"),
             ("experimental", "true"),
             ("experimental.shell-prompt", "true"),
-            ("experimental.shell-tmux-title", "true"),
+            ("experimental.shell-tmux", "window-title"),
         ];
 
         for (key, value) in cases {
@@ -623,6 +674,15 @@ mod tests {
         assert!(
             hint.contains("eval") && hint.contains("completion"),
             "shell feature hint should mention re-sourcing: got {:?}",
+            hint
+        );
+
+        // shell-tmux also gets a re-source hint
+        let out = do_set(&paths, "experimental.shell-tmux", "window-title");
+        let hint = extract_hint(&out).unwrap();
+        assert!(
+            hint.contains("eval") && hint.contains("completion"),
+            "shell-tmux hint should mention re-sourcing: got {:?}",
             hint
         );
     }

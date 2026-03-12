@@ -128,6 +128,10 @@ pub fn complete_config_values() -> Vec<CompletionCandidate> {
             CompletionCandidate::new("merge"),
         ],
         Some("agent-md" | "experimental") => bool_candidates(),
+        Some("experimental.shell-tmux") => crate::config::SHELL_TMUX_VALUES
+            .iter()
+            .map(|v| CompletionCandidate::new(*v))
+            .collect(),
         Some(k) if k.starts_with("language-integrations.") || k.starts_with("experimental.") => {
             bool_candidates()
         }

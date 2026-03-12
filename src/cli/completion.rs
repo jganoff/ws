@@ -6,16 +6,25 @@ use clap::{Arg, ArgMatches, Command};
 use crate::config::{Config, Paths};
 use crate::output::Output;
 
+/// Tmux integration mode for shell hooks.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+enum TmuxMode {
+    #[default]
+    Off,
+    /// Sets the tmux window name to `wsp:<workspace>` via `tmux rename-window`.
+    WindowTitle,
+}
+
 /// Shell hook options baked in at generation time from config.
 #[derive(Debug, Clone, Copy, Default)]
 struct ShellHookOpts {
-    tmux_title: bool,
+    tmux: TmuxMode,
     prompt: bool,
 }
 
 impl ShellHookOpts {
     fn any_enabled(&self) -> bool {
-        self.tmux_title || self.prompt
+        self.tmux != TmuxMode::Off || self.prompt
     }
 }
 
@@ -36,13 +45,29 @@ pub fn cmd() -> Command {
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let shell = matches.get_one::<String>("shell").unwrap();
-    let cfg = Config::load_from(&paths.config_path)?;
-    let hooks = match cfg.experimental.as_ref() {
-        Some(exp) => ShellHookOpts {
-            tmux_title: exp.is_feature_enabled("shell-tmux-title"),
-            prompt: exp.is_feature_enabled("shell-prompt"),
+    // Config load must not break shell startup — fall back to defaults on any error.
+    // This handles version skew (e.g. newer config format with older binary), corrupt
+    // config, or missing files gracefully.
+    let hooks = match Config::load_from(&paths.config_path) {
+        Ok(cfg) => match cfg.experimental.as_ref() {
+            Some(exp) => {
+                // SECURITY: closed match — only literal "window-title" produces shell
+                // code. Arbitrary strings from hand-edited config fall to Off.
+                let tmux = match exp.shell_tmux_mode() {
+                    Some("window-title") => TmuxMode::WindowTitle,
+                    _ => TmuxMode::Off,
+                };
+                ShellHookOpts {
+                    tmux,
+                    prompt: exp.is_feature_enabled("shell-prompt"),
+                }
+            }
+            None => ShellHookOpts::default(),
         },
-        None => ShellHookOpts::default(),
+        Err(e) => {
+            eprintln!("wsp: warning: failed to load config, shell hooks disabled: {e}");
+            ShellHookOpts::default()
+        }
     };
     match shell.as_str() {
         "zsh" => {
@@ -246,16 +271,19 @@ fn write_posix_hooks(
     writeln!(w, "    unset WSP_WORKSPACE")?;
     writeln!(w, "  fi")?;
 
-    if hooks.tmux_title {
+    if hooks.tmux == TmuxMode::WindowTitle {
         writeln!(w)?;
-        writeln!(w, "  if [ -n \"$TMUX\" ]; then")?;
-        writeln!(w, "    if [ -n \"$WSP_WORKSPACE\" ]; then")?;
         writeln!(
             w,
-            "      printf '\\033]2;wsp:%s\\033\\\\' \"$WSP_WORKSPACE\""
+            "  if [ -n \"$TMUX\" ] && command -v tmux >/dev/null 2>&1; then"
         )?;
+        writeln!(w, "    if [ -n \"$WSP_WORKSPACE\" ]; then")?;
+        writeln!(w, "      tmux rename-window \"wsp:$WSP_WORKSPACE\"")?;
         writeln!(w, "    else")?;
-        writeln!(w, "      printf '\\033]2;\\033\\\\'")?;
+        writeln!(
+            w,
+            "      tmux set-window-option automatic-rename on >/dev/null 2>&1"
+        )?;
         writeln!(w, "    fi")?;
         writeln!(w, "  fi")?;
     }
@@ -373,16 +401,16 @@ fn write_fish_hooks(w: &mut dyn Write, root_esc: &str, hooks: ShellHookOpts) -> 
     writeln!(w, "        set -ge WSP_WORKSPACE")?;
     writeln!(w, "    end")?;
 
-    if hooks.tmux_title {
+    if hooks.tmux == TmuxMode::WindowTitle {
         writeln!(w)?;
-        writeln!(w, "    if set -q TMUX")?;
+        writeln!(w, "    if set -q TMUX; and command -q tmux")?;
         writeln!(w, "        if set -q WSP_WORKSPACE")?;
+        writeln!(w, "            tmux rename-window \"wsp:$WSP_WORKSPACE\"")?;
+        writeln!(w, "        else")?;
         writeln!(
             w,
-            "            printf '\\033]2;wsp:%s\\033\\\\' $WSP_WORKSPACE"
+            "            tmux set-window-option automatic-rename on >/dev/null 2>&1"
         )?;
-        writeln!(w, "        else")?;
-        writeln!(w, "            printf '\\033]2;\\033\\\\'")?;
         writeln!(w, "        end")?;
         writeln!(w, "    end")?;
     }
@@ -719,14 +747,14 @@ mod tests {
     fn test_prompt_only_hooks() {
         let opts = ShellHookOpts {
             prompt: true,
-            tmux_title: false,
+            tmux: TmuxMode::Off,
         };
         // zsh
         let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh", opts));
         assert!(out.contains("_wsp_hook"), "zsh: hook function emitted");
         assert!(out.contains("WSP_WORKSPACE"), "zsh: sets WSP_WORKSPACE");
         assert!(out.contains("add-zsh-hook precmd"), "zsh: registers precmd");
-        assert!(!out.contains("\\033]2;"), "zsh: no tmux escape");
+        assert!(!out.contains("tmux rename-window"), "zsh: no tmux commands");
 
         // bash
         let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "bash", opts));
@@ -734,31 +762,52 @@ mod tests {
             out.contains("PROMPT_COMMAND"),
             "bash: registers PROMPT_COMMAND"
         );
-        assert!(!out.contains("\\033]2;"), "bash: no tmux escape");
+        assert!(
+            !out.contains("tmux rename-window"),
+            "bash: no tmux commands"
+        );
 
         // fish
         let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/user/dev", opts));
         assert!(out.contains("--on-variable PWD"), "fish: PWD hook");
         assert!(out.contains("WSP_WORKSPACE"), "fish: sets WSP_WORKSPACE");
-        assert!(!out.contains("\\033]2;"), "fish: no tmux escape");
+        assert!(
+            !out.contains("tmux rename-window"),
+            "fish: no tmux commands"
+        );
     }
 
     #[test]
-    fn test_tmux_title_hooks() {
+    fn test_tmux_window_title_hooks() {
         let opts = ShellHookOpts {
             prompt: false,
-            tmux_title: true,
+            tmux: TmuxMode::WindowTitle,
         };
         let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh", opts));
         assert!(out.contains("_wsp_hook"), "hook function emitted");
         assert!(out.contains("WSP_WORKSPACE"), "sets WSP_WORKSPACE");
-        assert!(out.contains("\\033]2;wsp:%s"), "tmux title escape present");
+        assert!(
+            out.contains("tmux rename-window"),
+            "tmux rename-window present"
+        );
+        assert!(
+            out.contains("automatic-rename on"),
+            "restores automatic-rename when leaving workspace"
+        );
         assert!(out.contains("$TMUX"), "guards on TMUX env var");
+        assert!(
+            out.contains("command -v tmux"),
+            "guards on tmux availability"
+        );
 
         let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/user/dev", opts));
         assert!(
-            out.contains("\\033]2;wsp:%s"),
-            "fish: tmux title escape present"
+            out.contains("tmux rename-window"),
+            "fish: tmux rename-window present"
+        );
+        assert!(
+            out.contains("command -q tmux"),
+            "fish: guards on tmux availability"
         );
     }
 
@@ -766,11 +815,11 @@ mod tests {
     fn test_both_hooks() {
         let opts = ShellHookOpts {
             prompt: true,
-            tmux_title: true,
+            tmux: TmuxMode::WindowTitle,
         };
         let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/user/dev", "zsh", opts));
         assert!(out.contains("WSP_WORKSPACE"));
-        assert!(out.contains("\\033]2;wsp:%s"));
+        assert!(out.contains("tmux rename-window"));
         assert!(out.contains("add-zsh-hook precmd"));
     }
 
@@ -778,7 +827,7 @@ mod tests {
     fn test_hook_path_escaping() {
         let opts = ShellHookOpts {
             prompt: true,
-            tmux_title: false,
+            tmux: TmuxMode::Off,
         };
         let out = output(|w| write_posix(w, "/usr/bin/wsp", "/home/o'brien/dev", "zsh", opts));
         assert!(

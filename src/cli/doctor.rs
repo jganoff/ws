@@ -1737,10 +1737,13 @@ fn check_unknown_experimental_keys(
         }
     };
 
+    // Allow both current and deprecated feature names (deprecated keys still deserialize)
+    let known_or_deprecated =
+        |k: &str| -> bool { config::EXPERIMENTAL_FEATURES.contains(&k) || k == "shell-tmux-title" };
     let unknown: Vec<String> = exp
         .features
         .keys()
-        .filter(|k| !config::EXPERIMENTAL_FEATURES.contains(&k.as_str()))
+        .filter(|k| !known_or_deprecated(k.as_str()))
         .cloned()
         .collect();
 
@@ -4260,7 +4263,8 @@ mod tests {
         let mut cfg = config::Config::default();
         let mut exp = config::ExperimentalConfig::default();
         exp.enabled = true;
-        exp.features.insert("shell-prompt".into(), true);
+        exp.features
+            .insert("shell-prompt".into(), config::ExperimentalValue::Bool(true));
         cfg.experimental = Some(exp);
         cfg.save_to(&paths.config_path).unwrap();
 
@@ -4279,8 +4283,12 @@ mod tests {
         let mut cfg = config::Config::default();
         let mut exp = config::ExperimentalConfig::default();
         exp.enabled = true;
-        exp.features.insert("shell-promt".into(), true); // typo
-        exp.features.insert("old-removed-feature".into(), false);
+        exp.features
+            .insert("shell-promt".into(), config::ExperimentalValue::Bool(true)); // typo
+        exp.features.insert(
+            "old-removed-feature".into(),
+            config::ExperimentalValue::Bool(false),
+        );
         cfg.experimental = Some(exp);
         cfg.save_to(&paths.config_path).unwrap();
 
@@ -4302,8 +4310,10 @@ mod tests {
         let mut cfg = config::Config::default();
         let mut exp = config::ExperimentalConfig::default();
         exp.enabled = true;
-        exp.features.insert("shell-prompt".into(), true); // valid
-        exp.features.insert("typo-feature".into(), true); // invalid
+        exp.features
+            .insert("shell-prompt".into(), config::ExperimentalValue::Bool(true)); // valid
+        exp.features
+            .insert("typo-feature".into(), config::ExperimentalValue::Bool(true)); // invalid
         cfg.experimental = Some(exp);
         cfg.save_to(&paths.config_path).unwrap();
 

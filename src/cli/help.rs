@@ -175,12 +175,15 @@ EXPERIMENTAL
                         Requires re-sourcing: eval \"$(wsp completion zsh)\"
                         Default: false
 
-  experimental.shell-tmux-title
-                        Boolean. Emit a shell hook that sets the tmux pane/window
-                        title to `wsp:<workspace>` when inside a workspace.
-                        Clears the title when outside. Only active when $TMUX is set.
+  experimental.shell-tmux
+                        String. Controls tmux integration in shell hooks.
+                        Values: window-title, false
+                        window-title: sets the tmux window name to `wsp:<workspace>`
+                          when inside a workspace. Restores automatic-rename when
+                          outside. Requires tmux on PATH and $TMUX to be set.
+                        false: disabled (default)
                         Requires re-sourcing: eval \"$(wsp completion zsh)\"
-                        Default: false
+                        (Replaces deprecated experimental.shell-tmux-title)
 
 EXAMPLES
 

@@ -23,23 +23,83 @@ pub struct RepoEntry {
     pub added: DateTime<Utc>,
 }
 
+/// Value for an experimental feature: either a boolean toggle or a string mode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExperimentalValue {
+    Bool(bool),
+    String(String),
+}
+
+impl ExperimentalValue {
+    /// Returns true if the value is `Bool(true)` or a non-empty string (i.e. not "false").
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            ExperimentalValue::Bool(b) => *b,
+            ExperimentalValue::String(s) => !s.is_empty() && s != "false",
+        }
+    }
+
+    /// Returns the string value if this is a `String` variant, or None.
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            ExperimentalValue::String(s) => Some(s),
+            ExperimentalValue::Bool(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExperimentalConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(flatten)]
-    pub features: BTreeMap<String, bool>,
+    pub features: BTreeMap<String, ExperimentalValue>,
 }
 
 impl ExperimentalConfig {
-    /// Returns true if the experimental gate is on AND the named feature is enabled.
+    /// Returns true if the experimental gate is on AND the named feature is truthy.
     pub fn is_feature_enabled(&self, feature: &str) -> bool {
-        self.enabled && self.features.get(feature).copied().unwrap_or(false)
+        self.enabled && self.features.get(feature).is_some_and(|v| v.is_truthy())
+    }
+
+    /// Returns the string value for a feature, if set and the gate is on.
+    #[allow(dead_code)]
+    pub fn feature_value(&self, feature: &str) -> Option<&str> {
+        if !self.enabled {
+            return None;
+        }
+        self.features.get(feature).and_then(|v| v.as_str())
+    }
+
+    /// Resolves `shell-tmux` with backward compat from `shell-tmux-title`.
+    /// Returns the mode string (e.g. "window-title") or None if disabled.
+    pub fn shell_tmux_mode(&self) -> Option<&str> {
+        if !self.enabled {
+            return None;
+        }
+        // Prefer new key
+        if let Some(v) = self.features.get("shell-tmux") {
+            return match v {
+                ExperimentalValue::String(s) if s != "false" && !s.is_empty() => Some(s),
+                ExperimentalValue::Bool(true) => Some("window-title"),
+                _ => None,
+            };
+        }
+        // Fall back to deprecated bool key
+        if let Some(ExperimentalValue::Bool(true)) = self.features.get("shell-tmux-title") {
+            return Some("window-title");
+        }
+        None
     }
 }
 
 /// All known experimental feature names.
-pub const EXPERIMENTAL_FEATURES: &[&str] = &["shell-tmux-title", "shell-prompt"];
+pub const EXPERIMENTAL_FEATURES: &[&str] = &["shell-tmux", "shell-prompt"];
+
+/// Valid values for `experimental.shell-tmux`.
+pub const SHELL_TMUX_VALUES: &[&str] = &["window-title", "false"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -508,7 +568,8 @@ mod tests {
         assert!(!exp.is_feature_enabled("shell-prompt"));
 
         // Gate off, feature on → false
-        exp.features.insert("shell-prompt".into(), true);
+        exp.features
+            .insert("shell-prompt".into(), ExperimentalValue::Bool(true));
         assert!(!exp.is_feature_enabled("shell-prompt"));
 
         // Gate on, feature on → true
@@ -516,7 +577,53 @@ mod tests {
         assert!(exp.is_feature_enabled("shell-prompt"));
 
         // Gate on, feature off → false
-        assert!(!exp.is_feature_enabled("shell-tmux-title"));
+        assert!(!exp.is_feature_enabled("shell-tmux"));
+    }
+
+    #[test]
+    fn test_experimental_string_value() {
+        let mut exp = ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert(
+            "shell-tmux".into(),
+            ExperimentalValue::String("window-title".into()),
+        );
+        assert!(exp.is_feature_enabled("shell-tmux"));
+        assert_eq!(exp.feature_value("shell-tmux"), Some("window-title"));
+    }
+
+    #[test]
+    fn test_shell_tmux_mode_new_key() {
+        let mut exp = ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert(
+            "shell-tmux".into(),
+            ExperimentalValue::String("window-title".into()),
+        );
+        assert_eq!(exp.shell_tmux_mode(), Some("window-title"));
+    }
+
+    #[test]
+    fn test_shell_tmux_mode_deprecated_key() {
+        let mut exp = ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features
+            .insert("shell-tmux-title".into(), ExperimentalValue::Bool(true));
+        assert_eq!(exp.shell_tmux_mode(), Some("window-title"));
+    }
+
+    #[test]
+    fn test_shell_tmux_mode_new_key_overrides_deprecated() {
+        let mut exp = ExperimentalConfig::default();
+        exp.enabled = true;
+        exp.features.insert(
+            "shell-tmux".into(),
+            ExperimentalValue::String("false".into()),
+        );
+        exp.features
+            .insert("shell-tmux-title".into(), ExperimentalValue::Bool(true));
+        // New key wins even if deprecated key is true
+        assert_eq!(exp.shell_tmux_mode(), None);
     }
 
     #[test]
@@ -527,8 +634,12 @@ mod tests {
         let mut cfg = Config::default();
         let mut exp = ExperimentalConfig::default();
         exp.enabled = true;
-        exp.features.insert("shell-prompt".into(), true);
-        exp.features.insert("shell-tmux-title".into(), false);
+        exp.features
+            .insert("shell-prompt".into(), ExperimentalValue::Bool(true));
+        exp.features.insert(
+            "shell-tmux".into(),
+            ExperimentalValue::String("window-title".into()),
+        );
         cfg.experimental = Some(exp);
         cfg.save_to(&cfg_path).unwrap();
 
@@ -536,7 +647,7 @@ mod tests {
         let exp = loaded.experimental.unwrap();
         assert!(exp.enabled);
         assert!(exp.is_feature_enabled("shell-prompt"));
-        assert!(!exp.is_feature_enabled("shell-tmux-title"));
+        assert_eq!(exp.shell_tmux_mode(), Some("window-title"));
     }
 
     #[test]
