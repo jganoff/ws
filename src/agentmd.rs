@@ -69,12 +69,9 @@ fn build_marked_section(metadata: &Metadata) -> String {
 
     s.push_str("\n## Workspace Boundary\n\n");
     s.push_str(
-        "All repositories listed above are cloned in this workspace directory.\n\
-         When working on code in this workspace:\n\
-         - **Only read and edit files within this workspace directory.**\n\
-         - Do not search for, read, or modify other copies of these repos\n\
-         \x20 (other workspaces, mirrors, or clones elsewhere on disk).\n\
-         - The workspace directory is the single source of truth for all repos.\n",
+        "**The workspace root is managed by wsp. Do not create, modify, or delete any files \
+         here.** Only edit files inside the repo directories listed above.\n\
+         Do not touch other copies of these repos elsewhere on disk.\n",
     );
 
     s.push_str("\n## Per-Repo Conventions\n\n");
@@ -456,7 +453,8 @@ mod tests {
                     "When spawning sub-agents, pass the full absolute path",
                     "| Repo | Directory |",
                     "## Workspace Boundary",
-                    "Only read and edit files within this workspace directory",
+                    "Do not create, modify, or delete any files here",
+                    "Only edit files inside the repo directories",
                     "## Per-Repo Conventions",
                     "## Quick Reference",
                     "## New Features",
