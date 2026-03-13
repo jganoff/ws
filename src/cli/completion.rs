@@ -7,6 +7,13 @@ use crate::config::{Config, Paths};
 use crate::output::Output;
 
 /// Tmux integration mode for shell hooks.
+///
+/// When enabled, the shell hook applies a three-layer guard before renaming:
+/// 1. **tmux available** — `$TMUX` set and `tmux` on PATH
+/// 2. **active pane** — only the focused pane renames (prevents multi-pane fights)
+/// 3. **title ownership** — skip if user explicitly set the title (`automatic-rename`
+///    off without our `@wsp-title` marker); only restore `automatic-rename` when
+///    leaving a workspace if wsp was the one who set the title
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 enum TmuxMode {
     #[default]
@@ -277,13 +284,44 @@ fn write_posix_hooks(
             w,
             "  if [ -n \"$TMUX\" ] && command -v tmux >/dev/null 2>&1; then"
         )?;
-        writeln!(w, "    if [ -n \"$WSP_WORKSPACE\" ]; then")?;
-        writeln!(w, "      tmux rename-window \"wsp:$WSP_WORKSPACE\"")?;
-        writeln!(w, "    else")?;
         writeln!(
             w,
-            "      tmux set-window-option automatic-rename on >/dev/null 2>&1"
+            "    if [ \"$(tmux display-message -p '#{{pane_id}}')\" = \"$TMUX_PANE\" ]; then"
         )?;
+        writeln!(w, "      if [ -n \"$WSP_WORKSPACE\" ]; then")?;
+        // Skip if user explicitly set the window title (automatic-rename off without our marker)
+        writeln!(
+            w,
+            "        if [ \"$(tmux show-window-option -v automatic-rename 2>/dev/null)\" = \"off\" ] \\"
+        )?;
+        writeln!(
+            w,
+            "           && [ -z \"$(tmux show-window-option -v @wsp-title 2>/dev/null)\" ]; then"
+        )?;
+        writeln!(w, "          : # user owns this title, skip")?;
+        writeln!(w, "        else")?;
+        writeln!(w, "          tmux rename-window \"wsp:$WSP_WORKSPACE\"")?;
+        writeln!(
+            w,
+            "          tmux set-window-option @wsp-title on >/dev/null 2>&1"
+        )?;
+        writeln!(w, "        fi")?;
+        writeln!(w, "      else")?;
+        // Only restore automatic-rename if wsp was the one who set the title
+        writeln!(
+            w,
+            "        if [ -n \"$(tmux show-window-option -v @wsp-title 2>/dev/null)\" ]; then"
+        )?;
+        writeln!(
+            w,
+            "          tmux set-window-option automatic-rename on >/dev/null 2>&1"
+        )?;
+        writeln!(
+            w,
+            "          tmux set-window-option -u @wsp-title >/dev/null 2>&1"
+        )?;
+        writeln!(w, "        fi")?;
+        writeln!(w, "      fi")?;
         writeln!(w, "    fi")?;
         writeln!(w, "  fi")?;
     }
@@ -404,13 +442,52 @@ fn write_fish_hooks(w: &mut dyn Write, root_esc: &str, hooks: ShellHookOpts) -> 
     if hooks.tmux == TmuxMode::WindowTitle {
         writeln!(w)?;
         writeln!(w, "    if set -q TMUX; and command -q tmux")?;
-        writeln!(w, "        if set -q WSP_WORKSPACE")?;
-        writeln!(w, "            tmux rename-window \"wsp:$WSP_WORKSPACE\"")?;
-        writeln!(w, "        else")?;
         writeln!(
             w,
-            "            tmux set-window-option automatic-rename on >/dev/null 2>&1"
+            "        if test (tmux display-message -p '#{{pane_id}}') = $TMUX_PANE"
         )?;
+        writeln!(w, "            if set -q WSP_WORKSPACE")?;
+        // Skip if user explicitly set the window title (automatic-rename off without our marker)
+        writeln!(
+            w,
+            "                set -l _ar (tmux show-window-option -v automatic-rename 2>/dev/null)"
+        )?;
+        writeln!(
+            w,
+            "                set -l _wt (tmux show-window-option -v @wsp-title 2>/dev/null)"
+        )?;
+        writeln!(
+            w,
+            "                if test \"$_ar\" = off; and test -z \"$_wt\""
+        )?;
+        writeln!(w, "                    : # user owns this title, skip")?;
+        writeln!(w, "                else")?;
+        writeln!(
+            w,
+            "                    tmux rename-window \"wsp:$WSP_WORKSPACE\""
+        )?;
+        writeln!(
+            w,
+            "                    tmux set-window-option @wsp-title on >/dev/null 2>&1"
+        )?;
+        writeln!(w, "                end")?;
+        writeln!(w, "            else")?;
+        // Only restore automatic-rename if wsp was the one who set the title
+        writeln!(
+            w,
+            "                set -l _wt (tmux show-window-option -v @wsp-title 2>/dev/null)"
+        )?;
+        writeln!(w, "                if test -n \"$_wt\"")?;
+        writeln!(
+            w,
+            "                    tmux set-window-option automatic-rename on >/dev/null 2>&1"
+        )?;
+        writeln!(
+            w,
+            "                    tmux set-window-option -u @wsp-title >/dev/null 2>&1"
+        )?;
+        writeln!(w, "                end")?;
+        writeln!(w, "            end")?;
         writeln!(w, "        end")?;
         writeln!(w, "    end")?;
     }
@@ -799,6 +876,14 @@ mod tests {
             out.contains("command -v tmux"),
             "guards on tmux availability"
         );
+        assert!(
+            out.contains("display-message -p") && out.contains("TMUX_PANE"),
+            "guards on active pane"
+        );
+        assert!(
+            out.contains("@wsp-title"),
+            "uses @wsp-title marker to track ownership"
+        );
 
         let out = output(|w| write_fish(w, "/usr/bin/wsp", "/home/user/dev", opts));
         assert!(
@@ -808,6 +893,14 @@ mod tests {
         assert!(
             out.contains("command -q tmux"),
             "fish: guards on tmux availability"
+        );
+        assert!(
+            out.contains("display-message -p") && out.contains("TMUX_PANE"),
+            "fish: guards on active pane"
+        );
+        assert!(
+            out.contains("@wsp-title"),
+            "fish: uses @wsp-title marker to track ownership"
         );
     }
 
