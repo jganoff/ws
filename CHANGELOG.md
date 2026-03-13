@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - 2026-03-13
+
+### Bug Fixes
+
+- *(tmux)* Only rename window from active pane, respect user-set titles
+
+### Refactor
+
+- *(config)* Normalize key naming to dot-separated groups
+
 ## [0.12.0] - 2026-03-13
 
 ### Features
