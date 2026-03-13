@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
 use anyhow::Result;
@@ -18,22 +18,27 @@ pub fn cmd() -> Command {
             "Run a command in each repo of a workspace.\n\n\
              Executes the given command sequentially in each repo directory. The command and \
              its arguments follow `--` (e.g., `wsp exec my-ws -- make test`). Exit codes \
-             are collected per repo and reported in the output.",
+             are collected per repo and reported in the output.\n\n\
+             The workspace name is optional when running from inside a workspace directory.",
         )
         .arg(
             Arg::new("workspace")
-                .required(true)
+                .required(false)
                 .add(ArgValueCandidates::new(completers::complete_workspaces)),
         )
         .arg(Arg::new("command").required(true).num_args(1..).last(true))
 }
 
 pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
-    let ws_name = matches.get_one::<String>("workspace").unwrap();
     let command: Vec<&String> = matches.get_many::<String>("command").unwrap().collect();
     let is_json = matches.get_flag("json");
 
-    let ws_dir = workspace::dir(&paths.workspaces_dir, ws_name);
+    let ws_dir: PathBuf = if let Some(name) = matches.get_one::<String>("workspace") {
+        workspace::dir(&paths.workspaces_dir, name)
+    } else {
+        let cwd = std::env::current_dir()?;
+        workspace::detect(&cwd)?
+    };
     let meta = workspace::load_metadata(&ws_dir)
         .map_err(|e| anyhow::anyhow!("reading workspace: {}", e))?;
 
@@ -103,7 +108,7 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     }
 
     Ok(Output::Exec(ExecOutput {
-        workspace: ws_name.to_string(),
+        workspace: meta.name,
         repos: results,
     }))
 }
@@ -166,5 +171,37 @@ fn run_command(
             stderr: None,
             error: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_args_with_workspace() {
+        let m = cmd().get_matches_from(["exec", "my-ws", "--", "echo", "hello"]);
+        assert_eq!(
+            m.get_one::<String>("workspace").map(|s| s.as_str()),
+            Some("my-ws")
+        );
+        let command: Vec<&str> = m
+            .get_many::<String>("command")
+            .unwrap()
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(command, vec!["echo", "hello"]);
+    }
+
+    #[test]
+    fn parse_args_without_workspace() {
+        let m = cmd().get_matches_from(["exec", "--", "make", "test"]);
+        assert!(m.get_one::<String>("workspace").is_none());
+        let command: Vec<&str> = m
+            .get_many::<String>("command")
+            .unwrap()
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(command, vec!["make", "test"]);
     }
 }

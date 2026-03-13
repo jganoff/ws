@@ -44,7 +44,7 @@ wsp st [<workspace>] [-v]                       # Git status across workspace re
 wsp diff [<workspace>] [<args>]...              # Show git diff across workspace repos [read-only]
 wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream per workspace repo [read-only]
 wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] [--abort] [--no-discover] # Fetch and rebase/merge all workspace repos
-wsp exec <workspace> <command>...               # Run a command in each repo of a workspace
+wsp exec [<workspace>] <command>...             # Run a command in each repo of a workspace
 wsp cd <workspace>                              # Change directory into a workspace
 wsp rm [<workspace>] [-f] [--permanent]         # Remove a workspace (alias: remove)
 wsp recover [<workspace>]                       # List, inspect, or restore recently removed workspaces [read-only without args]
@@ -58,10 +58,10 @@ wsp repo ls                                     # List repos in the current work
 ### Config
 
 ```bash
-wsp config ls                                   # List all config values [read-only] (alias: list)
-wsp config get <key>                            # Get a config value [read-only]
-wsp config set <key> <value>                    # Set a config value
-wsp config unset <key>                          # Unset a config value
+wsp config ls [--global]                        # List all config values [read-only] (alias: list)
+wsp config get <key> [--global]                 # Get a config value [read-only]
+wsp config set <key> <value> [--global]         # Set a config value
+wsp config unset <key> [--global]               # Unset a config value
 ```
 
 ### Diagnostics
@@ -305,7 +305,8 @@ wsp doctor [--fix]                              # Check workspace and global sta
     },
     {
       "key": "sync-strategy",
-      "value": "rebase"
+      "value": "rebase",
+      "source": "workspace"
     }
   ]
 }
