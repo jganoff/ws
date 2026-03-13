@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-03-13
+
+### Features
+
+- *(config)* Add workspace-scoped config overrides
+- *(exec)* Make workspace argument optional via cwd detection
+
+### Bug Fixes
+
+- *(agentmd)* Strengthen workspace root boundary in AGENTS.md
+
 ## [0.11.0] - 2026-03-12
 
 ### Features
