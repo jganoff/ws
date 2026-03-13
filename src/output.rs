@@ -254,6 +254,8 @@ pub struct ConfigListEntry {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub experimental: bool,
 }
 
 #[derive(Serialize)]
@@ -650,16 +652,19 @@ impl ConfigListOutput {
                     key: "branch-prefix".into(),
                     value: "jg".into(),
                     source: None,
+                    experimental: false,
                 },
                 ConfigListEntry {
                     key: "workspaces-dir".into(),
                     value: "~/dev/workspaces".into(),
                     source: None,
+                    experimental: false,
                 },
                 ConfigListEntry {
                     key: "sync-strategy".into(),
                     value: "rebase".into(),
                     source: Some("workspace".into()),
+                    experimental: false,
                 },
             ],
         }
@@ -1216,7 +1221,12 @@ fn render_config_list_text(v: ConfigListOutput) -> Result<()> {
                 .as_ref()
                 .map(|s| format!("({})", s))
                 .unwrap_or_default();
-            table.add_row(vec![e.key.clone(), e.value.clone(), source])?;
+            let value = if e.experimental {
+                format!("{} [experimental]", e.value)
+            } else {
+                e.value.clone()
+            };
+            table.add_row(vec![e.key.clone(), value, source])?;
         }
         table.render()
     } else {
@@ -1225,7 +1235,12 @@ fn render_config_list_text(v: ConfigListOutput) -> Result<()> {
             vec!["Key".to_string(), "Value".to_string()],
         );
         for e in &v.entries {
-            table.add_row(vec![e.key.clone(), e.value.clone()])?;
+            let value = if e.experimental {
+                format!("{} [experimental]", e.value)
+            } else {
+                e.value.clone()
+            };
+            table.add_row(vec![e.key.clone(), value])?;
         }
         table.render()
     }

@@ -62,12 +62,11 @@ pub fn complete_template_repos() -> Vec<CompletionCandidate> {
 }
 
 /// Complete valid template config key prefixes.
-/// Uses `git_config.` to match global `wsp config` naming; `git-config.` also accepted.
 pub fn complete_template_config_keys() -> Vec<CompletionCandidate> {
     vec![
         CompletionCandidate::new("sync-strategy"),
-        CompletionCandidate::new("language-integrations."),
-        CompletionCandidate::new("git_config."),
+        CompletionCandidate::new("lang."),
+        CompletionCandidate::new("git."),
     ]
 }
 
@@ -79,33 +78,18 @@ pub fn complete_config_keys() -> Vec<CompletionCandidate> {
         CompletionCandidate::new("sync-strategy"),
         CompletionCandidate::new("agent-md"),
         CompletionCandidate::new("gc.retention-days"),
-        CompletionCandidate::new("experimental"),
+        CompletionCandidate::new("shell.tmux"),
+        CompletionCandidate::new("shell.prompt"),
     ];
 
-    // experimental.<feature> keys — only visible when experimental gate is on
-    if let Ok(paths) = Paths::resolve()
-        && let Ok(cfg) = Config::load_from(&paths.config_path)
-        && cfg.experimental.as_ref().is_some_and(|e| e.enabled)
-    {
-        for feature in crate::config::EXPERIMENTAL_FEATURES {
-            keys.push(CompletionCandidate::new(format!(
-                "experimental.{}",
-                feature
-            )));
-        }
-    }
-
-    // language-integrations.<name> keys
+    // lang.<name> keys
     for name in crate::lang::integration_names() {
-        keys.push(CompletionCandidate::new(format!(
-            "language-integrations.{}",
-            name
-        )));
+        keys.push(CompletionCandidate::new(format!("lang.{}", name)));
     }
 
-    // git_config.* — show defaults as suggestions
+    // git.* — show defaults as suggestions
     for key in crate::config::Config::default_git_config().keys() {
-        keys.push(CompletionCandidate::new(format!("git_config.{}", key)));
+        keys.push(CompletionCandidate::new(format!("git.{}", key)));
     }
 
     keys
@@ -127,14 +111,12 @@ pub fn complete_config_values() -> Vec<CompletionCandidate> {
             CompletionCandidate::new("rebase"),
             CompletionCandidate::new("merge"),
         ],
-        Some("agent-md" | "experimental") => bool_candidates(),
-        Some("experimental.shell-tmux") => crate::config::SHELL_TMUX_VALUES
+        Some("agent-md" | "shell.prompt") => bool_candidates(),
+        Some("shell.tmux") => crate::config::SHELL_TMUX_VALUES
             .iter()
             .map(|v| CompletionCandidate::new(*v))
             .collect(),
-        Some(k) if k.starts_with("language-integrations.") || k.starts_with("experimental.") => {
-            bool_candidates()
-        }
+        Some(k) if k.starts_with("lang.") => bool_candidates(),
         _ => Vec::new(),
     }
 }

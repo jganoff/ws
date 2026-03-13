@@ -29,11 +29,21 @@ pub struct Template {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TemplateConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "lang",
+        alias = "language_integrations"
+    )]
     pub language_integrations: Option<std::collections::BTreeMap<String, bool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_strategy: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "git",
+        alias = "git_config"
+    )]
     pub git_config: Option<std::collections::BTreeMap<String, String>>,
 }
 
@@ -96,12 +106,12 @@ impl Template {
             }
             if let Some(ref li) = settings.language_integrations {
                 for (name, enabled) in li {
-                    eprintln!("  language-integrations.{}: {}", name, enabled);
+                    eprintln!("  lang.{}: {}", name, enabled);
                 }
             }
             if let Some(ref gc) = settings.git_config {
                 for (key, value) in gc {
-                    eprintln!("  git_config.{}: {}", key, value);
+                    eprintln!("  git.{}: {}", key, value);
                 }
             }
         }
@@ -560,12 +570,27 @@ pub fn auto_register(tmpl: &Template, cfg: &mut config::Config, paths: &Paths) -
 
 /// Valid key prefixes for template config. Global-only keys like `branch-prefix`,
 /// `workspaces-dir`, `gc.retention-days`, and `agent-md` are not valid here.
-const VALID_TEMPLATE_CONFIG_PREFIXES: &[&str] =
-    &["language-integrations.", "sync-strategy", "git-config."];
+const VALID_TEMPLATE_CONFIG_PREFIXES: &[&str] = &["lang.", "sync-strategy", "git."];
 
-/// Normalize a config key: convert underscores to hyphens for prefix matching.
+///// Normalize a config key: convert underscores to hyphens and map old prefixes to new.
 pub(crate) fn normalize_key(key: &str) -> String {
-    key.replace('_', "-")
+    let key = key.replace('_', "-");
+    if let Some(rest) = key.strip_prefix("git-config.") {
+        return format!("git.{rest}");
+    }
+    if let Some(rest) = key.strip_prefix("language-integrations.") {
+        return format!("lang.{rest}");
+    }
+    if key == "language-integrations" {
+        return "lang".into();
+    }
+    if key == "experimental.shell-tmux" {
+        return "shell.tmux".into();
+    }
+    if key == "experimental.shell-prompt" {
+        return "shell.prompt".into();
+    }
+    key
 }
 
 /// Validate that a config key is valid for template config.
@@ -577,7 +602,7 @@ pub(crate) fn validate_template_config_key(key: &str) -> Result<()> {
         }
     }
     bail!(
-        "invalid template config key {:?}; valid key patterns: language-integrations.<name>, sync-strategy, git-config.<key>",
+        "invalid template config key {:?}; valid key patterns: lang.<name>, sync-strategy, git.<key>",
         key
     );
 }
@@ -658,17 +683,17 @@ pub fn set_config(template: &mut Template, key: &str, value: &str) -> Result<()>
             _ => bail!("sync-strategy must be 'rebase' or 'merge'"),
         }
         config.sync_strategy = Some(value.to_string());
-    } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
-        let enabled: bool = value.parse().map_err(|_| {
-            anyhow::anyhow!("value for language-integrations must be true or false")
-        })?;
+    } else if let Some(lang) = normalized.strip_prefix("lang.") {
+        let enabled: bool = value
+            .parse()
+            .map_err(|_| anyhow::anyhow!("value for lang must be true or false"))?;
         let li = config
             .language_integrations
             .get_or_insert_with(std::collections::BTreeMap::new);
         li.insert(lang.to_string(), enabled);
-    } else if let Some(git_key) = normalized.strip_prefix("git-config.") {
+    } else if let Some(git_key) = normalized.strip_prefix("git.") {
         if git_key.is_empty() {
-            bail!("git-config key cannot be empty");
+            bail!("git key cannot be empty");
         }
         let gc = config
             .git_config
@@ -691,13 +716,13 @@ pub fn get_config(template: &Template, key: &str) -> Result<Option<String>> {
 
     if normalized == "sync-strategy" {
         Ok(config.sync_strategy.clone())
-    } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+    } else if let Some(lang) = normalized.strip_prefix("lang.") {
         Ok(config
             .language_integrations
             .as_ref()
             .and_then(|m| m.get(lang))
             .map(|v| v.to_string()))
-    } else if let Some(git_key) = normalized.strip_prefix("git-config.") {
+    } else if let Some(git_key) = normalized.strip_prefix("git.") {
         Ok(config
             .git_config
             .as_ref()
@@ -720,14 +745,14 @@ pub fn unset_config(template: &mut Template, key: &str) -> Result<()> {
 
     if normalized == "sync-strategy" {
         config.sync_strategy = None;
-    } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+    } else if let Some(lang) = normalized.strip_prefix("lang.") {
         if let Some(ref mut m) = config.language_integrations {
             m.remove(lang);
             if m.is_empty() {
                 config.language_integrations = None;
             }
         }
-    } else if let Some(git_key) = normalized.strip_prefix("git-config.")
+    } else if let Some(git_key) = normalized.strip_prefix("git.")
         && let Some(ref mut m) = config.git_config
     {
         m.remove(git_key);
@@ -1557,7 +1582,7 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn set_config_language_integration() {
         let mut tmpl = sample_template();
-        set_config(&mut tmpl, "language-integrations.go", "true").unwrap();
+        set_config(&mut tmpl, "lang.go", "true").unwrap();
         assert_eq!(
             tmpl.config
                 .as_ref()
@@ -1572,14 +1597,14 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn set_config_language_integration_invalid_value() {
         let mut tmpl = sample_template();
-        let err = set_config(&mut tmpl, "language-integrations.go", "yes").unwrap_err();
+        let err = set_config(&mut tmpl, "lang.go", "yes").unwrap_err();
         assert!(err.to_string().contains("true or false"));
     }
 
     #[test]
     fn set_config_git_config() {
         let mut tmpl = sample_template();
-        set_config(&mut tmpl, "git-config.push.default", "simple").unwrap();
+        set_config(&mut tmpl, "git.push.default", "simple").unwrap();
         assert_eq!(
             tmpl.config.as_ref().unwrap().git_config.as_ref().unwrap()["push.default"],
             "simple"
@@ -1589,7 +1614,7 @@ created: 2026-03-07T10:00:00Z
     #[test]
     fn set_config_git_config_underscore_variant() {
         let mut tmpl = sample_template();
-        // git_config. (underscore) matches global wsp config naming
+        // git_config. (underscore) normalizes to git. via normalize_key
         set_config(&mut tmpl, "git_config.push.default", "simple").unwrap();
         assert_eq!(
             tmpl.config.as_ref().unwrap().git_config.as_ref().unwrap()["push.default"],
@@ -1664,9 +1689,93 @@ created: 2026-03-07T10:00:00Z
             agent_md: None,
         };
 
-        unset_config(&mut tmpl, "language-integrations.go").unwrap();
+        unset_config(&mut tmpl, "lang.go").unwrap();
         // Config should be cleaned up entirely
         assert!(tmpl.config.is_none());
+    }
+
+    #[test]
+    fn normalize_key_mappings() {
+        struct Case {
+            input: &'static str,
+            expected: &'static str,
+        }
+        let cases = vec![
+            // Old git_config prefix → git
+            Case {
+                input: "git_config.push.default",
+                expected: "git.push.default",
+            },
+            Case {
+                input: "git-config.push.default",
+                expected: "git.push.default",
+            },
+            // Old language-integrations → lang
+            Case {
+                input: "language-integrations.go",
+                expected: "lang.go",
+            },
+            Case {
+                input: "language_integrations.go",
+                expected: "lang.go",
+            },
+            Case {
+                input: "language-integrations",
+                expected: "lang",
+            },
+            // Old experimental.shell-* → shell.*
+            Case {
+                input: "experimental.shell-tmux",
+                expected: "shell.tmux",
+            },
+            Case {
+                input: "experimental.shell-prompt",
+                expected: "shell.prompt",
+            },
+            // New keys pass through unchanged
+            Case {
+                input: "git.push.default",
+                expected: "git.push.default",
+            },
+            Case {
+                input: "lang.go",
+                expected: "lang.go",
+            },
+            Case {
+                input: "shell.tmux",
+                expected: "shell.tmux",
+            },
+            Case {
+                input: "shell.prompt",
+                expected: "shell.prompt",
+            },
+            // Other keys: underscore → hyphen only
+            Case {
+                input: "sync-strategy",
+                expected: "sync-strategy",
+            },
+            Case {
+                input: "sync_strategy",
+                expected: "sync-strategy",
+            },
+            Case {
+                input: "branch-prefix",
+                expected: "branch-prefix",
+            },
+            Case {
+                input: "gc.retention-days",
+                expected: "gc.retention-days",
+            },
+        ];
+
+        for tc in cases {
+            assert_eq!(
+                normalize_key(tc.input),
+                tc.expected,
+                "normalize_key({:?})",
+                tc.input
+            );
+        }
     }
 
     #[test]
@@ -1684,12 +1793,22 @@ created: 2026-03-07T10:00:00Z
                 want_err: false,
             },
             Case {
-                name: "lang int go",
+                name: "lang go (new)",
+                key: "lang.go",
+                want_err: false,
+            },
+            Case {
+                name: "lang go (old)",
                 key: "language-integrations.go",
                 want_err: false,
             },
             Case {
-                name: "git config",
+                name: "git config (new)",
+                key: "git.push.default",
+                want_err: false,
+            },
+            Case {
+                name: "git config (old)",
                 key: "git-config.push.default",
                 want_err: false,
             },

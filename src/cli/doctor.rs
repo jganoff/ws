@@ -243,8 +243,8 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     // G10. Global wspignore defaults
     check_wspignore_defaults(paths, fix, &mut checks, &mut fixed);
 
-    // G11. Unknown experimental keys — typos or stale keys in experimental config
-    check_unknown_experimental_keys(paths, &cfg, fix, &mut checks, &mut fixed);
+    // G11. Deprecated config keys — old-format keys that should be migrated
+    check_deprecated_config_keys(paths, &cfg, fix, &mut checks, &mut fixed);
 
     // --- Workspace checks (if inside one) ---
     let cwd = std::env::current_dir()?;
@@ -1713,79 +1713,66 @@ fn check_template_repos_registered(
     }
 }
 
-/// G11. Unknown experimental keys — typos or stale feature names in experimental config.
-fn check_unknown_experimental_keys(
+/// G11. Deprecated config keys — old-format keys that should be migrated.
+///
+/// Detects: `experimental` section present, or raw YAML has `git_config`/`language_integrations`.
+/// Fix: load config via `Config::load_from()` (applies migration) → save via `save_to()`.
+/// The serde `rename` + `skip_serializing` attributes do the rewriting automatically.
+fn check_deprecated_config_keys(
     paths: &Paths,
     cfg: &config::Config,
     fix: bool,
     checks: &mut Vec<DoctorCheck>,
     fixed: &mut usize,
 ) {
-    let exp = match cfg.experimental.as_ref() {
-        Some(e) if !e.features.is_empty() => e,
-        _ => {
-            checks.push(DoctorCheck {
-                scope: "global".into(),
-                check: "unknown-experimental-keys".into(),
-                status: CheckStatus::Ok,
-                message: "no unknown experimental keys".into(),
-                fixable: false,
-                details: None,
-            });
-            eprintln!("  ✓ no unknown experimental keys");
-            return;
+    // Check for deprecated keys by reading raw YAML
+    let mut deprecated: Vec<String> = Vec::new();
+
+    if cfg.experimental.is_some() {
+        deprecated.push("experimental".into());
+    }
+
+    // Check raw YAML for old field names (git_config, language_integrations)
+    if let Ok(raw) = std::fs::read_to_string(&paths.config_path) {
+        if raw.contains("git_config:") {
+            deprecated.push("git_config (use git)".into());
         }
-    };
+        if raw.contains("language_integrations:") {
+            deprecated.push("language_integrations (use lang)".into());
+        }
+    }
 
-    // Allow both current and deprecated feature names (deprecated keys still deserialize)
-    let known_or_deprecated =
-        |k: &str| -> bool { config::EXPERIMENTAL_FEATURES.contains(&k) || k == "shell-tmux-title" };
-    let unknown: Vec<String> = exp
-        .features
-        .keys()
-        .filter(|k| !known_or_deprecated(k.as_str()))
-        .cloned()
-        .collect();
-
-    if unknown.is_empty() {
+    if deprecated.is_empty() {
         checks.push(DoctorCheck {
             scope: "global".into(),
-            check: "unknown-experimental-keys".into(),
+            check: "deprecated-config-keys".into(),
             status: CheckStatus::Ok,
-            message: "no unknown experimental keys".into(),
+            message: "no deprecated config keys".into(),
             fixable: false,
             details: None,
         });
-        eprintln!("  ✓ no unknown experimental keys");
+        eprintln!("  ✓ no deprecated config keys");
     } else {
         let fixable = true;
         if fix {
-            let to_remove = unknown.clone();
-            match crate::filelock::with_config(&paths.config_path, |cfg| {
-                if let Some(ref mut exp) = cfg.experimental {
-                    for key in &to_remove {
-                        exp.features.remove(key);
-                    }
-                }
-                Ok(())
-            }) {
+            // Load under lock (applies migration), save writes new format.
+            // Using with_config avoids TOCTOU with concurrent `wsp config set`.
+            match filelock::with_config(&paths.config_path, |_cfg| Ok(())) {
                 Ok(_) => {
                     checks.push(DoctorCheck {
                         scope: "global".into(),
-                        check: "unknown-experimental-keys".into(),
+                        check: "deprecated-config-keys".into(),
                         status: CheckStatus::Ok,
                         message: format!(
-                            "removed {} unknown experimental key(s): {}",
-                            unknown.len(),
-                            unknown.join(", ")
+                            "migrated deprecated config keys: {}",
+                            deprecated.join(", ")
                         ),
                         fixable,
-                        details: Some(serde_json::json!({ "removed": unknown })),
+                        details: Some(serde_json::json!({ "migrated": deprecated })),
                     });
                     eprintln!(
-                        "  ✓ removed {} unknown experimental key(s): {}",
-                        unknown.len(),
-                        unknown.join(", ")
+                        "  ✓ migrated deprecated config keys: {}",
+                        deprecated.join(", ")
                     );
                     *fixed += 1;
                     return;
@@ -1793,46 +1780,29 @@ fn check_unknown_experimental_keys(
                 Err(e) => {
                     checks.push(DoctorCheck {
                         scope: "global".into(),
-                        check: "unknown-experimental-keys".into(),
+                        check: "deprecated-config-keys".into(),
                         status: CheckStatus::Warn,
-                        message: format!(
-                            "{} unknown experimental key(s), fix failed: {}",
-                            unknown.len(),
-                            e
-                        ),
+                        message: format!("deprecated config keys, migration failed: {}", e),
                         fixable,
-                        details: Some(serde_json::json!({ "unknown": unknown })),
+                        details: Some(serde_json::json!({ "deprecated": deprecated })),
                     });
-                    eprintln!(
-                        "  ⚠ {} unknown experimental key(s), fix failed: {}",
-                        unknown.len(),
-                        e
-                    );
+                    eprintln!("  ⚠ deprecated config keys, migration failed: {}", e);
                     return;
                 }
             }
         }
         checks.push(DoctorCheck {
             scope: "global".into(),
-            check: "unknown-experimental-keys".into(),
+            check: "deprecated-config-keys".into(),
             status: CheckStatus::Warn,
             message: format!(
-                "{} unknown experimental key(s): {} (known: {})",
-                unknown.len(),
-                unknown.join(", "),
-                config::EXPERIMENTAL_FEATURES.join(", ")
+                "deprecated config keys found: {} (run wsp doctor --fix to migrate)",
+                deprecated.join(", ")
             ),
             fixable,
-            details: Some(serde_json::json!({
-                "unknown": unknown,
-                "known": config::EXPERIMENTAL_FEATURES,
-            })),
+            details: Some(serde_json::json!({ "deprecated": deprecated })),
         });
-        eprintln!(
-            "  ⚠ {} unknown experimental key(s): {}",
-            unknown.len(),
-            unknown.join(", ")
-        );
+        eprintln!("  ⚠ deprecated config keys: {}", deprecated.join(", "));
     }
 }
 
@@ -4250,11 +4220,11 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // G11: Unknown experimental keys
+    // G11: Deprecated config keys
     // -----------------------------------------------------------------------
 
     #[test]
-    fn unknown_experimental_keys_none() {
+    fn deprecated_config_keys_none() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = test_paths(tmp.path());
         let cfg = config::Config::default();
@@ -4262,86 +4232,65 @@ mod tests {
 
         let mut checks = Vec::new();
         let mut fixed = 0;
-        check_unknown_experimental_keys(&paths, &cfg, false, &mut checks, &mut fixed);
+        check_deprecated_config_keys(&paths, &cfg, false, &mut checks, &mut fixed);
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Ok);
     }
 
     #[test]
-    fn unknown_experimental_keys_all_known() {
+    fn deprecated_config_keys_experimental_detected() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = test_paths(tmp.path());
-        let mut cfg = config::Config::default();
-        let mut exp = config::ExperimentalConfig::default();
-        exp.enabled = true;
-        exp.features
-            .insert("shell-prompt".into(), config::ExperimentalValue::Bool(true));
-        cfg.experimental = Some(exp);
-        cfg.save_to(&paths.config_path).unwrap();
+        // Write old-format config with experimental section
+        std::fs::write(
+            &paths.config_path,
+            "experimental:\n  enabled: true\n  shell-prompt: true\n",
+        )
+        .unwrap();
 
+        let cfg = config::Config::load_from(&paths.config_path).unwrap();
         let mut checks = Vec::new();
         let mut fixed = 0;
-        check_unknown_experimental_keys(&paths, &cfg, false, &mut checks, &mut fixed);
-
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].status, CheckStatus::Ok);
-    }
-
-    #[test]
-    fn unknown_experimental_keys_detected() {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = test_paths(tmp.path());
-        let mut cfg = config::Config::default();
-        let mut exp = config::ExperimentalConfig::default();
-        exp.enabled = true;
-        exp.features
-            .insert("shell-promt".into(), config::ExperimentalValue::Bool(true)); // typo
-        exp.features.insert(
-            "old-removed-feature".into(),
-            config::ExperimentalValue::Bool(false),
-        );
-        cfg.experimental = Some(exp);
-        cfg.save_to(&paths.config_path).unwrap();
-
-        let mut checks = Vec::new();
-        let mut fixed = 0;
-        check_unknown_experimental_keys(&paths, &cfg, false, &mut checks, &mut fixed);
+        check_deprecated_config_keys(&paths, &cfg, false, &mut checks, &mut fixed);
 
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Warn);
         assert!(checks[0].fixable);
-        assert!(checks[0].message.contains("old-removed-feature"));
-        assert!(checks[0].message.contains("shell-promt"));
+        assert!(checks[0].message.contains("experimental"));
     }
 
     #[test]
-    fn unknown_experimental_keys_fix() {
+    fn deprecated_config_keys_fix_migrates() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = test_paths(tmp.path());
-        let mut cfg = config::Config::default();
-        let mut exp = config::ExperimentalConfig::default();
-        exp.enabled = true;
-        exp.features
-            .insert("shell-prompt".into(), config::ExperimentalValue::Bool(true)); // valid
-        exp.features
-            .insert("typo-feature".into(), config::ExperimentalValue::Bool(true)); // invalid
-        cfg.experimental = Some(exp);
-        cfg.save_to(&paths.config_path).unwrap();
+        // Write old-format config
+        std::fs::write(
+            &paths.config_path,
+            "experimental:\n  enabled: true\n  shell-prompt: true\n  shell-tmux: window-title\n",
+        )
+        .unwrap();
 
+        let cfg = config::Config::load_from(&paths.config_path).unwrap();
         let mut checks = Vec::new();
         let mut fixed = 0;
-        check_unknown_experimental_keys(&paths, &cfg, true, &mut checks, &mut fixed);
+        check_deprecated_config_keys(&paths, &cfg, true, &mut checks, &mut fixed);
 
         assert_eq!(fixed, 1);
         assert_eq!(checks[0].status, CheckStatus::Ok);
-        assert!(checks[0].message.contains("removed"));
+        assert!(checks[0].message.contains("migrated"));
 
-        // Verify the valid key was preserved
+        // Verify the new format was written
         let reloaded = config::Config::load_from(&paths.config_path).unwrap();
-        let exp = reloaded.experimental.unwrap();
-        assert!(exp.features.contains_key("shell-prompt"));
-        assert!(!exp.features.contains_key("typo-feature"));
+        assert!(reloaded.shell_prompt_enabled());
+        assert_eq!(reloaded.shell_tmux_mode(), Some("window-title"));
+        // experimental section should not be written back
+        let raw = std::fs::read_to_string(&paths.config_path).unwrap();
+        assert!(
+            !raw.contains("experimental"),
+            "experimental should not appear in migrated config: {}",
+            raw
+        );
     }
 
     // -----------------------------------------------------------------------

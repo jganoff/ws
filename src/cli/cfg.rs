@@ -20,9 +20,9 @@ pub fn cmd() -> Command {
              Settings are stored in ~/.local/share/wsp/config.yaml (global) or per-workspace \
              in .wsp.yaml (workspace-scoped). When run inside a workspace, set/get/unset/ls \
              operate on workspace config by default. Use --global to target global config \
-             instead. Workspace config overrides global for: sync-strategy, git_config.*, \
-             language-integrations.*. Keys like branch-prefix, workspaces-dir, gc.retention-days, \
-             agent-md, and experimental.* are global-only.",
+             instead. Workspace config overrides global for: sync-strategy, git.*, \
+             lang.*. Keys like branch-prefix, workspaces-dir, gc.retention-days, \
+             agent-md, shell.tmux, and shell.prompt are global-only.",
         )
         .subcommand(list_cmd())
         .subcommand(get_cmd())
@@ -71,12 +71,16 @@ const GLOBAL_ONLY_KEYS: &[&str] = &[
     "workspaces-dir",
     "gc.retention-days",
     "agent-md",
+    "shell.tmux",
+    "shell.prompt",
     "experimental",
 ];
 
 fn is_global_only_key(key: &str) -> bool {
     let normalized = template::normalize_key(key);
-    GLOBAL_ONLY_KEYS.contains(&normalized.as_str()) || normalized.starts_with("experimental.")
+    GLOBAL_ONLY_KEYS.contains(&normalized.as_str())
+        || normalized.starts_with("shell.")
+        || normalized.starts_with("experimental.")
 }
 
 fn global_arg() -> Arg {
@@ -158,7 +162,7 @@ fn run_set_workspace(matches: &ArgMatches, ws_dir: &Path, _paths: &Paths) -> Res
                 _ => bail!("sync-strategy must be 'rebase' or 'merge'"),
             }
             config.sync_strategy = Some(value.to_string());
-        } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+        } else if let Some(lang) = normalized.strip_prefix("lang.") {
             let known = crate::lang::integration_names();
             if !known.iter().any(|n| n == lang) {
                 bail!("unknown language integration: {}", lang);
@@ -170,9 +174,9 @@ fn run_set_workspace(matches: &ArgMatches, ws_dir: &Path, _paths: &Paths) -> Res
                 .language_integrations
                 .get_or_insert_with(BTreeMap::new);
             li.insert(lang.to_string(), enabled);
-        } else if let Some(git_key) = normalized.strip_prefix("git-config.") {
+        } else if let Some(git_key) = normalized.strip_prefix("git.") {
             if git_key.is_empty() {
-                bail!("git-config key cannot be empty");
+                bail!("git key cannot be empty");
             }
             let gc = config.git_config.get_or_insert_with(BTreeMap::new);
             gc.insert(git_key.to_string(), value.to_string());
@@ -181,7 +185,7 @@ fn run_set_workspace(matches: &ArgMatches, ws_dir: &Path, _paths: &Paths) -> Res
     })?;
 
     // Apply git config to clones immediately (using metadata from the locked read above)
-    if let Some(git_key) = normalized.strip_prefix("git-config.") {
+    if let Some(git_key) = normalized.strip_prefix("git.") {
         let mut gc = BTreeMap::new();
         gc.insert(git_key.to_string(), value.to_string());
         workspace::apply_git_config(ws_dir, &meta, &gc, None);
@@ -200,6 +204,7 @@ fn run_get_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Resu
     // For workspace-scoped keys, return effective value; for global-only, delegate.
     // Normalize key for matching so both underscore and hyphen variants work.
     let normalized = template::normalize_key(key);
+    warn_if_deprecated(key, &normalized);
     match normalized.as_str() {
         "sync-strategy" => Ok(Output::ConfigGet(ConfigGetOutput {
             key: key.clone(),
@@ -211,8 +216,8 @@ fn run_get_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Resu
                     .to_string(),
             ),
         })),
-        k if k.starts_with("language-integrations.") => {
-            let lang = &k["language-integrations.".len()..];
+        k if k.starts_with("lang.") => {
+            let lang = &k["lang.".len()..];
             let enabled = effective
                 .language_integrations
                 .as_ref()
@@ -224,8 +229,8 @@ fn run_get_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Resu
                 value: Some(enabled.to_string()),
             }))
         }
-        k if k.starts_with("git-config.") => {
-            let git_key = &k["git-config.".len()..];
+        k if k.starts_with("git.") => {
+            let git_key = &k["git.".len()..];
             let effective_gc = effective.effective_git_config();
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
@@ -249,6 +254,8 @@ fn run_unset_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
     let normalized = template::normalize_key(key);
     let cfg = config::Config::load_from(&paths.config_path)?;
 
+    warn_if_deprecated(key, &normalized);
+
     filelock::with_metadata(ws_dir, |meta| {
         let config = match &mut meta.config {
             Some(c) => c,
@@ -257,14 +264,14 @@ fn run_unset_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
 
         if normalized == "sync-strategy" {
             config.sync_strategy = None;
-        } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+        } else if let Some(lang) = normalized.strip_prefix("lang.") {
             if let Some(ref mut m) = config.language_integrations {
                 m.remove(lang);
                 if m.is_empty() {
                     config.language_integrations = None;
                 }
             }
-        } else if let Some(git_key) = normalized.strip_prefix("git-config.")
+        } else if let Some(git_key) = normalized.strip_prefix("git.")
             && let Some(ref mut m) = config.git_config
         {
             m.remove(git_key);
@@ -288,8 +295,8 @@ fn run_unset_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
             let global = cfg.sync_strategy.as_deref().unwrap_or("rebase");
             format!(" (using global: {})", global)
         }
-        k if k.starts_with("language-integrations.") => {
-            let lang = &k["language-integrations.".len()..];
+        k if k.starts_with("lang.") => {
+            let lang = &k["lang.".len()..];
             let global = cfg
                 .language_integrations
                 .as_ref()
@@ -298,8 +305,8 @@ fn run_unset_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
                 .unwrap_or(false);
             format!(" (using global: {})", global)
         }
-        k if k.starts_with("git-config.") => {
-            let git_key = &k["git-config.".len()..];
+        k if k.starts_with("git.") => {
+            let git_key = &k["git.".len()..];
             let defaults = config::Config::default_git_config();
             let global = cfg
                 .git_config
@@ -327,20 +334,14 @@ fn run_list_workspace(_matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
     let ws_config = meta.config.as_ref();
 
     let mut entries = vec![
-        ConfigListEntry {
-            key: "branch-prefix".into(),
-            value: cfg
-                .branch_prefix
-                .as_deref()
-                .unwrap_or("(not set)")
-                .to_string(),
-            source: None,
-        },
-        ConfigListEntry {
-            key: "workspaces-dir".into(),
-            value: paths.workspaces_dir.display().to_string(),
-            source: None,
-        },
+        entry(
+            "branch-prefix",
+            cfg.branch_prefix.as_deref().unwrap_or("(not set)"),
+        ),
+        entry(
+            "workspaces-dir",
+            &paths.workspaces_dir.display().to_string(),
+        ),
         ConfigListEntry {
             key: "sync-strategy".into(),
             value: ws_config
@@ -351,18 +352,24 @@ fn run_list_workspace(_matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
             source: ws_config
                 .and_then(|c| c.sync_strategy.as_ref())
                 .map(|_| "workspace".to_string()),
+            experimental: false,
         },
-        ConfigListEntry {
-            key: "agent-md".into(),
-            value: cfg.agent_md.unwrap_or(true).to_string(),
-            source: None,
-        },
-        ConfigListEntry {
-            key: "gc.retention-days".into(),
-            value: cfg.gc_retention_days.unwrap_or(7).to_string(),
-            source: None,
-        },
+        entry("agent-md", &cfg.agent_md.unwrap_or(true).to_string()),
+        entry(
+            "gc.retention-days",
+            &cfg.gc_retention_days.unwrap_or(7).to_string(),
+        ),
     ];
+
+    // shell features (global-only, experimental)
+    entries.push(exp_entry(
+        "shell.tmux",
+        cfg.shell_tmux_mode().unwrap_or("false"),
+    ));
+    entries.push(exp_entry(
+        "shell.prompt",
+        &cfg.shell_prompt_enabled().to_string(),
+    ));
 
     // git config: merge workspace overrides over effective global
     let mut effective_gc = cfg.effective_git_config();
@@ -378,13 +385,14 @@ fn run_list_workspace(_matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
             .and_then(|c| c.git_config.as_ref())
             .is_some_and(|gc| gc.contains_key(key));
         entries.push(ConfigListEntry {
-            key: format!("git_config.{}", key),
+            key: format!("git.{}", key),
             value: value.clone(),
             source: if from_ws {
                 Some("workspace".to_string())
             } else {
                 None
             },
+            experimental: false,
         });
     }
 
@@ -407,43 +415,38 @@ fn run_list_workspace(_matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
                 .unwrap_or(false)
         };
         entries.push(ConfigListEntry {
-            key: format!("language-integrations.{}", name),
+            key: format!("lang.{}", name),
             value: enabled.to_string(),
             source: if from_ws {
                 Some("workspace".to_string())
             } else {
                 None
             },
+            experimental: false,
         });
     }
 
-    // experimental: same as global (workspace can't override)
-    let exp = cfg.experimental.as_ref();
-    let exp_enabled = exp.is_some_and(|e| e.enabled);
-    entries.push(ConfigListEntry {
-        key: "experimental".into(),
-        value: exp_enabled.to_string(),
-        source: None,
-    });
-    if exp_enabled {
-        for feature in config::EXPERIMENTAL_FEATURES {
-            let value = if *feature == "shell-tmux" {
-                exp.and_then(|e| e.shell_tmux_mode())
-                    .unwrap_or("false")
-                    .to_string()
-            } else {
-                exp.is_some_and(|e| e.is_feature_enabled(feature))
-                    .to_string()
-            };
-            entries.push(ConfigListEntry {
-                key: format!("experimental.{}", feature),
-                value,
-                source: None,
-            });
-        }
-    }
-
     Ok(Output::ConfigList(ConfigListOutput { entries }))
+}
+
+/// Helper to create a simple config list entry.
+fn entry(key: &str, value: &str) -> ConfigListEntry {
+    ConfigListEntry {
+        key: key.into(),
+        value: value.into(),
+        source: None,
+        experimental: false,
+    }
+}
+
+/// Helper to create an experimental config list entry.
+fn exp_entry(key: &str, value: &str) -> ConfigListEntry {
+    ConfigListEntry {
+        key: key.into(),
+        value: value.into(),
+        source: None,
+        experimental: config::EXPERIMENTAL_KEYS.contains(&key),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,45 +456,39 @@ fn run_list_workspace(_matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Re
 pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let cfg = config::Config::load_from(&paths.config_path)?;
     let mut entries = vec![
-        ConfigListEntry {
-            key: "branch-prefix".into(),
-            value: cfg
-                .branch_prefix
-                .as_deref()
-                .unwrap_or("(not set)")
-                .to_string(),
-            source: None,
-        },
-        ConfigListEntry {
-            key: "workspaces-dir".into(),
-            value: paths.workspaces_dir.display().to_string(),
-            source: None,
-        },
-        ConfigListEntry {
-            key: "sync-strategy".into(),
-            value: cfg.sync_strategy.as_deref().unwrap_or("rebase").to_string(),
-            source: None,
-        },
-        ConfigListEntry {
-            key: "agent-md".into(),
-            value: cfg.agent_md.unwrap_or(true).to_string(),
-            source: None,
-        },
-        ConfigListEntry {
-            key: "gc.retention-days".into(),
-            value: cfg.gc_retention_days.unwrap_or(7).to_string(),
-            source: None,
-        },
+        entry(
+            "branch-prefix",
+            cfg.branch_prefix.as_deref().unwrap_or("(not set)"),
+        ),
+        entry(
+            "workspaces-dir",
+            &paths.workspaces_dir.display().to_string(),
+        ),
+        entry(
+            "sync-strategy",
+            cfg.sync_strategy.as_deref().unwrap_or("rebase"),
+        ),
+        entry("agent-md", &cfg.agent_md.unwrap_or(true).to_string()),
+        entry(
+            "gc.retention-days",
+            &cfg.gc_retention_days.unwrap_or(7).to_string(),
+        ),
     ];
+
+    // shell features (always shown, no gate)
+    entries.push(exp_entry(
+        "shell.tmux",
+        cfg.shell_tmux_mode().unwrap_or("false"),
+    ));
+    entries.push(exp_entry(
+        "shell.prompt",
+        &cfg.shell_prompt_enabled().to_string(),
+    ));
 
     // git config: show effective values (defaults merged with overrides)
     let git_config = cfg.effective_git_config();
     for (key, value) in &git_config {
-        entries.push(ConfigListEntry {
-            key: format!("git_config.{}", key),
-            value: value.clone(),
-            source: None,
-        });
+        entries.push(entry(&format!("git.{}", key), value));
     }
 
     // language integrations: show effective value for all known integrations
@@ -502,37 +499,7 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             .and_then(|m| m.get(name.as_str()))
             .copied()
             .unwrap_or(false);
-        entries.push(ConfigListEntry {
-            key: format!("language-integrations.{}", name),
-            value: enabled.to_string(),
-            source: None,
-        });
-    }
-
-    // experimental: show gate and individual features (only when enabled)
-    let exp = cfg.experimental.as_ref();
-    let exp_enabled = exp.is_some_and(|e| e.enabled);
-    entries.push(ConfigListEntry {
-        key: "experimental".into(),
-        value: exp_enabled.to_string(),
-        source: None,
-    });
-    if exp_enabled {
-        for feature in config::EXPERIMENTAL_FEATURES {
-            let value = if *feature == "shell-tmux" {
-                exp.and_then(|e| e.shell_tmux_mode())
-                    .unwrap_or("false")
-                    .to_string()
-            } else {
-                exp.is_some_and(|e| e.is_feature_enabled(feature))
-                    .to_string()
-            };
-            entries.push(ConfigListEntry {
-                key: format!("experimental.{}", feature),
-                value,
-                source: None,
-            });
-        }
+        entries.push(entry(&format!("lang.{}", name), &enabled.to_string()));
     }
 
     Ok(Output::ConfigList(ConfigListOutput { entries }))
@@ -541,8 +508,10 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let key = matches.get_one::<String>("key").unwrap();
     let cfg = config::Config::load_from(&paths.config_path)?;
+    let normalized = template::normalize_key(key);
+    warn_if_deprecated(key, &normalized);
 
-    match key.as_str() {
+    match normalized.as_str() {
         "branch-prefix" => Ok(Output::ConfigGet(ConfigGetOutput {
             key: key.clone(),
             value: cfg.branch_prefix,
@@ -563,8 +532,19 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             key: key.clone(),
             value: Some(cfg.gc_retention_days.unwrap_or(7).to_string()),
         })),
-        k if k.starts_with("language-integrations.") => {
-            let lang = &k["language-integrations.".len()..];
+        "shell.tmux" => {
+            let mode = cfg.shell_tmux_mode().unwrap_or("false");
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: Some(mode.to_string()),
+            }))
+        }
+        "shell.prompt" => Ok(Output::ConfigGet(ConfigGetOutput {
+            key: key.clone(),
+            value: Some(cfg.shell_prompt_enabled().to_string()),
+        })),
+        k if k.starts_with("lang.") => {
+            let lang = &k["lang.".len()..];
             let enabled = cfg
                 .language_integrations
                 .as_ref()
@@ -576,45 +556,17 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 value: Some(enabled.to_string()),
             }))
         }
-        k if k.starts_with("git_config.") => {
-            let git_key = &k["git_config.".len()..];
+        k if k.starts_with("git.") => {
+            let git_key = &k["git.".len()..];
             let effective = cfg.effective_git_config();
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
                 value: effective.get(git_key).cloned(),
             }))
         }
+        // Legacy: still accept "experimental" and "experimental.*" for backward compat
         "experimental" => {
             let enabled = cfg.experimental.as_ref().is_some_and(|e| e.enabled);
-            Ok(Output::ConfigGet(ConfigGetOutput {
-                key: key.clone(),
-                value: Some(enabled.to_string()),
-            }))
-        }
-        "experimental.shell-tmux" => {
-            let mode = cfg
-                .experimental
-                .as_ref()
-                .and_then(|e| e.shell_tmux_mode())
-                .unwrap_or("false");
-            Ok(Output::ConfigGet(ConfigGetOutput {
-                key: key.clone(),
-                value: Some(mode.to_string()),
-            }))
-        }
-        k if k.starts_with("experimental.") => {
-            let feature = &k["experimental.".len()..];
-            if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
-                bail!(
-                    "unknown experimental feature: {} (known: {})",
-                    feature,
-                    config::EXPERIMENTAL_FEATURES.join(", ")
-                );
-            }
-            let enabled = cfg
-                .experimental
-                .as_ref()
-                .is_some_and(|e| e.is_feature_enabled(feature));
             Ok(Output::ConfigGet(ConfigGetOutput {
                 key: key.clone(),
                 value: Some(enabled.to_string()),
@@ -627,9 +579,11 @@ pub fn run_get(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
 pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let key = matches.get_one::<String>("key").unwrap();
     let value = matches.get_one::<String>("value").unwrap();
+    let normalized = template::normalize_key(key);
+    warn_if_deprecated(key, &normalized);
 
     // Validate inputs before acquiring lock
-    let (message, hint) = match key.as_str() {
+    let (message, hint) = match normalized.as_str() {
         "branch-prefix" => {
             let v = value.clone();
             filelock::with_config(&paths.config_path, |cfg| {
@@ -706,8 +660,47 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             };
             (format!("gc.retention-days = {}", days), Some(hint))
         }
-        k if k.starts_with("language-integrations.") => {
-            let lang = &k["language-integrations.".len()..];
+        "shell.tmux" => {
+            if !config::SHELL_TMUX_VALUES.contains(&value.as_str()) {
+                bail!(
+                    "shell.tmux must be one of: {}",
+                    config::SHELL_TMUX_VALUES.join(", ")
+                );
+            }
+            let v = value.clone();
+            let is_enabled = value != "false";
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.shell_tmux = Some(v);
+                Ok(())
+            })?;
+            let msg = format!("shell.tmux = {}", value);
+            let hint = if is_enabled {
+                note_if_experimental("shell.tmux");
+                Some("re-source your shell to activate: eval \"$(wsp completion zsh)\"".into())
+            } else {
+                None
+            };
+            (msg, hint)
+        }
+        "shell.prompt" => {
+            let enabled: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.shell_prompt = Some(enabled);
+                Ok(())
+            })?;
+            let msg = format!("shell.prompt = {}", enabled);
+            let hint = if enabled {
+                note_if_experimental("shell.prompt");
+                Some("re-source your shell to activate: eval \"$(wsp completion zsh)\"".into())
+            } else {
+                None
+            };
+            (msg, hint)
+        }
+        k if k.starts_with("lang.") => {
+            let lang = &k["lang.".len()..];
             let known = crate::lang::integration_names();
             if !known.iter().any(|n| n == lang) {
                 bail!("unknown language integration: {}", lang);
@@ -722,14 +715,14 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Ok(())
             })?;
             (
-                format!("language-integrations.{} = {}", lang, enabled),
+                format!("lang.{} = {}", lang, enabled),
                 Some("takes effect on next wsp new or wsp sync".into()),
             )
         }
-        k if k.starts_with("git_config.") => {
-            let git_key = k["git_config.".len()..].to_string();
+        k if k.starts_with("git.") => {
+            let git_key = k["git.".len()..].to_string();
             if git_key.is_empty() {
-                bail!("git_config key cannot be empty");
+                bail!("git key cannot be empty");
             }
             let v = value.clone();
             filelock::with_config(&paths.config_path, |cfg| {
@@ -738,90 +731,15 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Ok(())
             })?;
             (
-                format!("git_config.{} = {}", git_key, value),
+                format!("git.{} = {}", git_key, value),
                 Some("applied to new clones; run wsp sync to update existing repos".into()),
             )
         }
+        // Legacy key — no longer functional, guide users to new keys
         "experimental" => {
-            let enabled: bool = value
-                .parse()
-                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
-            filelock::with_config(&paths.config_path, |cfg| {
-                let exp = cfg
-                    .experimental
-                    .get_or_insert_with(config::ExperimentalConfig::default);
-                exp.enabled = enabled;
-                Ok(())
-            })?;
-            let hint = if enabled {
-                "use wsp config set experimental.<feature> true to enable specific features"
-            } else {
-                "all experimental features are now disabled"
-            };
-            (format!("experimental = {}", enabled), Some(hint.into()))
-        }
-        "experimental.shell-tmux" => {
-            if !config::SHELL_TMUX_VALUES.contains(&value.as_str()) {
-                bail!(
-                    "shell-tmux must be one of: {}",
-                    config::SHELL_TMUX_VALUES.join(", ")
-                );
-            }
-            let val = if value == "false" {
-                config::ExperimentalValue::Bool(false)
-            } else {
-                config::ExperimentalValue::String(value.clone())
-            };
-            let is_enabled = val.is_truthy();
-            filelock::with_config(&paths.config_path, |cfg| {
-                let exp = cfg
-                    .experimental
-                    .get_or_insert_with(config::ExperimentalConfig::default);
-                if is_enabled {
-                    exp.enabled = true;
-                }
-                exp.features.insert("shell-tmux".into(), val.clone());
-                // Remove deprecated key if present
-                exp.features.remove("shell-tmux-title");
-                Ok(())
-            })?;
-            let msg = format!("experimental.shell-tmux = {}", value);
-            (
-                msg,
-                config_set_hint_for_experimental("shell-tmux", is_enabled),
-            )
-        }
-        k if k.starts_with("experimental.") => {
-            let feature = &k["experimental.".len()..];
-            if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
-                bail!(
-                    "unknown experimental feature: {} (known: {})",
-                    feature,
-                    config::EXPERIMENTAL_FEATURES.join(", ")
-                );
-            }
-            let enabled: bool = value
-                .parse()
-                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
-            let feature = feature.to_string();
-            filelock::with_config(&paths.config_path, |cfg| {
-                let exp = cfg
-                    .experimental
-                    .get_or_insert_with(config::ExperimentalConfig::default);
-                // Auto-enable the gate when enabling a specific feature
-                if enabled {
-                    exp.enabled = true;
-                }
-                exp.features
-                    .insert(feature.clone(), config::ExperimentalValue::Bool(enabled));
-                Ok(())
-            })?;
-            let msg = if enabled {
-                format!("experimental.{} = true (experimental enabled)", feature)
-            } else {
-                format!("experimental.{} = false", feature)
-            };
-            (msg, config_set_hint_for_experimental(&feature, enabled))
+            bail!(
+                "'experimental' is no longer supported. Use 'shell.tmux' and 'shell.prompt' directly instead."
+            );
         }
         _ => bail!("unknown config key: {}", key),
     };
@@ -842,23 +760,34 @@ fn extract_hint(output: &Output) -> Option<&str> {
     }
 }
 
-/// Returns a hint for setting an experimental feature, if applicable.
-fn config_set_hint_for_experimental(feature: &str, enabled: bool) -> Option<String> {
-    if !enabled {
-        return None;
+/// Print a note on stderr when setting an experimental key.
+fn note_if_experimental(key: &str) {
+    if config::EXPERIMENTAL_KEYS.contains(&key) {
+        eprintln!(
+            "note: '{}' is experimental and may change in future releases",
+            key
+        );
     }
-    match feature {
-        "shell-prompt" | "shell-tmux" => {
-            Some("re-source your shell to activate: eval \"$(wsp completion zsh)\"".into())
-        }
-        _ => None,
+}
+
+/// Print a deprecation warning on stderr if the user-supplied key differs from normalized.
+fn warn_if_deprecated(input: &str, normalized: &str) {
+    // After normalize_key, underscores are already hyphens, so compare normalized form
+    let input_normalized = input.replace('_', "-");
+    if input_normalized != normalized {
+        eprintln!(
+            "warning: '{}' is deprecated, use '{}' instead",
+            input, normalized
+        );
     }
 }
 
 pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let key = matches.get_one::<String>("key").unwrap();
+    let normalized = template::normalize_key(key);
+    warn_if_deprecated(key, &normalized);
 
-    let (message, hint) = match key.as_str() {
+    let (message, hint): (String, Option<String>) = match normalized.as_str() {
         "branch-prefix" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.branch_prefix = None;
@@ -897,8 +826,22 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             })?;
             ("gc.retention-days unset (default: 7)".into(), None)
         }
-        k if k.starts_with("language-integrations.") => {
-            let lang = &k["language-integrations.".len()..];
+        "shell.tmux" => {
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.shell_tmux = None;
+                Ok(())
+            })?;
+            ("shell.tmux unset (default: false)".into(), None)
+        }
+        "shell.prompt" => {
+            filelock::with_config(&paths.config_path, |cfg| {
+                cfg.shell_prompt = None;
+                Ok(())
+            })?;
+            ("shell.prompt unset (default: false)".into(), None)
+        }
+        k if k.starts_with("lang.") => {
+            let lang = &k["lang.".len()..];
             let known = crate::lang::integration_names();
             if !known.iter().any(|n| n == lang) {
                 bail!("unknown language integration: {}", lang);
@@ -913,16 +856,12 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 }
                 Ok(())
             })?;
-            (
-                format!("language-integrations.{} unset (default: false)", lang),
-                None,
-            )
+            (format!("lang.{} unset (default: false)", lang), None)
         }
-        k if k.starts_with("git_config.") => {
-            let git_key = k["git_config.".len()..].to_string();
-            // Validate key even on unset — prevents confusing "unset" messages for invalid keys
+        k if k.starts_with("git.") => {
+            let git_key = k["git.".len()..].to_string();
             if git_key.is_empty() {
-                bail!("git_config key cannot be empty");
+                bail!("git key cannot be empty");
             }
             let default_val = config::Config::default_git_config().get(&git_key).cloned();
             filelock::with_config(&paths.config_path, |cfg| {
@@ -935,45 +874,22 @@ pub fn run_unset(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 Ok(())
             })?;
             let msg = match default_val {
-                Some(v) => format!("git_config.{} unset (default: {})", git_key, v),
-                None => format!("git_config.{} unset", git_key),
+                Some(v) => format!("git.{} unset (default: {})", git_key, v),
+                None => format!("git.{} unset", git_key),
             };
             (msg, None)
         }
+        // Legacy: still accept "experimental" for backward compat
         "experimental" => {
             filelock::with_config(&paths.config_path, |cfg| {
                 cfg.experimental = None;
+                cfg.shell_tmux = None;
+                cfg.shell_prompt = None;
                 Ok(())
             })?;
             (
-                "experimental unset (default: false)".into(),
-                Some("all experimental features and their settings have been reset".into()),
-            )
-        }
-        k if k.starts_with("experimental.") => {
-            let feature = &k["experimental.".len()..];
-            if !config::EXPERIMENTAL_FEATURES.contains(&feature) {
-                bail!(
-                    "unknown experimental feature: {} (known: {})",
-                    feature,
-                    config::EXPERIMENTAL_FEATURES.join(", ")
-                );
-            }
-            let feature = feature.to_string();
-            filelock::with_config(&paths.config_path, |cfg| {
-                if let Some(ref mut exp) = cfg.experimental {
-                    exp.features.remove(&feature);
-                    // Also remove deprecated key when unsetting shell-tmux
-                    if feature == "shell-tmux" {
-                        exp.features.remove("shell-tmux-title");
-                    }
-                }
-                Ok(())
-            })?;
-            let hint = config_set_hint_for_experimental(&feature, false);
-            (
-                format!("experimental.{} unset (default: false)", feature),
-                hint,
+                "experimental unset — shell.tmux and shell.prompt also cleared".into(),
+                Some("use shell.tmux / shell.prompt directly instead".into()),
             )
         }
         _ => bail!("unknown config key: {}", key),
@@ -1029,11 +945,10 @@ mod tests {
             ("sync-strategy", "merge"),
             ("agent-md", "true"),
             ("gc.retention-days", "14"),
-            ("language-integrations.go", "true"),
-            ("git_config.push.default", "current"),
-            ("experimental", "true"),
-            ("experimental.shell-prompt", "true"),
-            ("experimental.shell-tmux", "window-title"),
+            ("lang.go", "true"),
+            ("git.push.default", "current"),
+            ("shell.tmux", "window-title"),
+            ("shell.prompt", "true"),
         ];
 
         for (key, value) in cases {
@@ -1047,14 +962,34 @@ mod tests {
     }
 
     #[test]
-    fn set_experimental_shell_hint_mentions_shell() {
+    fn set_experimental_rejected() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = test_paths(tmp.path());
         config::Config::default()
             .save_to(&paths.config_path)
             .unwrap();
 
-        let out = do_set(&paths, "experimental.shell-prompt", "true");
+        let cmd = set_cmd();
+        let m = cmd.get_matches_from(["set", "experimental", "true"]);
+        let result = run_set(&m, &paths);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(
+            format!("{}", err).contains("no longer supported"),
+            "should reject experimental set: got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn set_shell_hint_mentions_shell() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+
+        let out = do_set(&paths, "shell.prompt", "true");
         let hint = extract_hint(&out).unwrap();
         assert!(
             hint.contains("eval") && hint.contains("completion"),
@@ -1062,8 +997,8 @@ mod tests {
             hint
         );
 
-        // shell-tmux also gets a re-source hint
-        let out = do_set(&paths, "experimental.shell-tmux", "window-title");
+        // shell.tmux also gets a re-source hint
+        let out = do_set(&paths, "shell.tmux", "window-title");
         let hint = extract_hint(&out).unwrap();
         assert!(
             hint.contains("eval") && hint.contains("completion"),
@@ -1073,7 +1008,7 @@ mod tests {
     }
 
     #[test]
-    fn set_experimental_disabled_no_shell_hint() {
+    fn set_shell_disabled_no_shell_hint() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = test_paths(tmp.path());
         config::Config::default()
@@ -1081,8 +1016,8 @@ mod tests {
             .unwrap();
 
         // Enable first so we can disable
-        do_set(&paths, "experimental.shell-prompt", "true");
-        let out = do_set(&paths, "experimental.shell-prompt", "false");
+        do_set(&paths, "shell.prompt", "true");
+        let out = do_set(&paths, "shell.prompt", "false");
         // Disabling should not produce a "re-source" hint
         let hint = extract_hint(&out);
         assert!(
@@ -1099,12 +1034,12 @@ mod tests {
             .save_to(&paths.config_path)
             .unwrap();
 
-        do_set(&paths, "experimental.shell-prompt", "true");
+        do_set(&paths, "shell.prompt", "true");
         let out = do_unset(&paths, "experimental");
         let hint = extract_hint(&out).unwrap();
         assert!(
-            hint.contains("reset"),
-            "unsetting experimental should warn about reset: got {:?}",
+            hint.contains("shell.tmux") || hint.contains("shell.prompt"),
+            "unsetting experimental should mention new key names: got {:?}",
             hint
         );
     }
@@ -1206,8 +1141,9 @@ mod tests {
             "workspaces-dir",
             "gc.retention-days",
             "agent-md",
+            "shell.tmux",
+            "shell.prompt",
             "experimental",
-            "experimental.shell-prompt",
         ];
         for key in cases {
             let cmd = set_cmd();

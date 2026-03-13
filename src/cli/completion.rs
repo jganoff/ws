@@ -56,21 +56,18 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     // This handles version skew (e.g. newer config format with older binary), corrupt
     // config, or missing files gracefully.
     let hooks = match Config::load_from(&paths.config_path) {
-        Ok(cfg) => match cfg.experimental.as_ref() {
-            Some(exp) => {
-                // SECURITY: closed match — only literal "window-title" produces shell
-                // code. Arbitrary strings from hand-edited config fall to Off.
-                let tmux = match exp.shell_tmux_mode() {
-                    Some("window-title") => TmuxMode::WindowTitle,
-                    _ => TmuxMode::Off,
-                };
-                ShellHookOpts {
-                    tmux,
-                    prompt: exp.is_feature_enabled("shell-prompt"),
-                }
+        Ok(cfg) => {
+            // SECURITY: closed match — only literal "window-title" produces shell
+            // code. Arbitrary strings from hand-edited config fall to Off.
+            let tmux = match cfg.shell_tmux_mode() {
+                Some("window-title") => TmuxMode::WindowTitle,
+                _ => TmuxMode::Off,
+            };
+            ShellHookOpts {
+                tmux,
+                prompt: cfg.shell_prompt_enabled(),
             }
-            None => ShellHookOpts::default(),
-        },
+        }
         Err(e) => {
             eprintln!("wsp: warning: failed to load config, shell hooks disabled: {e}");
             ShellHookOpts::default()

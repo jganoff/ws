@@ -121,9 +121,9 @@ When run inside a workspace, `wsp config set/get/unset/ls` operate on
 workspace config by default. Use --global to target global config instead.
 Outside a workspace, commands always use global config.
 
-Workspace-scoped keys: sync-strategy, git_config.*, language-integrations.*
+Workspace-scoped keys: sync-strategy, git.*, lang.*
 Global-only keys: branch-prefix, workspaces-dir, gc.retention-days, agent-md,
-                  experimental.*
+                  shell.tmux, shell.prompt
 
 Config hierarchy (top wins): workspace → global → built-in defaults.
 
@@ -150,9 +150,25 @@ GC (GARBAGE COLLECTION)
                         Set to 0 to disable gc (keep indefinitely).
                         Default: 7
 
+SHELL (experimental)
+
+  shell.prompt          Boolean. Emit a shell hook that sets the WSP_WORKSPACE
+                        environment variable to the current workspace name.
+                        Use in your prompt: PS1='${WSP_WORKSPACE:+[wsp:$WSP_WORKSPACE] }%~ $ '
+                        Requires re-sourcing: eval \"$(wsp completion zsh)\"
+                        Default: false
+
+  shell.tmux            String. Controls tmux integration in shell hooks.
+                        Values: window-title, false
+                        window-title: sets the tmux window name to `wsp:<workspace>`
+                          when inside a workspace. Restores automatic-rename when
+                          outside. Requires tmux on PATH and $TMUX to be set.
+                        false: disabled (default)
+                        Requires re-sourcing: eval \"$(wsp completion zsh)\"
+
 GIT CONFIG
 
-  git_config.<key>      Override git config applied to every clone. The key
+  git.<key>             Override git config applied to every clone. The key
                         is any valid git config key (e.g., push.default).
                         These merge with built-in defaults:
 
@@ -161,40 +177,14 @@ GIT CONFIG
                           rerere.enabled        true
                           branch.sort           -committerdate
 
-                        Example: `wsp config set git_config.merge.conflictstyle zdiff3`
+                        Example: `wsp config set git.merge.conflictstyle zdiff3`
                         Unset reverts to the built-in default (if any).
 
 LANGUAGE INTEGRATIONS
 
-  language-integrations.<name>
-                        Boolean. Enable/disable per-language workspace support.
+  lang.<name>           Boolean. Enable/disable per-language workspace support.
                         Available: go (generates go.work for multi-module repos).
                         Default: false
-
-EXPERIMENTAL
-
-  experimental          Boolean. Top-level gate for unstable features. When false,
-                        experimental features are hidden from config ls and tab
-                        completion. Must be true for any experimental.* flag to
-                        take effect.
-                        Default: false
-
-  experimental.shell-prompt
-                        Boolean. Emit a shell hook that sets the WSP_WORKSPACE
-                        environment variable to the current workspace name.
-                        Use in your prompt: PS1='${WSP_WORKSPACE:+[wsp:$WSP_WORKSPACE] }%~ $ '
-                        Requires re-sourcing: eval \"$(wsp completion zsh)\"
-                        Default: false
-
-  experimental.shell-tmux
-                        String. Controls tmux integration in shell hooks.
-                        Values: window-title, false
-                        window-title: sets the tmux window name to `wsp:<workspace>`
-                          when inside a workspace. Restores automatic-rename when
-                          outside. Requires tmux on PATH and $TMUX to be set.
-                        false: disabled (default)
-                        Requires re-sourcing: eval \"$(wsp completion zsh)\"
-                        (Replaces deprecated experimental.shell-tmux-title)
 
 EXAMPLES
 
@@ -203,8 +193,8 @@ EXAMPLES
   wsp config set --global sync-strategy merge     # set in global config
   wsp config set branch-prefix jganoff            # global-only key (always global)
   wsp config set gc.retention-days 30             # keep deleted workspaces 30 days
-  wsp config set git_config.merge.conflictstyle zdiff3  # workspace or global
-  wsp config set experimental.shell-prompt true   # enable prompt variable (global)
+  wsp config set git.merge.conflictstyle zdiff3         # workspace or global
+  wsp config set shell.prompt true                      # enable prompt variable (global)
   wsp config unset sync-strategy                  # unset workspace override
   wsp config unset --global branch-prefix         # revert global to default
 ",

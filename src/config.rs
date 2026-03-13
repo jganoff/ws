@@ -95,10 +95,10 @@ impl ExperimentalConfig {
     }
 }
 
-/// All known experimental feature names.
-pub const EXPERIMENTAL_FEATURES: &[&str] = &["shell-tmux", "shell-prompt"];
+/// Keys labeled as experimental in UI output (display only, no gating).
+pub const EXPERIMENTAL_KEYS: &[&str] = &["shell.tmux", "shell.prompt"];
 
-/// Valid values for `experimental.shell-tmux`.
+/// Valid values for `shell.tmux` (and legacy `experimental.shell-tmux`).
 pub const SHELL_TMUX_VALUES: &[&str] = &["window-title", "false"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -112,7 +112,12 @@ pub struct Config {
     pub branch_prefix: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub repos: BTreeMap<String, RepoEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "lang",
+        alias = "language_integrations"
+    )]
     pub language_integrations: Option<BTreeMap<String, bool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspaces_dir: Option<String>,
@@ -122,9 +127,18 @@ pub struct Config {
     pub agent_md: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gc_retention_days: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "git",
+        alias = "git_config"
+    )]
     pub git_config: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_tmux: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_prompt: Option<bool>,
+    #[serde(default, skip_serializing)]
     pub experimental: Option<ExperimentalConfig>,
 }
 
@@ -135,13 +149,26 @@ impl Config {
         }
 
         let data = crate::util::read_yaml_file(path)?;
-        let cfg: Config = serde_yaml_ng::from_str(&data)?;
+        let mut cfg: Config = serde_yaml_ng::from_str(&data)?;
         if cfg.version > CURRENT_CONFIG_VERSION {
             eprintln!(
                 "warning: config.yaml has version {}, but this wsp only supports version {}. Some fields may be ignored.",
                 cfg.version, CURRENT_CONFIG_VERSION
             );
         }
+
+        // Migrate experimental shell values to top-level fields
+        if let Some(ref exp) = cfg.experimental {
+            if cfg.shell_tmux.is_none()
+                && let Some(mode) = exp.shell_tmux_mode()
+            {
+                cfg.shell_tmux = Some(mode.to_string());
+            }
+            if cfg.shell_prompt.is_none() && exp.is_feature_enabled("shell-prompt") {
+                cfg.shell_prompt = Some(true);
+            }
+        }
+
         Ok(cfg)
     }
 
@@ -165,6 +192,29 @@ impl Config {
             }
         }
         result
+    }
+
+    /// Resolves the effective shell-tmux mode. Checks top-level `shell_tmux` first,
+    /// falls back to legacy `experimental.shell-tmux`.
+    pub fn shell_tmux_mode(&self) -> Option<&str> {
+        if let Some(ref mode) = self.shell_tmux {
+            if mode != "false" && !mode.is_empty() {
+                return Some(mode);
+            }
+            return None;
+        }
+        self.experimental.as_ref().and_then(|e| e.shell_tmux_mode())
+    }
+
+    /// Returns true if shell-prompt is enabled. Checks top-level `shell_prompt` first,
+    /// falls back to legacy `experimental.shell-prompt`.
+    pub fn shell_prompt_enabled(&self) -> bool {
+        if let Some(enabled) = self.shell_prompt {
+            return enabled;
+        }
+        self.experimental
+            .as_ref()
+            .is_some_and(|e| e.is_feature_enabled("shell-prompt"))
     }
 
     pub fn upstream_url(&self, identity: &str) -> Option<&str> {
@@ -627,27 +677,49 @@ mod tests {
     }
 
     #[test]
-    fn test_experimental_round_trip() {
+    fn test_experimental_migration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.yaml");
+
+        // Write old-format config with experimental section directly
+        fs::write(
+            &cfg_path,
+            "experimental:\n  enabled: true\n  shell-prompt: true\n  shell-tmux: window-title\n",
+        )
+        .unwrap();
+
+        // load_from migrates experimental values to top-level fields
+        let loaded = Config::load_from(&cfg_path).unwrap();
+        assert!(loaded.shell_prompt_enabled());
+        assert_eq!(loaded.shell_tmux_mode(), Some("window-title"));
+        // Top-level fields populated
+        assert_eq!(loaded.shell_prompt, Some(true));
+        assert_eq!(loaded.shell_tmux.as_deref(), Some("window-title"));
+    }
+
+    #[test]
+    fn test_experimental_not_written_on_save() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg_path = tmp.path().join("config.yaml");
 
         let mut cfg = Config::default();
-        let mut exp = ExperimentalConfig::default();
-        exp.enabled = true;
-        exp.features
-            .insert("shell-prompt".into(), ExperimentalValue::Bool(true));
-        exp.features.insert(
-            "shell-tmux".into(),
-            ExperimentalValue::String("window-title".into()),
-        );
-        cfg.experimental = Some(exp);
+        cfg.shell_tmux = Some("window-title".into());
+        cfg.shell_prompt = Some(true);
         cfg.save_to(&cfg_path).unwrap();
 
-        let loaded = Config::load_from(&cfg_path).unwrap();
-        let exp = loaded.experimental.unwrap();
-        assert!(exp.enabled);
-        assert!(exp.is_feature_enabled("shell-prompt"));
-        assert_eq!(exp.shell_tmux_mode(), Some("window-title"));
+        let yaml = fs::read_to_string(&cfg_path).unwrap();
+        assert!(
+            !yaml.contains("experimental"),
+            "experimental section should not be written"
+        );
+        assert!(
+            yaml.contains("shell_tmux"),
+            "shell_tmux should be in output"
+        );
+        assert!(
+            yaml.contains("shell_prompt"),
+            "shell_prompt should be in output"
+        );
     }
 
     #[test]

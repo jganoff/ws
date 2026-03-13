@@ -510,8 +510,7 @@ fn config_cmd() -> Command {
         .long_about(
             "Manage template-scoped config overrides.\n\n\
              Template config overrides global config when a workspace is created from the \
-             template. Valid keys: language-integrations.<name>, sync-strategy, \
-             git-config.<key>.",
+             template. Valid keys: lang.<name>, sync-strategy, git.<key>.",
         )
         .subcommand_required(true)
         .subcommand(
