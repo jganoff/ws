@@ -77,6 +77,10 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
     let strategy = matches
         .get_one::<String>("strategy")
         .map(|s| s.as_str())
+        .or(meta
+            .config
+            .as_ref()
+            .and_then(|c| c.sync_strategy.as_deref()))
         .or(cfg.sync_strategy.as_deref())
         .unwrap_or("rebase");
 

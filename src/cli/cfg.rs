@@ -1,22 +1,28 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use anyhow::{Result, bail};
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use clap_complete::engine::ArgValueCandidates;
 
 use crate::cli::completers;
 use crate::config::{self, Paths};
 use crate::filelock;
 use crate::output::{ConfigGetOutput, ConfigListEntry, ConfigListOutput, MutationOutput, Output};
+use crate::template;
+use crate::workspace;
 
 pub fn cmd() -> Command {
     Command::new("config")
         .about("Manage wsp settings")
         .long_about(
             "Manage wsp settings.\n\n\
-             Settings are stored in ~/.local/share/wsp/config.yaml. Keys include \
-             branch-prefix, workspaces-dir, gc.retention-days, git_config.* overrides, \
-             and language integration toggles. Use `wsp config ls` to see all current values.",
+             Settings are stored in ~/.local/share/wsp/config.yaml (global) or per-workspace \
+             in .wsp.yaml (workspace-scoped). When run inside a workspace, set/get/unset/ls \
+             operate on workspace config by default. Use --global to target global config \
+             instead. Workspace config overrides global for: sync-strategy, git_config.*, \
+             language-integrations.*. Keys like branch-prefix, workspaces-dir, gc.retention-days, \
+             agent-md, and experimental.* are global-only.",
         )
         .subcommand(list_cmd())
         .subcommand(get_cmd())
@@ -25,20 +31,66 @@ pub fn cmd() -> Command {
 }
 
 pub fn dispatch(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
-    match matches.subcommand() {
-        Some(("ls", m)) => run_list(m, paths),
-        Some(("get", m)) => run_get(m, paths),
-        Some(("set", m)) => run_set(m, paths),
-        Some(("unset", m)) => run_unset(m, paths),
-        None => run_list(matches, paths),
+    let (sub_name, sub_matches) = match matches.subcommand() {
+        Some((name, m)) => (name, m),
+        None => ("ls", matches),
+    };
+
+    // Use try_get_one: bare `wsp config` dispatches as "ls" with the parent ArgMatches
+    // which doesn't define --global, so get_flag would panic.
+    let global = sub_matches
+        .try_get_one::<bool>("global")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false);
+    let ws_dir = if global {
+        None
+    } else {
+        std::env::current_dir()
+            .ok()
+            .and_then(|cwd| workspace::detect(&cwd).ok())
+    };
+
+    match (sub_name, ws_dir) {
+        ("ls", Some(ws)) => run_list_workspace(sub_matches, &ws, paths),
+        ("ls", None) => run_list(sub_matches, paths),
+        ("get", Some(ws)) => run_get_workspace(sub_matches, &ws, paths),
+        ("get", None) => run_get(sub_matches, paths),
+        ("set", Some(ws)) => run_set_workspace(sub_matches, &ws, paths),
+        ("set", None) => run_set(sub_matches, paths),
+        ("unset", Some(ws)) => run_unset_workspace(sub_matches, &ws, paths),
+        ("unset", None) => run_unset(sub_matches, paths),
         _ => unreachable!(),
     }
+}
+
+/// Keys that are global-only and cannot be set at workspace level.
+const GLOBAL_ONLY_KEYS: &[&str] = &[
+    "branch-prefix",
+    "workspaces-dir",
+    "gc.retention-days",
+    "agent-md",
+    "experimental",
+];
+
+fn is_global_only_key(key: &str) -> bool {
+    let normalized = template::normalize_key(key);
+    GLOBAL_ONLY_KEYS.contains(&normalized.as_str()) || normalized.starts_with("experimental.")
+}
+
+fn global_arg() -> Arg {
+    Arg::new("global")
+        .long("global")
+        .action(ArgAction::SetTrue)
+        .help("Use global config even when inside a workspace")
 }
 
 pub fn list_cmd() -> Command {
     Command::new("ls")
         .visible_alias("list")
         .about("List all config values [read-only]")
+        .arg(global_arg())
 }
 
 pub fn get_cmd() -> Command {
@@ -49,6 +101,7 @@ pub fn get_cmd() -> Command {
                 .required(true)
                 .add(ArgValueCandidates::new(completers::complete_config_keys)),
         )
+        .arg(global_arg())
 }
 
 pub fn set_cmd() -> Command {
@@ -64,18 +117,215 @@ pub fn set_cmd() -> Command {
                 .required(true)
                 .add(ArgValueCandidates::new(completers::complete_config_values)),
         )
+        .arg(global_arg())
 }
 
 pub fn unset_cmd() -> Command {
-    Command::new("unset").about("Unset a config value").arg(
-        Arg::new("key")
-            .required(true)
-            .add(ArgValueCandidates::new(completers::complete_config_keys)),
-    )
+    Command::new("unset")
+        .about("Unset a config value")
+        .arg(
+            Arg::new("key")
+                .required(true)
+                .add(ArgValueCandidates::new(completers::complete_config_keys)),
+        )
+        .arg(global_arg())
 }
 
-pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+// ---------------------------------------------------------------------------
+// Workspace-scoped config operations
+// ---------------------------------------------------------------------------
+
+fn run_set_workspace(matches: &ArgMatches, ws_dir: &Path, _paths: &Paths) -> Result<Output> {
+    let key = matches.get_one::<String>("key").unwrap();
+    let value = matches.get_one::<String>("value").unwrap();
+
+    if is_global_only_key(key) {
+        bail!("{} is a global-only key; use --global to set it", key);
+    }
+
+    template::validate_template_config_key(key)?;
+
+    let normalized = template::normalize_key(key);
+
+    let meta = filelock::with_metadata(ws_dir, |meta| {
+        let config = meta
+            .config
+            .get_or_insert_with(template::TemplateConfig::default);
+
+        if normalized == "sync-strategy" {
+            match value.as_str() {
+                "rebase" | "merge" => {}
+                _ => bail!("sync-strategy must be 'rebase' or 'merge'"),
+            }
+            config.sync_strategy = Some(value.to_string());
+        } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+            let known = crate::lang::integration_names();
+            if !known.iter().any(|n| n == lang) {
+                bail!("unknown language integration: {}", lang);
+            }
+            let enabled: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value must be true or false"))?;
+            let li = config
+                .language_integrations
+                .get_or_insert_with(BTreeMap::new);
+            li.insert(lang.to_string(), enabled);
+        } else if let Some(git_key) = normalized.strip_prefix("git-config.") {
+            if git_key.is_empty() {
+                bail!("git-config key cannot be empty");
+            }
+            let gc = config.git_config.get_or_insert_with(BTreeMap::new);
+            gc.insert(git_key.to_string(), value.to_string());
+        }
+        Ok(())
+    })?;
+
+    // Apply git config to clones immediately (using metadata from the locked read above)
+    if let Some(git_key) = normalized.strip_prefix("git-config.") {
+        let mut gc = BTreeMap::new();
+        gc.insert(git_key.to_string(), value.to_string());
+        workspace::apply_git_config(ws_dir, &meta, &gc, None);
+    }
+
+    let message = format!("{} = {} (workspace: {})", key, value, meta.name);
+    Ok(Output::Mutation(MutationOutput::new(message)))
+}
+
+fn run_get_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Result<Output> {
+    let key = matches.get_one::<String>("key").unwrap();
+    let meta = workspace::load_metadata(ws_dir)?;
     let cfg = config::Config::load_from(&paths.config_path)?;
+    let effective = meta.apply_workspace_config(&cfg);
+
+    // For workspace-scoped keys, return effective value; for global-only, delegate.
+    // Normalize key for matching so both underscore and hyphen variants work.
+    let normalized = template::normalize_key(key);
+    match normalized.as_str() {
+        "sync-strategy" => Ok(Output::ConfigGet(ConfigGetOutput {
+            key: key.clone(),
+            value: Some(
+                effective
+                    .sync_strategy
+                    .as_deref()
+                    .unwrap_or("rebase")
+                    .to_string(),
+            ),
+        })),
+        k if k.starts_with("language-integrations.") => {
+            let lang = &k["language-integrations.".len()..];
+            let enabled = effective
+                .language_integrations
+                .as_ref()
+                .and_then(|m| m.get(lang))
+                .copied()
+                .unwrap_or(false);
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: Some(enabled.to_string()),
+            }))
+        }
+        k if k.starts_with("git-config.") => {
+            let git_key = &k["git-config.".len()..];
+            let effective_gc = effective.effective_git_config();
+            Ok(Output::ConfigGet(ConfigGetOutput {
+                key: key.clone(),
+                value: effective_gc.get(git_key).cloned(),
+            }))
+        }
+        // Global-only keys: delegate to global get
+        _ => run_get(matches, paths),
+    }
+}
+
+fn run_unset_workspace(matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Result<Output> {
+    let key = matches.get_one::<String>("key").unwrap();
+
+    if is_global_only_key(key) {
+        bail!("{} is a global-only key; use --global to unset it", key);
+    }
+
+    template::validate_template_config_key(key)?;
+
+    let normalized = template::normalize_key(key);
+    let cfg = config::Config::load_from(&paths.config_path)?;
+
+    filelock::with_metadata(ws_dir, |meta| {
+        let config = match &mut meta.config {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+
+        if normalized == "sync-strategy" {
+            config.sync_strategy = None;
+        } else if let Some(lang) = normalized.strip_prefix("language-integrations.") {
+            if let Some(ref mut m) = config.language_integrations {
+                m.remove(lang);
+                if m.is_empty() {
+                    config.language_integrations = None;
+                }
+            }
+        } else if let Some(git_key) = normalized.strip_prefix("git-config.")
+            && let Some(ref mut m) = config.git_config
+        {
+            m.remove(git_key);
+            if m.is_empty() {
+                config.git_config = None;
+            }
+        }
+
+        // Clean up empty config
+        if *config == template::TemplateConfig::default() {
+            meta.config = None;
+        }
+
+        Ok(())
+    })?;
+
+    // Build message with fallback info
+    // Use normalized key for matching so both underscore and hyphen variants work
+    let fallback = match normalized.as_str() {
+        "sync-strategy" => {
+            let global = cfg.sync_strategy.as_deref().unwrap_or("rebase");
+            format!(" (using global: {})", global)
+        }
+        k if k.starts_with("language-integrations.") => {
+            let lang = &k["language-integrations.".len()..];
+            let global = cfg
+                .language_integrations
+                .as_ref()
+                .and_then(|m| m.get(lang))
+                .copied()
+                .unwrap_or(false);
+            format!(" (using global: {})", global)
+        }
+        k if k.starts_with("git-config.") => {
+            let git_key = &k["git-config.".len()..];
+            let defaults = config::Config::default_git_config();
+            let global = cfg
+                .git_config
+                .as_ref()
+                .and_then(|m| m.get(git_key))
+                .or_else(|| defaults.get(git_key))
+                .cloned()
+                .unwrap_or_default();
+            if global.is_empty() {
+                String::new()
+            } else {
+                format!(" (using global: {})", global)
+            }
+        }
+        _ => String::new(),
+    };
+
+    let message = format!("{} unset in workspace{}", key, fallback);
+    Ok(Output::Mutation(MutationOutput::new(message)))
+}
+
+fn run_list_workspace(_matches: &ArgMatches, ws_dir: &Path, paths: &Paths) -> Result<Output> {
+    let meta = workspace::load_metadata(ws_dir)?;
+    let cfg = config::Config::load_from(&paths.config_path)?;
+    let ws_config = meta.config.as_ref();
+
     let mut entries = vec![
         ConfigListEntry {
             key: "branch-prefix".into(),
@@ -84,54 +334,96 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
                 .as_deref()
                 .unwrap_or("(not set)")
                 .to_string(),
+            source: None,
         },
         ConfigListEntry {
             key: "workspaces-dir".into(),
             value: paths.workspaces_dir.display().to_string(),
+            source: None,
         },
         ConfigListEntry {
             key: "sync-strategy".into(),
-            value: cfg.sync_strategy.as_deref().unwrap_or("rebase").to_string(),
+            value: ws_config
+                .and_then(|c| c.sync_strategy.as_deref())
+                .or(cfg.sync_strategy.as_deref())
+                .unwrap_or("rebase")
+                .to_string(),
+            source: ws_config
+                .and_then(|c| c.sync_strategy.as_ref())
+                .map(|_| "workspace".to_string()),
         },
         ConfigListEntry {
             key: "agent-md".into(),
             value: cfg.agent_md.unwrap_or(true).to_string(),
+            source: None,
         },
         ConfigListEntry {
             key: "gc.retention-days".into(),
             value: cfg.gc_retention_days.unwrap_or(7).to_string(),
+            source: None,
         },
     ];
 
-    // git config: show effective values (defaults merged with overrides)
-    let git_config = cfg.effective_git_config();
-    for (key, value) in &git_config {
+    // git config: merge workspace overrides over effective global
+    let mut effective_gc = cfg.effective_git_config();
+    if let Some(wc) = ws_config
+        && let Some(ref gc) = wc.git_config
+    {
+        for (k, v) in gc {
+            effective_gc.insert(k.clone(), v.clone());
+        }
+    }
+    for (key, value) in &effective_gc {
+        let from_ws = ws_config
+            .and_then(|c| c.git_config.as_ref())
+            .is_some_and(|gc| gc.contains_key(key));
         entries.push(ConfigListEntry {
             key: format!("git_config.{}", key),
             value: value.clone(),
+            source: if from_ws {
+                Some("workspace".to_string())
+            } else {
+                None
+            },
         });
     }
 
-    // language integrations: show effective value for all known integrations
+    // language integrations: merge workspace overrides
     for name in crate::lang::integration_names() {
-        let enabled = cfg
-            .language_integrations
-            .as_ref()
-            .and_then(|m| m.get(name.as_str()))
-            .copied()
-            .unwrap_or(false);
+        let from_ws = ws_config
+            .and_then(|c| c.language_integrations.as_ref())
+            .is_some_and(|li| li.contains_key(name.as_str()));
+        let enabled = if from_ws {
+            ws_config
+                .and_then(|c| c.language_integrations.as_ref())
+                .and_then(|li| li.get(name.as_str()))
+                .copied()
+                .unwrap_or(false)
+        } else {
+            cfg.language_integrations
+                .as_ref()
+                .and_then(|m| m.get(name.as_str()))
+                .copied()
+                .unwrap_or(false)
+        };
         entries.push(ConfigListEntry {
             key: format!("language-integrations.{}", name),
             value: enabled.to_string(),
+            source: if from_ws {
+                Some("workspace".to_string())
+            } else {
+                None
+            },
         });
     }
 
-    // experimental: show gate and individual features (only when enabled)
+    // experimental: same as global (workspace can't override)
     let exp = cfg.experimental.as_ref();
     let exp_enabled = exp.is_some_and(|e| e.enabled);
     entries.push(ConfigListEntry {
         key: "experimental".into(),
         value: exp_enabled.to_string(),
+        source: None,
     });
     if exp_enabled {
         for feature in config::EXPERIMENTAL_FEATURES {
@@ -146,6 +438,99 @@ pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             entries.push(ConfigListEntry {
                 key: format!("experimental.{}", feature),
                 value,
+                source: None,
+            });
+        }
+    }
+
+    Ok(Output::ConfigList(ConfigListOutput { entries }))
+}
+
+// ---------------------------------------------------------------------------
+// Global config operations (existing behavior)
+// ---------------------------------------------------------------------------
+
+pub fn run_list(_matches: &ArgMatches, paths: &Paths) -> Result<Output> {
+    let cfg = config::Config::load_from(&paths.config_path)?;
+    let mut entries = vec![
+        ConfigListEntry {
+            key: "branch-prefix".into(),
+            value: cfg
+                .branch_prefix
+                .as_deref()
+                .unwrap_or("(not set)")
+                .to_string(),
+            source: None,
+        },
+        ConfigListEntry {
+            key: "workspaces-dir".into(),
+            value: paths.workspaces_dir.display().to_string(),
+            source: None,
+        },
+        ConfigListEntry {
+            key: "sync-strategy".into(),
+            value: cfg.sync_strategy.as_deref().unwrap_or("rebase").to_string(),
+            source: None,
+        },
+        ConfigListEntry {
+            key: "agent-md".into(),
+            value: cfg.agent_md.unwrap_or(true).to_string(),
+            source: None,
+        },
+        ConfigListEntry {
+            key: "gc.retention-days".into(),
+            value: cfg.gc_retention_days.unwrap_or(7).to_string(),
+            source: None,
+        },
+    ];
+
+    // git config: show effective values (defaults merged with overrides)
+    let git_config = cfg.effective_git_config();
+    for (key, value) in &git_config {
+        entries.push(ConfigListEntry {
+            key: format!("git_config.{}", key),
+            value: value.clone(),
+            source: None,
+        });
+    }
+
+    // language integrations: show effective value for all known integrations
+    for name in crate::lang::integration_names() {
+        let enabled = cfg
+            .language_integrations
+            .as_ref()
+            .and_then(|m| m.get(name.as_str()))
+            .copied()
+            .unwrap_or(false);
+        entries.push(ConfigListEntry {
+            key: format!("language-integrations.{}", name),
+            value: enabled.to_string(),
+            source: None,
+        });
+    }
+
+    // experimental: show gate and individual features (only when enabled)
+    let exp = cfg.experimental.as_ref();
+    let exp_enabled = exp.is_some_and(|e| e.enabled);
+    entries.push(ConfigListEntry {
+        key: "experimental".into(),
+        value: exp_enabled.to_string(),
+        source: None,
+    });
+    if exp_enabled {
+        for feature in config::EXPERIMENTAL_FEATURES {
+            let value = if *feature == "shell-tmux" {
+                exp.and_then(|e| e.shell_tmux_mode())
+                    .unwrap_or("false")
+                    .to_string()
+            } else {
+                exp.is_some_and(|e| e.is_feature_enabled(feature))
+                    .to_string()
+            };
+            entries.push(ConfigListEntry {
+                key: format!("experimental.{}", feature),
+                value,
+                source: None,
             });
         }
     }
@@ -721,6 +1106,257 @@ mod tests {
             hint.contains("reset"),
             "unsetting experimental should warn about reset: got {:?}",
             hint
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Workspace-scoped config tests
+    // -----------------------------------------------------------------------
+
+    /// Create a minimal workspace directory with .wsp.yaml for testing.
+    fn setup_workspace(tmp: &std::path::Path) -> std::path::PathBuf {
+        let ws_dir = tmp.join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test-ws".into(),
+            branch: "test/test-ws".into(),
+            repos: BTreeMap::new(),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: BTreeMap::new(),
+            config: None,
+        };
+        workspace::save_metadata(&ws_dir, &meta).unwrap();
+        ws_dir
+    }
+
+    fn extract_message(output: &Output) -> &str {
+        match output {
+            Output::Mutation(m) => &m.message,
+            _ => panic!("expected Mutation output"),
+        }
+    }
+
+    fn extract_config_entries(output: &Output) -> &[ConfigListEntry] {
+        match output {
+            Output::ConfigList(l) => &l.entries,
+            _ => panic!("expected ConfigList output"),
+        }
+    }
+
+    fn extract_config_value(output: &Output) -> Option<&str> {
+        match output {
+            Output::ConfigGet(g) => g.value.as_deref(),
+            _ => panic!("expected ConfigGet output"),
+        }
+    }
+
+    #[test]
+    fn workspace_set_and_get_sync_strategy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+        let ws_dir = setup_workspace(tmp.path());
+
+        let cmd = set_cmd();
+        let m = cmd.get_matches_from(["set", "sync-strategy", "merge"]);
+        let out = run_set_workspace(&m, &ws_dir, &paths).unwrap();
+        assert!(
+            extract_message(&out).contains("workspace: test-ws"),
+            "should mention workspace name"
+        );
+
+        let cmd = get_cmd();
+        let m = cmd.get_matches_from(["get", "sync-strategy"]);
+        let out = run_get_workspace(&m, &ws_dir, &paths).unwrap();
+        assert_eq!(extract_config_value(&out), Some("merge"));
+    }
+
+    #[test]
+    fn workspace_get_falls_back_to_global() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let mut cfg = config::Config::default();
+        cfg.sync_strategy = Some("merge".into());
+        cfg.save_to(&paths.config_path).unwrap();
+        let ws_dir = setup_workspace(tmp.path());
+
+        let cmd = get_cmd();
+        let m = cmd.get_matches_from(["get", "sync-strategy"]);
+        let out = run_get_workspace(&m, &ws_dir, &paths).unwrap();
+        assert_eq!(extract_config_value(&out), Some("merge"));
+    }
+
+    #[test]
+    fn workspace_set_rejects_global_only_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+        let ws_dir = setup_workspace(tmp.path());
+
+        let cases = vec![
+            "branch-prefix",
+            "workspaces-dir",
+            "gc.retention-days",
+            "agent-md",
+            "experimental",
+            "experimental.shell-prompt",
+        ];
+        for key in cases {
+            let cmd = set_cmd();
+            let m = cmd.get_matches_from(["set", key, "test"]);
+            let result = run_set_workspace(&m, &ws_dir, &paths);
+            assert!(result.is_err(), "set {} should fail", key);
+            let err = result.err().unwrap();
+            assert!(
+                format!("{}", err).contains("global-only"),
+                "set {} should be rejected as global-only, got: {}",
+                key,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_unset_falls_back_to_global() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        let mut cfg = config::Config::default();
+        cfg.sync_strategy = Some("merge".into());
+        cfg.save_to(&paths.config_path).unwrap();
+        let ws_dir = setup_workspace(tmp.path());
+
+        // Set workspace override then unset it
+        let cmd = set_cmd();
+        let m = cmd.get_matches_from(["set", "sync-strategy", "rebase"]);
+        run_set_workspace(&m, &ws_dir, &paths).unwrap();
+
+        let cmd = unset_cmd();
+        let m = cmd.get_matches_from(["unset", "sync-strategy"]);
+        let out = run_unset_workspace(&m, &ws_dir, &paths).unwrap();
+        let msg = extract_message(&out);
+        assert!(msg.contains("using global: merge"), "got: {}", msg);
+
+        // Verify get returns global value
+        let cmd = get_cmd();
+        let m = cmd.get_matches_from(["get", "sync-strategy"]);
+        let out = run_get_workspace(&m, &ws_dir, &paths).unwrap();
+        assert_eq!(extract_config_value(&out), Some("merge"));
+    }
+
+    #[test]
+    fn workspace_list_shows_source_annotation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
+        config::Config::default()
+            .save_to(&paths.config_path)
+            .unwrap();
+        let ws_dir = setup_workspace(tmp.path());
+
+        // Set a workspace override
+        let cmd = set_cmd();
+        let m = cmd.get_matches_from(["set", "sync-strategy", "merge"]);
+        run_set_workspace(&m, &ws_dir, &paths).unwrap();
+
+        let cmd = list_cmd();
+        let m = cmd.get_matches_from(["ls"]);
+        let out = run_list_workspace(&m, &ws_dir, &paths).unwrap();
+        let entries = extract_config_entries(&out);
+
+        let sync_entry = entries.iter().find(|e| e.key == "sync-strategy").unwrap();
+        assert_eq!(sync_entry.value, "merge");
+        assert_eq!(
+            sync_entry.source.as_deref(),
+            Some("workspace"),
+            "should be annotated as workspace source"
+        );
+
+        let prefix_entry = entries.iter().find(|e| e.key == "branch-prefix").unwrap();
+        assert!(
+            prefix_entry.source.is_none(),
+            "global-only keys should have no source annotation"
+        );
+    }
+
+    #[test]
+    fn workspace_config_metadata_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_dir = setup_workspace(tmp.path());
+
+        // Verify config survives save/load
+        filelock::with_metadata(&ws_dir, |meta| {
+            let config = meta
+                .config
+                .get_or_insert_with(template::TemplateConfig::default);
+            config.sync_strategy = Some("merge".into());
+            config.git_config = Some({
+                let mut m = BTreeMap::new();
+                m.insert("push.default".into(), "simple".into());
+                m
+            });
+            Ok(())
+        })
+        .unwrap();
+
+        let meta = workspace::load_metadata(&ws_dir).unwrap();
+        let config = meta.config.as_ref().unwrap();
+        assert_eq!(config.sync_strategy.as_deref(), Some("merge"));
+        assert_eq!(
+            config.git_config.as_ref().unwrap().get("push.default"),
+            Some(&"simple".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_workspace_config_hierarchy() {
+        let mut global = config::Config::default();
+        global.sync_strategy = Some("rebase".into());
+        global.git_config = Some({
+            let mut m = BTreeMap::new();
+            m.insert("push.default".into(), "current".into());
+            m.insert("rerere.enabled".into(), "true".into());
+            m
+        });
+
+        let meta = workspace::Metadata {
+            version: 0,
+            name: "test".into(),
+            branch: "test/test".into(),
+            repos: BTreeMap::new(),
+            created: chrono::Utc::now(),
+            description: None,
+            last_used: None,
+            created_from: None,
+            dirs: BTreeMap::new(),
+            config: Some(template::TemplateConfig {
+                sync_strategy: Some("merge".into()),
+                git_config: Some({
+                    let mut m = BTreeMap::new();
+                    m.insert("push.default".into(), "simple".into());
+                    m
+                }),
+                language_integrations: None,
+            }),
+        };
+
+        let effective = meta.apply_workspace_config(&global);
+        // Workspace overrides
+        assert_eq!(effective.sync_strategy.as_deref(), Some("merge"));
+        assert_eq!(
+            effective.git_config.as_ref().unwrap().get("push.default"),
+            Some(&"simple".to_string())
+        );
+        // Global preserved for non-overridden keys
+        assert_eq!(
+            effective.git_config.as_ref().unwrap().get("rerere.enabled"),
+            Some(&"true".to_string())
         );
     }
 }

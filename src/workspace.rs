@@ -32,6 +32,9 @@ pub struct WorkspaceRepoRef {
     pub url: Option<String>,
 }
 
+/// Workspace metadata stored in `.wsp.yaml`.
+/// Adding a field? Search for `Metadata {` across the codebase — there are 25+ manual
+/// initializers in tests. New Option fields need `config: None,` (or similar) in each.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
     #[serde(
@@ -51,6 +54,8 @@ pub struct Metadata {
     pub created_from: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dirs: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<crate::template::TemplateConfig>,
 }
 
 impl Metadata {
@@ -62,6 +67,35 @@ impl Metadata {
         }
         let parsed = parse_identity(identity)?;
         Ok(parsed.repo)
+    }
+
+    /// Apply workspace config onto global config, returning a modified copy.
+    /// Workspace config overrides global config; absent fields leave config unchanged.
+    /// Same pattern as `Template::apply_config`.
+    pub fn apply_workspace_config(&self, cfg: &crate::config::Config) -> crate::config::Config {
+        let mut effective = cfg.clone();
+        if let Some(ref settings) = self.config {
+            if let Some(ref li) = settings.language_integrations {
+                let target = effective
+                    .language_integrations
+                    .get_or_insert_with(std::collections::BTreeMap::new);
+                for (k, v) in li {
+                    target.insert(k.clone(), *v);
+                }
+            }
+            if let Some(ref strategy) = settings.sync_strategy {
+                effective.sync_strategy = Some(strategy.clone());
+            }
+            if let Some(ref gc) = settings.git_config {
+                let target = effective
+                    .git_config
+                    .get_or_insert_with(std::collections::BTreeMap::new);
+                for (k, v) in gc {
+                    target.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        effective
     }
 }
 
@@ -272,6 +306,7 @@ fn create_inner(opts: &CreateInnerOpts) -> Result<()> {
         last_used: None,
         created_from: opts.created_from.map(|s| s.to_string()),
         dirs: dirs.clone(),
+        config: None,
     };
 
     for identity in opts.repo_refs.keys() {
@@ -2274,6 +2309,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         };
 
         save_metadata(tmp.path(), &meta).unwrap();
@@ -2316,6 +2352,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         };
 
         save_metadata(tmp.path(), &meta).unwrap();
@@ -2353,6 +2390,7 @@ mod tests {
             last_used: None,
             created_from: Some("backend".into()),
             dirs: BTreeMap::new(),
+            config: None,
         };
 
         save_metadata(tmp.path(), &meta).unwrap();
@@ -2605,6 +2643,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::from([("github.com/acme/utils".into(), "acme-utils".into())]),
+            config: None,
         };
         assert_eq!(
             meta.dir_name("github.com/acme/utils").unwrap(),
@@ -2624,6 +2663,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         };
         assert_eq!(meta.dir_name("github.com/acme/utils").unwrap(), "utils");
     }
@@ -3441,6 +3481,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         };
 
         save_metadata(tmp.path(), &meta).unwrap();
@@ -3494,6 +3535,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         }
     }
 

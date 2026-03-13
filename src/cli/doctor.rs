@@ -2373,6 +2373,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         }
     }
 
@@ -2699,6 +2700,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
         let cfg = config::Config {
             repos: std::collections::BTreeMap::from([(
@@ -2748,6 +2750,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
 
         let mut checks = Vec::new();
@@ -2788,6 +2791,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
 
         let mut checks = Vec::new();
@@ -2820,6 +2824,7 @@ mod tests {
                 ("github.com/acme/repo".into(), "repo".into()),
                 ("github.com/acme/removed".into(), "removed".into()),
             ]),
+            config: None,
         };
 
         let mut checks = Vec::new();
@@ -2853,6 +2858,7 @@ mod tests {
                 "github.com/acme/repo".into(),
                 "repo".into(),
             )]),
+            config: None,
         };
 
         let mut checks = Vec::new();
@@ -3230,6 +3236,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
         create_workspace_on_disk(&ws_dir, &meta);
 
@@ -3279,6 +3286,7 @@ mod tests {
                 ("github.com/acme/repo".into(), "repo".into()),
                 ("github.com/acme/removed".into(), "removed".into()),
             ]),
+            config: None,
         };
         create_workspace_on_disk(&ws_dir, &meta);
 
@@ -3826,6 +3834,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
         create_workspace_on_disk(&ws_dir, &meta);
 
@@ -3862,6 +3871,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(), // Missing collision entries!
+            config: None,
         };
         create_workspace_on_disk(&ws_dir, &meta);
 
@@ -3899,6 +3909,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
         create_workspace_on_disk(&ws_dir, &meta);
 
@@ -3943,6 +3954,7 @@ mod tests {
                 ("github.com/org1/shared".into(), "wrong-name-1".into()),
                 ("github.com/org2/shared".into(), "wrong-name-2".into()),
             ]),
+            config: None,
         };
         create_workspace_on_disk(&ws_dir, &meta);
 

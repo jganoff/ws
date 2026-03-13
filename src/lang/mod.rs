@@ -79,6 +79,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         }
     }
 

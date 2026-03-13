@@ -417,6 +417,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
         let yaml = serde_yaml_ng::to_string(&meta).unwrap();
         fs::write(ws_dir.join(".wsp.yaml"), yaml).unwrap();
@@ -691,6 +692,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: std::collections::BTreeMap::new(),
+            config: None,
         };
         let yaml = serde_yaml_ng::to_string(&meta).unwrap();
         fs::write(ws_dir.join(".wsp.yaml"), yaml).unwrap();

@@ -112,9 +112,20 @@ EXAMPLES
         "\
 config — configuration keys and their effects
 
-All settings are stored in ~/.local/share/wsp/config.yaml. Manage them
-with `wsp config ls`, `wsp config get <key>`, `wsp config set <key> <value>`,
-and `wsp config unset <key>`.
+Settings are stored at two levels:
+
+  Global:     ~/.local/share/wsp/config.yaml
+  Workspace:  .wsp.yaml `config` field (per-workspace overrides)
+
+When run inside a workspace, `wsp config set/get/unset/ls` operate on
+workspace config by default. Use --global to target global config instead.
+Outside a workspace, commands always use global config.
+
+Workspace-scoped keys: sync-strategy, git_config.*, language-integrations.*
+Global-only keys: branch-prefix, workspaces-dir, gc.retention-days, agent-md,
+                  experimental.*
+
+Config hierarchy (top wins): workspace → global → built-in defaults.
 
 GENERAL
 
@@ -187,13 +198,15 @@ EXPERIMENTAL
 
 EXAMPLES
 
-  wsp config ls                                   # show all settings
-  wsp config set branch-prefix jganoff            # prefix branches
-  wsp config set sync-strategy merge              # use merge instead of rebase
+  wsp config ls                                   # show all settings (workspace-aware)
+  wsp config set sync-strategy merge              # set in workspace (if inside one)
+  wsp config set --global sync-strategy merge     # set in global config
+  wsp config set branch-prefix jganoff            # global-only key (always global)
   wsp config set gc.retention-days 30             # keep deleted workspaces 30 days
-  wsp config set git_config.merge.conflictstyle zdiff3
-  wsp config set experimental.shell-prompt true   # enable prompt variable
-  wsp config unset branch-prefix                  # revert to default
+  wsp config set git_config.merge.conflictstyle zdiff3  # workspace or global
+  wsp config set experimental.shell-prompt true   # enable prompt variable (global)
+  wsp config unset sync-strategy                  # unset workspace override
+  wsp config unset --global branch-prefix         # revert global to default
 ",
     ),
 ];

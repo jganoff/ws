@@ -252,6 +252,8 @@ pub struct ConfigListOutput {
 pub struct ConfigListEntry {
     pub key: String,
     pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -647,14 +649,17 @@ impl ConfigListOutput {
                 ConfigListEntry {
                     key: "branch-prefix".into(),
                     value: "jg".into(),
+                    source: None,
                 },
                 ConfigListEntry {
                     key: "workspaces-dir".into(),
                     value: "~/dev/workspaces".into(),
+                    source: None,
                 },
                 ConfigListEntry {
                     key: "sync-strategy".into(),
                     value: "rebase".into(),
+                    source: Some("workspace".into()),
                 },
             ],
         }
@@ -1199,14 +1204,31 @@ fn render_config_list_text(v: ConfigListOutput) -> Result<()> {
         println!("No config values set.");
         return Ok(());
     }
-    let mut table = Table::new(
-        Box::new(std::io::stdout()),
-        vec!["Key".to_string(), "Value".to_string()],
-    );
-    for e in &v.entries {
-        table.add_row(vec![e.key.clone(), e.value.clone()])?;
+    let has_source = v.entries.iter().any(|e| e.source.is_some());
+    if has_source {
+        let mut table = Table::new(
+            Box::new(std::io::stdout()),
+            vec!["Key".to_string(), "Value".to_string(), "Source".to_string()],
+        );
+        for e in &v.entries {
+            let source = e
+                .source
+                .as_ref()
+                .map(|s| format!("({})", s))
+                .unwrap_or_default();
+            table.add_row(vec![e.key.clone(), e.value.clone(), source])?;
+        }
+        table.render()
+    } else {
+        let mut table = Table::new(
+            Box::new(std::io::stdout()),
+            vec!["Key".to_string(), "Value".to_string()],
+        );
+        for e in &v.entries {
+            table.add_row(vec![e.key.clone(), e.value.clone()])?;
+        }
+        table.render()
     }
-    table.render()
 }
 
 fn render_config_get_text(v: ConfigGetOutput) -> Result<()> {

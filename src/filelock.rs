@@ -259,6 +259,7 @@ mod tests {
             last_used: None,
             created_from: None,
             dirs: BTreeMap::new(),
+            config: None,
         };
         save_metadata(ws_dir, &meta).unwrap();
 

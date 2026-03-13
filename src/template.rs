@@ -564,12 +564,12 @@ const VALID_TEMPLATE_CONFIG_PREFIXES: &[&str] =
     &["language-integrations.", "sync-strategy", "git-config."];
 
 /// Normalize a config key: convert underscores to hyphens for prefix matching.
-fn normalize_key(key: &str) -> String {
+pub(crate) fn normalize_key(key: &str) -> String {
     key.replace('_', "-")
 }
 
 /// Validate that a config key is valid for template config.
-fn validate_template_config_key(key: &str) -> Result<()> {
+pub(crate) fn validate_template_config_key(key: &str) -> Result<()> {
     let normalized = normalize_key(key);
     for prefix in VALID_TEMPLATE_CONFIG_PREFIXES {
         if normalized == *prefix.trim_end_matches('.') || normalized.starts_with(prefix) {
