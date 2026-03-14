@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.1] - 2026-03-14
+
+### Features
+
+- *(doctor)* Add git config drift detection (W14)
+
+### Bug Fixes
+
+- *(workspace)* Register wsp-new-feature in check_claude_dir managed sets
+
 ## [0.13.0] - 2026-03-13
 
 ### Bug Fixes
