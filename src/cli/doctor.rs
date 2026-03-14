@@ -283,6 +283,19 @@ pub fn run(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
         // W11. go.work validity
         check_go_work_valid(&ws_dir, &meta, &ws_scope, fix, &mut checks, &mut fixed);
 
+        // W14. Git config drift — clone's local config differs from effective config
+        let effective_cfg = meta.apply_workspace_config(&cfg);
+        let effective_gc = effective_cfg.effective_git_config();
+        check_git_config_drift(
+            &ws_dir,
+            &meta,
+            &effective_gc,
+            &ws_scope,
+            fix,
+            &mut checks,
+            &mut fixed,
+        );
+
         // Per-repo checks
         let repo_infos = meta.repo_infos(&ws_dir);
         for info in &repo_infos {
@@ -2192,6 +2205,110 @@ fn check_mirror_refspec(
             })),
         });
         eprintln!("  ⚠ {}: missing expected fetch refspec", dir_name);
+    }
+}
+
+/// W14. Git config drift — clone's local git config differs from effective config.
+fn check_git_config_drift(
+    ws_dir: &std::path::Path,
+    meta: &workspace::Metadata,
+    effective_gc: &std::collections::BTreeMap<String, String>,
+    ws_scope: &str,
+    fix: bool,
+    checks: &mut Vec<DoctorCheck>,
+    fixed: &mut usize,
+) {
+    if effective_gc.is_empty() {
+        return;
+    }
+
+    let repo_infos = meta.repo_infos(ws_dir);
+    let mut all_drifted: Vec<serde_json::Value> = Vec::new();
+
+    for info in &repo_infos {
+        if info.error.is_some() || !info.clone_dir.join(".git").exists() {
+            continue;
+        }
+
+        let mut drifted_keys: Vec<serde_json::Value> = Vec::new();
+        for (key, expected) in effective_gc {
+            let actual = git::get_config(&info.clone_dir, key).ok();
+            if actual.as_deref() != Some(expected.as_str()) {
+                drifted_keys.push(serde_json::json!({
+                    "key": key,
+                    "expected": expected,
+                    "actual": actual,
+                }));
+            }
+        }
+
+        if drifted_keys.is_empty() {
+            continue;
+        }
+
+        all_drifted.push(serde_json::json!({
+            "repo": info.identity,
+            "dir": info.dir_name,
+            "keys": drifted_keys,
+        }));
+    }
+
+    if all_drifted.is_empty() {
+        return;
+    }
+
+    let total_keys: usize = all_drifted
+        .iter()
+        .map(|r| r["keys"].as_array().map_or(0, |a| a.len()))
+        .sum();
+    let repo_count = all_drifted.len();
+
+    if fix {
+        workspace::apply_git_config(ws_dir, meta, effective_gc, None);
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "git-config-drift".into(),
+            status: CheckStatus::Ok,
+            message: format!(
+                "applied {} git config value{} across {} repo{}",
+                total_keys,
+                if total_keys == 1 { "" } else { "s" },
+                repo_count,
+                if repo_count == 1 { "" } else { "s" },
+            ),
+            fixable: true,
+            details: None,
+        });
+        eprintln!(
+            "  ✓ applied {} git config value{} across {} repo{}",
+            total_keys,
+            if total_keys == 1 { "" } else { "s" },
+            repo_count,
+            if repo_count == 1 { "" } else { "s" },
+        );
+        *fixed += 1;
+    } else {
+        checks.push(DoctorCheck {
+            scope: ws_scope.into(),
+            check: "git-config-drift".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{} git config value{} drifted across {} repo{}",
+                total_keys,
+                if total_keys == 1 { "" } else { "s" },
+                repo_count,
+                if repo_count == 1 { "" } else { "s" },
+            ),
+            fixable: true,
+            details: Some(serde_json::json!({ "drifted": all_drifted })),
+        });
+        eprintln!(
+            "  ⚠ {} git config value{} drifted across {} repo{}",
+            total_keys,
+            if total_keys == 1 { "" } else { "s" },
+            repo_count,
+            if repo_count == 1 { "" } else { "s" },
+        );
     }
 }
 

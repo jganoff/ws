@@ -732,7 +732,7 @@ pub fn run_set(matches: &ArgMatches, paths: &Paths) -> Result<Output> {
             })?;
             (
                 format!("git.{} = {}", git_key, value),
-                Some("applied to new clones; run wsp sync to update existing repos".into()),
+                Some("applied to new clones; run wsp doctor --fix to update existing repos".into()),
             )
         }
         // Legacy key — no longer functional, guide users to new keys

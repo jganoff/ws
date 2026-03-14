@@ -110,6 +110,11 @@ pub fn set_config(dir: &Path, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Read a local git config value. Returns Err if the key is not set.
+pub fn get_config(dir: &Path, key: &str) -> Result<String> {
+    run(Some(dir), &["config", "--local", key])
+}
+
 pub fn fetch(dir: &Path, prune: bool) -> Result<()> {
     ensure_fetch_refspec(dir)?;
     let mut args = vec!["fetch", "--all"];
