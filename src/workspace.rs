@@ -1233,18 +1233,25 @@ fn check_claude_dir(ws_dir: &Path) -> Vec<RootProblem> {
     let mut problems = Vec::new();
 
     // Known wsp-managed paths (relative to .claude/)
-    let managed: std::collections::HashSet<&str> =
-        ["skills/wsp-manage/SKILL.md", "skills/wsp-report/SKILL.md"]
-            .iter()
-            .copied()
-            .collect();
+    let managed: std::collections::HashSet<&str> = [
+        "skills/wsp-manage/SKILL.md",
+        "skills/wsp-report/SKILL.md",
+        "skills/wsp-new-feature/SKILL.md",
+    ]
+    .iter()
+    .copied()
+    .collect();
 
     // Intermediate directories that only contain managed content
-    let managed_dirs: std::collections::HashSet<&str> =
-        ["skills", "skills/wsp-manage", "skills/wsp-report"]
-            .iter()
-            .copied()
-            .collect();
+    let managed_dirs: std::collections::HashSet<&str> = [
+        "skills",
+        "skills/wsp-manage",
+        "skills/wsp-report",
+        "skills/wsp-new-feature",
+    ]
+    .iter()
+    .copied()
+    .collect();
 
     fn walk(
         base: &Path,
